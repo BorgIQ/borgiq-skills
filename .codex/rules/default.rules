@@ -1,0 +1,52 @@
+# Codex command policy for borgiq-skills.
+
+prefix_rule(
+    pattern = ["python3", "scripts/quick_validate.py"],
+    decision = "allow",
+    justification = "Repository-local skill validation is allowed.",
+)
+prefix_rule(
+    pattern = ["python3", "scripts/sync_platform_refs.py", "--dry-run"],
+    decision = "allow",
+    justification = "Dry-run platform reference sync is allowed.",
+)
+prefix_rule(
+    pattern = ["python3", "scripts/init_skill.py"],
+    decision = "prompt",
+    justification = "Skill scaffolding creates files; review the target first.",
+)
+prefix_rule(
+    pattern = ["python3", "scripts/install_skills.py"],
+    decision = "prompt",
+    justification = "Skill installation writes outside the repo or to agent homes.",
+)
+prefix_rule(
+    pattern = ["python3", "scripts/package_skill.py"],
+    decision = "prompt",
+    justification = "Packaging skills creates distributable artifacts.",
+)
+prefix_rule(
+    pattern = ["python3", "scripts/sync_platform_refs.py"],
+    decision = "prompt",
+    justification = "Platform reference sync rewrites generated reference files.",
+)
+prefix_rule(
+    pattern = ["npm", "publish"],
+    decision = "forbidden",
+    justification = "Publishing should run only through the approved release workflow.",
+)
+prefix_rule(
+    pattern = ["git", ["commit", "push"]],
+    decision = "prompt",
+    justification = "Git history and remote changes require human confirmation.",
+)
+prefix_rule(
+    pattern = [["bash", "zsh", "sh"]],
+    decision = "prompt",
+    justification = "Broad shell entrypoints can run arbitrary commands and should be reviewed.",
+)
+prefix_rule(
+    pattern = [["rm", "rmdir"]],
+    decision = "forbidden",
+    justification = "Use a reviewed cleanup command instead of direct deletion.",
+)

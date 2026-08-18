@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned action references in .github/workflows fresh.
+  # This repo publishes a docs-only npm package with no dependencies, so
+  # there is no npm ecosystem block.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci
+      include: scope

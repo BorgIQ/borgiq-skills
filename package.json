@@ -1,0 +1,46 @@
+{
+  "name": "@borgiq/skills",
+  "version": "0.3.0",
+  "description": "BorgIQ skills for AI coding agents (Claude Code, OpenAI Codex CLI, opencode.ai, Pi). Build, validate, deploy, test, and debug BorgIQ workflows from your agent of choice.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BorgIQ/borgiq-skills.git"
+  },
+  "homepage": "https://github.com/BorgIQ/borgiq-skills#readme",
+  "bugs": {
+    "url": "https://github.com/BorgIQ/borgiq-skills/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "borgiq",
+    "claude-code",
+    "codex",
+    "opencode",
+    "pi",
+    "agent-skills",
+    "workflow-automation"
+  ],
+  "files": [
+    "plugins/borgiq-builder/skills/borgiq-builder/SKILL.md",
+    "plugins/borgiq-builder/skills/borgiq-builder/references/",
+    "plugins/borgiq-builder/skills/borgiq-form-builder/",
+    "plugins/borgiq-builder/skills/borgiq-react-app-builder/",
+    "plugins/borgiq-builder/skills/borgiq-agent-builder/",
+    "plugins/borgiq-builder/skills/borgiq-json-schema-builder/",
+    "plugins/borgiq-builder/skills/validate/",
+    "plugins/borgiq-builder/skills/new-actor/",
+    "plugins/borgiq-builder/skills/deploy/",
+    "plugins/borgiq-builder/skills/test/",
+    "plugins/borgiq-builder/skills/debug-flow/",
+    "README.md"
+  ],
+  "pi": {
+    "skills": [
+      "plugins/borgiq-builder/skills/*"
+    ]
+  }
+}

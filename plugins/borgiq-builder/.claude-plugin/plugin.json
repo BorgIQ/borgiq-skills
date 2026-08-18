@@ -1,0 +1,12 @@
+{
+  "name": "borgiq-builder",
+  "description": "Build BorgIQ Actors, Triggers, AI Agents, web apps, React apps, and forms from Claude Code. Hub + 4 spokes (form-builder, react-app-builder, agent-builder, json-schema-builder) + 5 lifecycle commands (/validate, /new-actor, /deploy, /test, /debug-flow).",
+  "version": "0.3.0",
+  "author": {
+    "name": "BorgIQ",
+    "email": "support@borgiq.com"
+  },
+  "homepage": "https://borgiq.com/docs/claude-code",
+  "repository": "https://github.com/BorgIQ/borgiq-skills",
+  "license": "Apache-2.0"
+}

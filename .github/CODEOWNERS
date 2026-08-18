@@ -1,0 +1,18 @@
+# CODEOWNERS for borgiq-skills
+#
+# Every PR that touches the files below must be approved by an owner before
+# merge. This guards the release pipeline: anyone with `main` write could
+# otherwise smuggle a malicious version bump or workflow change.
+
+# Anything that controls a release
+/package.json                                    @BorgIQ/borgiq-engineering
+/CHANGELOG.md                                    @BorgIQ/borgiq-engineering
+/.release-please-manifest.json                   @BorgIQ/borgiq-engineering
+/release-please-config.json                      @BorgIQ/borgiq-engineering
+
+# Plugin manifests carry the published version and install surface
+/.claude-plugin/                                 @BorgIQ/borgiq-engineering
+/plugins/borgiq-builder/.claude-plugin/          @BorgIQ/borgiq-engineering
+
+# Anything that runs in CI / can publish
+/.github/                                        @BorgIQ/borgiq-engineering

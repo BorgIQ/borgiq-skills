@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Build BorgIQ workflows",
+      "description": "Hub skill plus four specialist spokes for composing BorgIQ canvases. The hub loads first; specialists auto-load when their domain (forms, React apps, AI agents, JSON schemas) shows up in the request.",
+      "skills": [
+        "borgiq-builder",
+        "borgiq-form-builder",
+        "borgiq-react-app-builder",
+        "borgiq-agent-builder",
+        "borgiq-json-schema-builder"
+      ]
+    },
+    {
+      "title": "Lifecycle workflows",
+      "description": "Validate, scaffold, deploy, test, and debug BorgIQ flows via the borgiq CLI. User-invocable; safe-by-default — deploy and test require explicit user intent.",
+      "skills": [
+        "validate",
+        "new-actor",
+        "deploy",
+        "test",
+        "debug-flow"
+      ]
+    }
+  ]
+}
