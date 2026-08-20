@@ -11,6 +11,7 @@ All operations go through a single `POST /collections` runtime endpoint with an 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Single-Collection Design](#single-collection-design)
 - [Collection Management Actions](#collection-management-actions)
 - [Item Operations](#item-operations)
 - [Query Expression Syntax](#query-expression-syntax)
@@ -32,6 +33,7 @@ The Collection API provides persistent, structured storage organized into named 
 **Built on DynamoDB:** Collections are backed by AWS DynamoDB. Each collection is a partition in a DynamoDB table with the item `key` as the sort key. This means:
 - **Keys are sorted lexicographically** — prefix queries like `user:*` and range queries like `>=user:U003` are efficient and fast
 - **Design keys hierarchically** using delimiters (e.g., `app:R001:C004`) to enable efficient prefix-based access patterns
+- **One app = one collection** — model all of an app's entity types in a single collection with key prefixes, not one collection per entity type. See [Single-Collection Design](#single-collection-design)
 - **Single-item operations are strongly consistent** — `getItem`, `putItem`, `updateItem`, `deleteItem` always return the latest data
 - **Transactions are ACID** — `transactWrite` is all-or-nothing across up to 100 items, even across collections
 - **No full-table scans** — queries always operate on a single collection (partition), keeping them fast regardless of total data size
@@ -45,6 +47,63 @@ The Collection API provides persistent, structured storage organized into named 
 **Batch Operations:** Batch get (up to 100) and batch write (up to 25) items
 
 **Transactions:** Transactional reads (up to 100) and writes (up to 100) with conditions
+
+## Single-Collection Design
+
+**Default rule: one app, one collection.** Model *all* of an app's entity types in a single collection and separate them with key prefixes — do **not** create one collection per entity type. Collections are DynamoDB partitions inside one table, not separate tables, so this is the platform's form of DynamoDB **single-table design**, and it is the default for every app you build. Only split an app across multiple collections when a **security/access boundary** requires it or the **user explicitly asks** for separate collections (see [When multiple collections are justified](#when-multiple-collections-are-justified)).
+
+**Wrong — one collection per entity type:**
+
+```
+tt-tickets     ticket records
+tt-users       user records
+tt-labels      label records
+tt-comments    comment records
+tt-activity    activity records
+tt-meta        schema version + counters
+```
+
+**Right — one collection, one key prefix per entity type:**
+
+```
+Collection: ticketing
+  ticket:<id>                      ticket records
+  user:<id>                        user records
+  label:<id>                       label records
+  comment:<ticketId>:<createdAt>   comments, sorted under their ticket
+  activity:<ticketId>:<at>         activity, sorted under its ticket
+  meta:schema                      schema version
+  meta:counters                    counters
+```
+
+Everything a separate collection gives you, a key prefix gives you too: `query { collection: "ticketing", expression: "ticket:*" }` is exactly as fast and exactly as isolated as `query { collection: "tt-tickets", expression: "*" }` — both are a single-partition prefix read.
+
+### Key-prefix modeling rules
+
+- **`<entity>:<id>`** for top-level entities: `ticket:01HQX...`, `user:demo-maya`, `label:bug`.
+- **Hierarchical keys for child entities:** `comment:<ticketId>:<createdAt>` sorts a ticket's comments together in time order — one prefix query (`comment:ticket-42:*`) fetches them, no index needed.
+- **`meta:` / `config:` prefixes for singletons:** schema version, counters, settings rows.
+- **Always query by entity prefix, never `*`.** In a shared collection a bare `*` returns every entity type. `expression: "ticket:*"` is the equivalent of `SELECT * FROM tickets`.
+- **Reserve `_`-prefixed keys for operational rows** (e.g. the `_migration:<id>` ledger — see [collection-migrations.md](collection-migrations.md)); entity prefixes never start with `_`.
+
+### Labels in a shared collection
+
+A collection has at most **5 label slots**, shared by every entity type in it. Choose generic label names that work across entities (`type`, `status`, `owner`) rather than entity-specific ones. A `type` label whose value is the entity name (`ticket`, `user`, …) gives you a GSI listing per entity type as an alternative access path when you need something other than key order.
+
+### Why one collection
+
+- **It is DynamoDB best practice.** Single-table design keeps related data co-located and readable in one round trip. A collection is a partition, so "one collection per entity" buys no schema, index, or isolation benefit — it only fragments the data.
+- **Transactions and batch operations stay natural.** `transactWrite` across a ticket and its activity row, or `batchGetItem` for a ticket plus its assignee, address one collection with different key prefixes.
+- **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)).
+- **Workspace budget.** A workspace allows at most 100 collections; an app that burns six slots for one logical database does not scale to many apps.
+
+### When multiple collections are justified
+
+- **Security / access isolation** — data that must sit behind a different exposure or permission boundary than the rest of the app.
+- **The user explicitly asks** for separate collections.
+- **Documented infrastructure patterns** — the [Queue Pattern](#queue-pattern-using-collections) keeps a `queue-<name>` collection because a high-churn queue benefits from its own lifecycle and can be sharded across collections for throughput. Standalone workflow state (e.g. a `callback-tokens` collection for one workflow) is already single-collection design.
+
+If none of these apply and you are about to call `createCollection` a second time for the same app, redesign the keys instead.
 
 ## Collection Management Actions
 
@@ -878,12 +937,12 @@ configuration:
   options:
     action: batchGetItem
     items:
-      - collection: user-profiles
-        key: user-001
-      - collection: user-profiles
-        key: user-002
-      - collection: user-preferences
-        key: user-001
+      - collection: crm
+        key: user:001
+      - collection: crm
+        key: user:002
+      - collection: crm
+        key: pref:001
     options:
       meta: true
 ```
@@ -893,18 +952,18 @@ configuration:
 {
   "items": [
     {
-      "key": "user-001",
+      "key": "user:001",
       "value": { "name": "Alice", "email": "alice@example.com" },
-      "collection": "user-profiles",
+      "collection": "crm",
       "labels": {},
       "createdAt": "2026-03-18T08:00:00.000Z",
       "updatedAt": "2026-03-19T10:00:00.000Z"
     },
     null,
     {
-      "key": "user-001",
+      "key": "pref:001",
       "value": { "theme": "dark", "language": "en" },
-      "collection": "user-preferences",
+      "collection": "crm",
       "labels": {},
       "createdAt": "2026-03-18T08:00:00.000Z",
       "updatedAt": "2026-03-18T08:00:00.000Z"
@@ -1054,8 +1113,8 @@ configuration:
         atomicCounters:
           balance: 100
       - operation: put
-        collection: transfer-log
-        key: transfer-${{ Q.ulid() }}
+        collection: accounts
+        key: transfer:${{ Q.ulid() }}
         value:
           from: account-sender
           to: account-receiver
@@ -1317,12 +1376,12 @@ await collectionsApi({
   ],
 });
 
-// batchGetItem — get up to 100 items across collections
+// batchGetItem — get up to 100 items (mixed entity types via key prefixes)
 const results = await collectionsApi({
   action: "batchGetItem",
   items: [
-    { collection: "products", key: "widget-1" },
-    { collection: "users", key: "alice" },
+    { collection: "shop", key: "product:widget-1" },
+    { collection: "shop", key: "user:alice" },
   ],
   options: { meta: true },
 });
@@ -1350,7 +1409,7 @@ await collectionsApi({
     },
     {
       operation: "put",
-      collection: "transfers",
+      collection: "accounts",
       key: "txn:2025-01-15_001",
       value: { from: "alice", to: "bob", amount: 50 },
     },
