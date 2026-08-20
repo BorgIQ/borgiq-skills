@@ -164,7 +164,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | **CallFlowActor** | Invokes sub-flows by calling a CallableTriggerActor in another canvas/workspace | [call-flow-actor.md](references/call-flow-actor.md) |
 | **InterfaceActor** | Renders a web form/page mid-workflow with two output ports: Meta (URL info on render) and Event (form submission data) | [interface-actor.md](references/interface-actor.md) |
 | **SendEmailActor** | Sends text/HTML emails with optional attachments | [send-email-actor.md](references/send-email-actor.md) |
-| **CollectionActor** | Persistent structured storage organized into named collections with labels, TTL, queries, batch operations, and transactions. Recommended for all new storage needs. | [collection-actor.md](references/collection-actor.md) |
+| **CollectionActor** | Persistent structured storage organized into named collections with labels, TTL, queries, batch operations, and transactions. Recommended for all new storage needs. **One collection per app** — model all entity types with key prefixes ([single-collection design](references/collection-api.md#single-collection-design)). | [collection-actor.md](references/collection-actor.md) |
 | **McpServerActor** | Exposes its child tool actors as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server endpoint that external AI agents (Claude Desktop, Cursor, custom agents) can connect to. Reuses the AiAgentActor tool-actor pattern (`aiAgentToolActorIds`, `${{aiInput}}` schema filtering) — the difference is that an external MCP client drives tool invocations instead of an internal LLM loop. | [mcp-server-actor.md](references/mcp-server-actor.md) |
 | **CommentActor** | Non-functional UI element for adding notes, TODOs, and documentation to workflows | [comment-actor.md](references/comment-actor.md) |
 
@@ -247,6 +247,7 @@ If the task can be done with `${{ }}` expressions and Q-lib functions, use Messa
 | Distribute reports via email with attachments | SendEmailActor |
 | Send HTML formatted emails | SendEmailActor |
 | Store structured data persistently | CollectionActor (`putItem`, `getItem`) |
+| Model an app's entities (users, orders, comments, …) | CollectionActor — **one collection per app**, entity key prefixes ([single-collection design](references/collection-api.md#single-collection-design)) |
 | Query stored data | CollectionActor (`query`) |
 | Batch read/write operations | CollectionActor (`batchGetItem`, `batchWriteItem`) |
 | Atomic counter increment/decrement | CollectionActor (`updateItem` with `atomicCounters`) |
@@ -701,13 +702,15 @@ Key wiring facts this hub still owns: **App and Webhook triggers connect via URL
 
 ### Collection migrations and provisioning
 
-**Collections are not implicit — a `putItem`/`query` against a slug that was never created fails with `COLLECTION_NOT_FOUND`.** So any app or flow backed by a [CollectionActor](references/collection-actor.md) needs a **provisioning step** that creates its collections and seeds default data before it serves traffic — and that step must be safe to re-run on every deploy and in every workspace.
+**One collection per app.** Model *all* of an app's entity types in a **single collection**, separated by key prefixes (`ticket:<id>`, `user:<id>`, `comment:<ticketId>:<at>`, `meta:schema`) — never one collection per entity type. Collections are DynamoDB partitions, so this is DynamoDB single-table design: a prefix query (`ticket:*`) is exactly as fast and as isolated as a dedicated collection, and transactions, batch ops, and provisioning all stay simpler. Split into multiple collections **only** when a security/access boundary requires it or the user explicitly asks. Full rules, the worked ticketing example, and label guidance: [collection-api.md → Single-Collection Design](references/collection-api.md#single-collection-design).
+
+**Collections are not implicit — a `putItem`/`query` against a slug that was never created fails with `COLLECTION_NOT_FOUND`.** So any app or flow backed by a [CollectionActor](references/collection-actor.md) needs a **provisioning step** that creates its collection and seeds default data before it serves traffic — and that step must be safe to re-run on every deploy and in every workspace.
 
 Treat this like database migrations: when you design a collection-backed app, also design an **idempotent migration runner** that brings a workspace's storage up to the shape the app expects. Think through collection management as part of the build — don't bolt it on later. The pattern:
 
 - Build the runner as a **UniversalTriggerActor fired with the `manual` trigger type only** — set `webhook.enabled: false` and `schedule.enabled: false` so it can never run off an HTTP request, a cron tick, a button, or a sub-flow call. Provisioning is a deliberate operator action.
-- It holds an ordered list of migrations (each with a stable `id`), reads a `_migrations` ledger collection, **skips already-applied** migrations, runs the rest in order, and records each success.
-- Each migration **ensures collections exist** (`createCollection`, swallowing `COLLECTION_ALREADY_EXISTS`) and **seeds defaults idempotently** — `putItem` is create-only by default, so catch `ITEM_ALREADY_EXISTS` on re-runs; never pass `overwrite: true` for seed data, which would clobber user-edited rows on every deploy.
+- It holds an ordered list of migrations (each with a stable `id`), reads `_migration:<id>` ledger keys stored in the app's own collection, **skips already-applied** migrations, runs the rest in order, and records each success.
+- The runner **ensures the app's collection exists** (`createCollection`, swallowing `COLLECTION_ALREADY_EXISTS`) and each migration **seeds defaults idempotently** — `putItem` is create-only by default, so catch `ITEM_ALREADY_EXISTS` on re-runs; never pass `overwrite: true` for seed data, which would clobber user-edited rows on every deploy.
 - Run it via canvas Invoke or `borgiq triggers run` (the manual invoke) after deploying to a new workspace and after appending migrations. Re-running is always safe.
 
 A collection-backed app shipped without a migration actor is a gap: it works in the dev workspace where collections were hand-created, then 404s in prod. Full guidance, the worked migration-manager trigger, and idempotency techniques are in [collection-migrations.md](references/collection-migrations.md).

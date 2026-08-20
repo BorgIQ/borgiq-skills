@@ -4,7 +4,9 @@ CollectionActor is a **Task Actor** that provides YAML-based access to the [Coll
 
 For full API documentation including actions, parameters, DynamoDB behavior, conditions, concurrent update patterns, transactions, batch operations, error codes, and code examples (Deno/Python), see [collection-api.md](collection-api.md).
 
-> **Collections must be created before use** — a `putItem`/`query` against a slug that was never created returns `COLLECTION_NOT_FOUND`. Any app backed by collections needs an idempotent **provisioning/migration** step (create collections + seed defaults, safe to re-run per deploy and per workspace). See [collection-migrations.md](collection-migrations.md) for the migration-manager pattern.
+> **One collection per app** — model all of an app's entity types in a **single collection** with key prefixes (`ticket:*`, `user:*`, `meta:*`), never one collection per entity type. This is DynamoDB single-table design; split into multiple collections only for a security boundary or when the user explicitly asks. See [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design).
+
+> **Collections must be created before use** — a `putItem`/`query` against a slug that was never created returns `COLLECTION_NOT_FOUND`. Any app backed by collections needs an idempotent **provisioning/migration** step (create the app's collection + seed defaults, safe to re-run per deploy and per workspace). See [collection-migrations.md](collection-migrations.md) for the migration-manager pattern.
 
 ## Table of Contents
 
@@ -308,7 +310,8 @@ configuration:
 | Consistent multi-item reads | `transactGet` |
 | CRUD API backend | `putItem` / `getItem` / `deleteItem` / `query` |
 | Organize data by category | `putItem` with `labels` + `query` with label filter |
-| Manage storage namespaces | `createCollection` / `listCollections` / `deleteCollection` |
+| Store multiple entity types for one app | One collection + key prefixes (`user:*`, `order:*`) — see [single-collection design](collection-api.md#single-collection-design) |
+| Provision the app's collection (migrations) | `createCollection` / `listCollections` / `deleteCollection` |
 | Background job queue | `putItem` (enqueue) + `query` + `updateItem` (dequeue) — see [Queue Pattern](collection-api.md#queue-pattern-using-collections) |
 
 ---

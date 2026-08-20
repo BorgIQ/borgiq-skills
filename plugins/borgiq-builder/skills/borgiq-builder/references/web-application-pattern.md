@@ -506,7 +506,9 @@ RouterActor (Route by action)
 WebhookResponseActor
 ```
 
-**Actions:** Use `query` to list items, `putItem` to add, and `deleteItem` to remove. Create the collection first with `createCollection`.
+**Actions:** Use `query` to list items, `putItem` to add, and `deleteItem` to remove. Create the collection first with `createCollection` (via the app's migration runner — see [collection-migrations.md](collection-migrations.md)).
+
+**One collection per app:** model every entity type the app stores in a single collection with key prefixes (`task:<id>`, `user:<id>`, `meta:config`) and query by prefix (`task:*`) — do not create one collection per entity type. See [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design).
 
 ---
 
