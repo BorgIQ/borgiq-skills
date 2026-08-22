@@ -2,14 +2,14 @@
 
 Collections are **not implicit**. A `putItem`/`getItem`/`query` against a slug that was never created fails with `COLLECTION_NOT_FOUND` (404) — the collection must exist in the registry first (see [collection-api.md → Error Codes](collection-api.md#error-codes)). So any app backed by [CollectionActor](collection-actor.md) needs a **provisioning step** that creates its collection and seeds default data *before the app serves traffic* — and that step has to be safe to run again every deploy, in every workspace/environment.
 
-Per [single-collection design](collection-api.md#single-collection-design), an app normally has exactly **one** collection to provision: all of its entity types live in that collection under key prefixes (`task:`, `user:`, `config:`). If your migration runner is creating a second collection for the same app, first check that a security boundary or an explicit user request actually justifies it.
+Per [single-collection design](collection-api.md#single-collection-design), an app normally has exactly **one** collection to provision: all of its entity types live in that collection under key prefixes (`task:`, `user:`, `config:`), and a [`$meta` manifest](collection-api.md#the--system-namespace-and-the-meta-manifest) row — the first row in the UI — lists those prefixes so the collection can be navigated without scanning it. The migration runner is what writes that manifest. If your runner is creating a second collection for the same app, first check that a security boundary or an explicit user request actually justifies it.
 
 Treat this exactly like database migrations in a normal app: an **idempotent migration runner** that brings a workspace's collections up to the shape the app expects. Build it as a **UniversalTriggerActor that you fire with the `manual` trigger type** (canvas Invoke) — *never* via a webhook, a schedule, a button, or any other invoke. Migrations are an explicit, operator-initiated action: a UniversalTriggerActor runs Deno code (with `biqApi`) directly in `receive`, and restricting it to manual invoke keeps it from ever running by accident on an HTTP request or cron tick. Reach for this pattern whenever you design a collection-backed app — it is not an afterthought.
 
 ## Table of Contents
 
 - [When to build migrations](#when-to-build-migrations)
-- [The three things a migration does](#the-three-things-a-migration-does)
+- [The four things a migration run does](#the-four-things-a-migration-run-does)
 - [Idempotency — the core requirement](#idempotency--the-core-requirement)
 - [The migration manager pattern](#the-migration-manager-pattern)
 - [Worked example: a migration manager UniversalTriggerActor (manual invoke)](#worked-example-a-migration-manager-universaltriggeractor-manual-invoke)
@@ -28,19 +28,20 @@ Build a migration step whenever the app:
 
 If you are generating a collection-backed app and there is no migration actor, that is a gap — flag it and add one.
 
-## The three things a migration does
+## The four things a migration run does
 
 1. **Ensure the app's collection exists** — `createCollection` for the app's **single** collection (with the right `name`, `description`, and `labels` — see [single-collection design](collection-api.md#single-collection-design)).
 2. **Seed default data** — `putItem` the rows the app can't run without, each under its entity key prefix (`config:settings`, `user:admin`).
-3. **Record what ran** — write a marker so the next run knows this migration is already applied (the "ledger"): `_migration:<id>` keys inside the app's own collection.
+3. **Record what ran** — write a marker so the next run knows this migration is already applied (the "ledger"): `$migration:<id>` keys inside the app's own collection.
+4. **Publish the manifest** — rewrite `$meta` (`putItem` with `overwrite: true`) from the runner's `ENTITIES` constant, with the applied `schemaVersion`. This happens at the end of **every** invoke, whether or not anything was applied, so the manifest always matches the code that was deployed.
 
 ## Idempotency — the core requirement
 
 A migration **will** be run more than once (re-deploys, retries, multiple environments). Every step must be safe to repeat without erroring or clobbering live data. Three techniques, in order of preference:
 
-- **Keep a migration ledger.** Reserved `_migration:<id>` keys **inside the app's own collection**, keyed by a stable migration id. Before running a migration, `getItem` its `_migration:<id>` key; skip if present. After it succeeds, `putItem` the key with a timestamp. This makes the *whole* migration skippable, not just each call, and gives you an applied-history audit trail — without a second collection, and with each app's ledger scoped to its own collection so migration ids can't collide across apps. The `_` prefix keeps ledger rows out of entity prefix queries (`task:*`), which is why entity prefixes never start with `_`.
+- **Keep a migration ledger.** Reserved `$migration:<id>` keys **inside the app's own collection**, keyed by a stable migration id. Before running a migration, `getItem` its `$migration:<id>` key; skip if present. After it succeeds, `putItem` the key with a timestamp. This makes the *whole* migration skippable, not just each call, and gives you an applied-history audit trail — without a second collection, and with each app's ledger scoped to its own collection so migration ids can't collide across apps. The `$` prefix sorts the ledger (and `$meta`) to the top of the collection view and keeps it out of entity prefix queries (`task:*`) — see [the `$` system namespace](collection-api.md#the--system-namespace-and-the-meta-manifest).
 - **Catch `COLLECTION_ALREADY_EXISTS` (409) on `createCollection`.** Re-creating an existing collection is a no-op you simply swallow. (Or call `listCollections` first and create only the missing slugs.)
-- **Catch `ITEM_ALREADY_EXISTS` (409) on seed `putItem`s.** `putItem` is **create-only by default** (`overwrite` defaults to `false`) — writing a key that already exists throws rather than replacing it. That default is exactly what seed data wants: a re-run can never clobber a row a user has since edited. So treat "already exists" as success and move on. Do **not** "fix" the error by passing `overwrite: true` — that turns every re-deploy into a reset of live data.
+- **Catch `ITEM_ALREADY_EXISTS` (409) on seed `putItem`s.** `putItem` is **create-only by default** (`overwrite` defaults to `false`) — writing a key that already exists throws rather than replacing it. That default is exactly what seed data wants: a re-run can never clobber a row a user has since edited. So treat "already exists" as success and move on. Do **not** "fix" the error by passing `overwrite: true` — that turns every re-deploy into a reset of live data. The **one** exception is `$meta`: it is derived from code, not edited by users, so the runner rewrites it with `overwrite: true` every run.
 
 > Two related error-code details: if a seed `putItem` also passes `conditions`, the same collision surfaces as `CONDITION_FAILED` instead of `ITEM_ALREADY_EXISTS`; and `createCollection` against a collection that is mid-deletion returns `COLLECTION_DELETING` rather than `COLLECTION_ALREADY_EXISTS` — don't swallow that one; it means wait and re-run. See [collection-api.md → Error Codes](collection-api.md#error-codes).
 
@@ -51,13 +52,14 @@ Rather than scatter provisioning calls across the app, centralize them in **one 
 - holds an **ordered list** of migrations, each with a unique `id` and a `run()` function,
 - reads the ledger, **skips already-applied** migrations, runs the rest **in order**,
 - records each success in the ledger,
-- returns a **report** (`applied`, `skipped`) for the operator to inspect.
+- rewrites the `$meta` manifest from its `ENTITIES` constant,
+- returns a **report** (`applied`, `skipped`, `schemaVersion`) for the operator to inspect.
 
-Adding a new seed row, label, or key prefix later = appending one entry to the list. The manager stays the single source of truth for "what shape should this workspace's storage be in."
+Adding a new seed row or label later = appending one entry to the list; adding a new entity prefix = adding it to `ENTITIES` (plus a migration if it needs seed rows). The manager stays the single source of truth for "what shape should this workspace's storage be in" — and `$meta` is that truth, published into the collection.
 
 ## Worked example: a migration manager UniversalTriggerActor (manual invoke)
 
-A single UniversalTriggerActor that provisions an app's collection and seed data idempotently. The app follows [single-collection design](collection-api.md#single-collection-design): **one** collection holds every entity type under key prefixes, and the migration ledger lives in the same collection under `_migration:` keys. **Webhook and schedule are disabled — it only ever fires on the `manual` trigger type (canvas Invoke).** It uses the same `biqApi`/`collectionsApi` helper documented in [collection-api.md → SDK Interface](collection-api.md#sdk-interface-denoactor--pythonactor); static source config follows [universal-trigger-actor.md](universal-trigger-actor.md).
+A single UniversalTriggerActor that provisions an app's collection and seed data idempotently. The app follows [single-collection design](collection-api.md#single-collection-design): **one** collection holds every entity type under key prefixes; the migration ledger lives in the same collection under `$migration:` keys; and the runner publishes a `$meta` manifest listing every prefix so the collection is navigable from its first row. **Webhook and schedule are disabled — it only ever fires on the `manual` trigger type (canvas Invoke).** It uses the same `biqApi`/`collectionsApi` helper documented in [collection-api.md → SDK Interface](collection-api.md#sdk-interface-denoactor--pythonactor); static source config follows [universal-trigger-actor.md](universal-trigger-actor.md).
 
 ```yaml
 metadata:
@@ -89,10 +91,20 @@ actors:
           import type { TriggerRequest, Response } from "@borgiq/actors";
 
           // ONE collection for the whole app — entity types are separated by key
-          // prefix (task:, user:, config:), per single-collection design. The
-          // migration ledger lives in the same collection under _migration: keys.
+          // prefix (task:, user:, config:), per single-collection design. System
+          // rows use the $ prefix so they sort to the top of the collection view:
+          // $meta (manifest), $migration:<id> (ledger), $counter:<name>.
           const COLLECTION = "taskapp";
-          const LEDGER_PREFIX = "_migration:";
+          const LEDGER_PREFIX = "$migration:";
+
+          // Every key prefix the app writes. This is what $meta publishes — if a
+          // prefix is missing here, nobody opening the collection can find it.
+          const ENTITIES = {
+            task:   { prefix: "task:",   key: "task:<ulid>",   description: "Tasks" },
+            user:   { prefix: "user:",   key: "user:<id>",     description: "Users" },
+            config: { prefix: "config:", key: "config:<name>", description: "Settings and status lookup rows" },
+          };
+          const LABELS = { type: "entity name (task, user, config)", status: "task status", owner: "assignee user id" };
 
           async function collectionsApi<T = unknown>(body: Record<string, unknown>): Promise<T> {
             const res = await biqApi("/collections", {
@@ -184,7 +196,25 @@ actors:
               applied.push(m.id);
             }
 
-            return { results: { ok: true, applied, skipped } };
+            // Publish the manifest LAST, on every run. $meta is derived from code,
+            // so overwrite: true is correct here (and only here). Reaching this line
+            // means every migration is applied (a failure throws above), so the
+            // declared count IS the applied schemaVersion the app checks against.
+            const schemaVersion = MIGRATIONS.length;
+            await collectionsApi({
+              action: "putItem", collection: COLLECTION, key: "$meta",
+              value: {
+                app: "taskapp",
+                schemaVersion,
+                entities: ENTITIES,
+                system: { [LEDGER_PREFIX]: "Applied migration ledger" },
+                labels: LABELS,
+                updatedAt: new Date().toISOString(),
+              },
+              options: { overwrite: true },
+            });
+
+            return { results: { ok: true, applied, skipped, schemaVersion } };
           }
     schemas: {}
     id: ACTR01migrationmgr0000000000
@@ -194,7 +224,7 @@ actors:
     edges: {}
 ```
 
-> The ledger check (`getItem` on the `_migration:<id>` key) is the primary idempotency guard; the per-call "already exists" handling is the belt-and-suspenders backup for a migration that failed midway and re-runs.
+> The ledger check (`getItem` on the `$migration:<id>` key) is the primary idempotency guard; the per-call "already exists" handling is the belt-and-suspenders backup for a migration that failed midway and re-runs. Because `$meta` is written last, a run that fails midway leaves the previous manifest (and its `schemaVersion`) in place — app code checking for pending migrations keeps refusing until the re-run succeeds.
 
 ## Wiring and running migrations
 
@@ -221,7 +251,8 @@ Because every step is idempotent, re-running is always safe — that is the whol
 2. **Assuming `putItem` auto-creates the collection.** It does not — you get `COLLECTION_NOT_FOUND`. Always provision with `createCollection` first.
 3. **Non-idempotent migrations.** A bare `createCollection` throws `COLLECTION_ALREADY_EXISTS` on the second run and aborts the whole flow. Swallow it (or check `listCollections` first).
 4. **Mishandling seed re-runs.** `putItem` is create-only by default, so a re-run seed throws `ITEM_ALREADY_EXISTS` — and the wrong fix is passing `overwrite: true`, which makes every deploy reset user-edited rows. The right fix: keep the create-only default and treat `ITEM_ALREADY_EXISTS` as success.
-5. **No ledger.** Without recording applied ids you can't tell first-run from re-run, can't add migrations safely, and have no audit trail. Keep `_migration:<id>` ledger keys in the app's collection.
+5. **No ledger.** Without recording applied ids you can't tell first-run from re-run, can't add migrations safely, and have no audit trail. Keep `$migration:<id>` ledger keys in the app's collection.
 6. **Reordering or renaming migration ids.** The ledger keys on the id; renaming `0001_init` makes it look unapplied and it re-runs. Treat shipped ids as immutable; only append.
 7. **Forgetting migrations entirely.** A collection-backed app with no provisioning step works in the dev workspace where someone hand-created the collection, then 404s in prod. Always ship the migration actor with the app.
-8. **Running migrations on an automatic invoke.** A webhook-, schedule-, button-, or sub-flow-triggered migration can fire on user traffic or a timer. Build the migration runner as a UniversalTriggerActor with `webhook.enabled: false` / `schedule.enabled: false` and fire it with the **manual** trigger type only.
+8. **No `$meta` manifest, or a stale one.** A shared collection without `$meta` shows only its first entity prefix on page one of the UI and hides the rest; a manifest missing a newly added prefix does the same for that prefix. Publish `$meta` from `ENTITIES` at the end of every run and update `ENTITIES` whenever the app starts writing a new prefix — see [the `$` system namespace](collection-api.md#the--system-namespace-and-the-meta-manifest).
+9. **Running migrations on an automatic invoke.** A webhook-, schedule-, button-, or sub-flow-triggered migration can fire on user traffic or a timer. Build the migration runner as a UniversalTriggerActor with `webhook.enabled: false` / `schedule.enabled: false` and fire it with the **manual** trigger type only.

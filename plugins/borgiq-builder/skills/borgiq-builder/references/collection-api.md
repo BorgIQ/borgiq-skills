@@ -63,17 +63,18 @@ tt-activity    activity records
 tt-meta        schema version + counters
 ```
 
-**Right — one collection, one key prefix per entity type:**
+**Right — one collection, one key prefix per entity type, a `$meta` manifest on top** (shown in the order the UI lists them):
 
 ```
 Collection: ticketing
+  $meta                            manifest: lists every entity prefix below — always the first row
+  $migration:<id>                  migration ledger
+  $counter:ticketNumber            atomic counters
+  activity:<ticketId>:<at>         activity, sorted under its ticket
+  comment:<ticketId>:<createdAt>   comments, sorted under their ticket
+  label:<id>                       label records
   ticket:<id>                      ticket records
   user:<id>                        user records
-  label:<id>                       label records
-  comment:<ticketId>:<createdAt>   comments, sorted under their ticket
-  activity:<ticketId>:<at>         activity, sorted under its ticket
-  meta:schema                      schema version
-  meta:counters                    counters
 ```
 
 Everything a separate collection gives you, a key prefix gives you too: `query { collection: "ticketing", expression: "ticket:*" }` is exactly as fast and exactly as isolated as `query { collection: "tt-tickets", expression: "*" }` — both are a single-partition prefix read.
@@ -82,9 +83,74 @@ Everything a separate collection gives you, a key prefix gives you too: `query {
 
 - **`<entity>:<id>`** for top-level entities: `ticket:01HQX...`, `user:demo-maya`, `label:bug`.
 - **Hierarchical keys for child entities:** `comment:<ticketId>:<createdAt>` sorts a ticket's comments together in time order — one prefix query (`comment:ticket-42:*`) fetches them, no index needed.
-- **`meta:` / `config:` prefixes for singletons:** schema version, counters, settings rows.
+- **`config:` prefix for app-level lookup rows** (settings, status enums). Schema version, counters, and the migration ledger are *system* rows and live under `$` (below), not under an entity prefix.
 - **Always query by entity prefix, never `*`.** In a shared collection a bare `*` returns every entity type. `expression: "ticket:*"` is the equivalent of `SELECT * FROM tickets`.
-- **Reserve `_`-prefixed keys for operational rows** (e.g. the `_migration:<id>` ledger — see [collection-migrations.md](collection-migrations.md)); entity prefixes never start with `_`.
+- **Reserve the `$` prefix for system rows** (`$meta`, `$migration:<id>`, `$counter:<name>` — see [The `$` system namespace and the `$meta` manifest](#the--system-namespace-and-the-meta-manifest)); entity prefixes are lowercase words and never start with `$`.
+
+### The `$` system namespace and the `$meta` manifest
+
+A shared collection has a discoverability problem that a one-entity collection doesn't: the Collections UI (and a bare `query` with `expression: "*"`) lists items in **UTF-8 byte order of the key, one page at a time**. In a ticketing collection the first page is all `activity:*` rows, and nothing tells you that `comment:`, `label:`, `ticket:`, and `user:` rows exist further down — a full listing of a large collection is exactly the scan you don't want to run. The fix is a standard, always-present **manifest item that sorts before every entity row**, so it is the first thing anyone sees and tells them which prefixes to search.
+
+**Rule: every app collection has a `$meta` item, and all system rows use the `$` prefix.**
+
+`$` is chosen deliberately. Keys sort by UTF-8 bytes, and `$` (0x24) sorts before digits (`0` = 0x30), uppercase (`A` = 0x41), underscore (`_` = 0x5F), and lowercase (`a` = 0x61) — so `$`-rows are always the first rows on page one, no matter how entities are keyed. The alternatives all fail somewhere: `_` sorts *after* digits and uppercase (so a ULID-keyed or uppercase row beats it); `!`, `-`, `&`, `%`, and `*` are YAML-special at the start of a plain scalar and break CollectionActor configs; `>`, `<`, `|`, and a trailing `*` are query-expression operators; `#` is not allowed in keys. `$` is safe in YAML plain scalars, JS template literals (only `${` is special), Python, and query expressions (`$*` lists the whole system namespace).
+
+| Key | Purpose | Written by |
+|-----|---------|-----------|
+| `$meta` | **Required.** The collection manifest: app name, applied `schemaVersion`, and the `entities` index of every key prefix in the collection | Migration runner, at the end of **every** invoke, with `overwrite: true` |
+| `$migration:<id>` | Migration ledger — one row per applied migration | Migration runner |
+| `$counter:<name>` | Atomic counters (`updateItem` + `atomicCounters`), e.g. `$counter:ticketNumber` | App code |
+| `$<anything-else>` | Other operational singletons (locks, cursors, cached config) | App code |
+
+`$` rows are **never entity data** and never appear in entity prefix queries (`ticket:*`), so they cost nothing at read time.
+
+**`$meta` shape:**
+
+```json
+{
+  "app": "ticketing",
+  "schemaVersion": 3,
+  "entities": {
+    "ticket":   { "prefix": "ticket:",   "key": "ticket:<ulid>",                  "description": "Tickets" },
+    "user":     { "prefix": "user:",     "key": "user:<id>",                      "description": "Users and demo users" },
+    "label":    { "prefix": "label:",    "key": "label:<slug>",                   "description": "Ticket labels" },
+    "comment":  { "prefix": "comment:",  "key": "comment:<ticketId>:<createdAt>", "description": "Comments, sorted under their ticket", "parent": "ticket" },
+    "activity": { "prefix": "activity:", "key": "activity:<ticketId>:<at>",       "description": "Activity log, sorted under its ticket", "parent": "ticket" }
+  },
+  "system": {
+    "$migration:": "Applied migration ledger",
+    "$counter:":   "Atomic counters (ticketNumber)"
+  },
+  "labels": { "type": "entity name (ticket, user, …)", "status": "ticket status", "owner": "assignee id" },
+  "updatedAt": "2026-08-20T10:00:00.000Z"
+}
+```
+
+Rules for the manifest:
+
+- **It is derived from code, not edited by users.** The migration runner holds an `ENTITIES` constant and rewrites `$meta` with `putItem` + `options.overwrite: true` at the end of every invoke — applied migrations or not. This is the one seed-style write where `overwrite: true` is correct: clobbering a manifest with a fresher copy of itself is the point. (Seed *data* rows keep the create-only default — see [collection-migrations.md](collection-migrations.md).)
+- **Adding an entity prefix means updating `ENTITIES` and re-invoking the runner.** A prefix that isn't in `$meta` is invisible to everyone who opens the collection. Treat "new key prefix, manifest not updated" as a bug.
+- **`schemaVersion` is the *applied* version**, written after migrations succeed. App code that needs to refuse traffic until migrations run (`MIGRATIONS_PENDING`) reads `$meta` and compares `schemaVersion` to the version it was built against; a missing `$meta` means version 0.
+- **Keep the manifest small** — prefixes, key patterns, one-line descriptions, label meanings. No counts (they go stale), no data.
+
+**Access pattern — the same three steps everywhere:**
+
+1. **Read `$meta`.** In the UI it is the first row of the collection. In code: `getItem { collection, key: "$meta" }`.
+2. **Pick a prefix from `entities`.** Every entity the app stores is listed; nothing else needs to be discovered by scanning.
+3. **Prefix-query it.** UI: type `ticket:*` in the expression box. Code: `query { collection, expression: "ticket:*" }`.
+
+```typescript
+// Enumerate a collection without scanning it: manifest first, then one prefix query per entity.
+const manifest = await collectionsApi<GetItemResult<{ entities: Record<string, { prefix: string }> }>>({
+  action: "getItem", collection: "ticketing", key: "$meta",
+});
+for (const [name, entity] of Object.entries(manifest?.value.entities ?? {})) {
+  const page = await collectionsApi<QueryResult>({
+    action: "query", collection: "ticketing", expression: `${entity.prefix}*`, options: { limit: 25 },
+  });
+  console.log(name, page.count, page.lastKey ? "(more)" : "");
+}
+```
 
 ### Labels in a shared collection
 
@@ -94,7 +160,7 @@ A collection has at most **5 label slots**, shared by every entity type in it. C
 
 - **It is DynamoDB best practice.** Single-table design keeps related data co-located and readable in one round trip. A collection is a partition, so "one collection per entity" buys no schema, index, or isolation benefit — it only fragments the data.
 - **Transactions and batch operations stay natural.** `transactWrite` across a ticket and its activity row, or `batchGetItem` for a ticket plus its assignee, address one collection with different key prefixes.
-- **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)).
+- **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)). The `$meta` manifest it writes is the single place that says what the collection contains.
 - **Workspace budget.** A workspace allows at most 100 collections; an app that burns six slots for one logical database does not scale to many apps.
 
 ### When multiple collections are justified

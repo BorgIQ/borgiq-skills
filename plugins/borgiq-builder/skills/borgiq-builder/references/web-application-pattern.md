@@ -508,7 +508,7 @@ WebhookResponseActor
 
 **Actions:** Use `query` to list items, `putItem` to add, and `deleteItem` to remove. Create the collection first with `createCollection` (via the app's migration runner — see [collection-migrations.md](collection-migrations.md)).
 
-**One collection per app:** model every entity type the app stores in a single collection with key prefixes (`task:<id>`, `user:<id>`, `meta:config`) and query by prefix (`task:*`) — do not create one collection per entity type. See [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design).
+**One collection per app:** model every entity type the app stores in a single collection with key prefixes (`task:<id>`, `user:<id>`, `config:<name>`) and query by prefix (`task:*`) — do not create one collection per entity type. The migration runner also publishes a `$meta` manifest row listing those prefixes so the collection is navigable from its first row in the UI. See [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design).
 
 ---
 
