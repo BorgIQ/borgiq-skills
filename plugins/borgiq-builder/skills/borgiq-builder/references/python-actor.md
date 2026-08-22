@@ -598,7 +598,7 @@ def receive(req: Request) -> Response:
         'value': {'name': 'Alice'}
     })
 
-    # getItem — strongly consistent read
+    # getItem — eventually consistent read (returns None if missing)
     item = biq_api('/collections', method='POST', json={
         'action': 'getItem', 'collection': 'my-col', 'key': 'k1'
     }).json()

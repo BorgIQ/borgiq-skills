@@ -835,7 +835,7 @@ async function collectionsApi<T = unknown>(body: Record<string, unknown>): Promi
 // putItem — full replace
 await collectionsApi({ action: "putItem", collection: "my-col", key: "k1", value: { name: "Alice" } });
 
-// getItem — strongly consistent read
+// getItem — eventually consistent read (returns null if missing)
 const item = await collectionsApi({ action: "getItem", collection: "my-col", key: "k1" });
 
 // updateItem — shallow field merge (only listed fields change, others preserved)
