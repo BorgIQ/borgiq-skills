@@ -335,9 +335,11 @@ configuration:
   credentials:
     openai:
       workspaceKey: my-openai-key
-  options:
-    code: |
-      const apiKey = credentials.openai;
+  options: {}
+  codeDir:
+    - path: main.ts
+      content: |
+        const apiKey = req.credentials.openai;  // inside receive(req)
 ```
 
 ### Connections as Credentials
@@ -352,10 +354,12 @@ configuration:
     slack:
       workspaceKey: my-slack-connection
       source: connection
-  options:
-    code: |
-      const googleAuth = credentials['google-sheets'].auth;
-      const slackAuth = credentials['slack'].auth;
+  options: {}
+  codeDir:
+    - path: main.ts
+      content: |
+        const googleAuth = req.credentials['google-sheets'].auth;  // inside receive(req)
+        const slackAuth = req.credentials['slack'].auth;
 ```
 
 **Note:** Actors can use both `connection` and `credentials` together. For example, use `connection` for the primary auth and `credentials` for additional credentials like a private key to verify request signatures.

@@ -168,32 +168,34 @@ ACTR01jn59bxebpqetm28j8ev936r9:
   msgVar: gmail_trigger_on_new_emails
   enableLTM: true  # Persist historyId across flowruns
   configuration:
-    code: |
-      import _ from "npm:lodash@4.17.21";
-      import type { Request, Response } from "@borgiq/actors";
+    codeDir:
+      - path: main.ts
+        content: |
+          import _ from "npm:lodash@4.17.21";
+          import type { Request, Response } from "@borgiq/actors";
 
-      export default async function receive(req: Request): Promise<Response> {
-        // Read the whole ltm half from incoming memory
-        const ltm = req.memory.ltm ?? {};
-        const storedHistoryId = ltm.historyId;
+          export default async function receive(req: Request): Promise<Response> {
+            // Read the whole ltm half from incoming memory
+            const ltm = req.memory.ltm ?? {};
+            const storedHistoryId = ltm.historyId;
 
-        // If first run, initialize and return empty (persist the new historyId)
-        if (!storedHistoryId) {
-          const profile = await fetch("...").then(r => r.json());
-          ltm.historyId = profile.historyId;
-          return { results: [], memory: { ltm } };   // return only the ltm half
-        }
+            // If first run, initialize and return empty (persist the new historyId)
+            if (!storedHistoryId) {
+              const profile = await fetch("...").then(r => r.json());
+              ltm.historyId = profile.historyId;
+              return { results: [], memory: { ltm } };   // return only the ltm half
+            }
 
-        // Fetch history since last check
-        const data = await fetch(`...?startHistoryId=${storedHistoryId}`).then(r => r.json());
+            // Fetch history since last check
+            const data = await fetch(`...?startHistoryId=${storedHistoryId}`).then(r => r.json());
 
-        // Persist historyId for next run, emit new messages (excluding sent emails)
-        ltm.historyId = data.historyId;
-        return {
-          results: messages.filter(m => !m.labelIds?.includes("SENT")),
-          memory: { ltm },
-        };
-      }
+            // Persist historyId for next run, emit new messages (excluding sent emails)
+            ltm.historyId = data.historyId;
+            return {
+              results: messages.filter(m => !m.labelIds?.includes("SENT")),
+              memory: { ltm },
+            };
+          }
     options:
       emitArrayAsSingleMessage: false  # Emit each message separately
       allowNet: true
@@ -861,81 +863,81 @@ actors:
     sourcePorts:
       - id: SPRTdefault
     configuration:
-      code: >
+      codeDir:
+        - path: main.ts
+          content: |
+            import _ from "npm:lodash@4.17.21";
 
-        import _ from "npm:lodash@4.17.21";
-
-        import type { Request, Response } from "@borgiq/actors";
+            import type { Request, Response } from "@borgiq/actors";
 
 
-        export default async function receive(req:
-        Request): Promise<Response> {
-          // Get the stored historyId from incoming LTM
-          const storedHistoryId = _.get(req.memory.ltm, "historyId");
+            export default async function receive(req: Request): Promise<Response> {
+              // Get the stored historyId from incoming LTM
+              const storedHistoryId = _.get(req.memory.ltm, "historyId");
 
-          // If no historyId exists, initialize it
-          if (!storedHistoryId) {
-            // Fetch user's profile to get initial historyId
-            const profileResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
-              headers: {
-                Authorization: `Bearer ${req.connection.auth.values.token}`,
-              },
-            });
+              // If no historyId exists, initialize it
+              if (!storedHistoryId) {
+                // Fetch user's profile to get initial historyId
+                const profileResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+                  headers: {
+                    Authorization: `Bearer ${req.connection.auth.values.token}`,
+                  },
+                });
 
-            if (!profileResponse.ok) {
-              throw new Error(`Failed to fetch profile: ${profileResponse.statusText}`);
-            }
+                if (!profileResponse.ok) {
+                  throw new Error(`Failed to fetch profile: ${profileResponse.statusText}`);
+                }
 
-            const profile = await profileResponse.json();
+                const profile = await profileResponse.json();
 
-            // Store the historyId in LTM (persist via Response.memory)
-            _.set(req.memory.ltm, "historyId", profile.historyId);
+                // Store the historyId in LTM (persist via Response.memory)
+                _.set(req.memory.ltm, "historyId", profile.historyId);
 
-            // First run - don't emit any messages
-            return { results: [], memory: req.memory };
-          }
-
-          // Construct the URL for history API
-          const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
-          const params = new URLSearchParams({
-            startHistoryId: storedHistoryId,
-            historyTypes: "messageAdded"
-          });
-          url.search = params.toString();
-
-          // Fetch history from Gmail API
-          const response = await fetch(url.toString(), {
-            headers: {
-              Authorization: `Bearer ${req.connection.auth.values.token}`,
-            },
-          });
-
-          if (!response.ok) {
-            throw new Error(`Failed to fetch history: ${response.statusText}`);
-          }
-
-          const data = await response.json();
-
-          // Update the historyId in LTM if present in response (persist via Response.memory)
-          if (data.historyId) {
-            _.set(req.memory.ltm, "historyId", data.historyId);
-          }
-
-          // Extract messages from history, excluding those with SENT label
-          const messages = [];
-          if (data.history) {
-            for (const history of data.history) {
-              if (history.messagesAdded) {
-                const filteredMessages = history.messagesAdded
-                  .map(item => item.message)
-                  .filter(message => !message.labelIds?.includes("SENT"));
-                messages.push(...filteredMessages);
+                // First run - don't emit any messages
+                return { results: [], memory: req.memory };
               }
-            }
-          }
 
-          return { results: messages, memory: req.memory };
-        }
+              // Construct the URL for history API
+              const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+              const params = new URLSearchParams({
+                startHistoryId: storedHistoryId,
+                historyTypes: "messageAdded"
+              });
+              url.search = params.toString();
+
+              // Fetch history from Gmail API
+              const response = await fetch(url.toString(), {
+                headers: {
+                  Authorization: `Bearer ${req.connection.auth.values.token}`,
+                },
+              });
+
+              if (!response.ok) {
+                throw new Error(`Failed to fetch history: ${response.statusText}`);
+              }
+
+              const data = await response.json();
+
+              // Update the historyId in LTM if present in response (persist via Response.memory)
+              if (data.historyId) {
+                _.set(req.memory.ltm, "historyId", data.historyId);
+              }
+
+              // Extract messages from history, excluding those with SENT label
+              const messages = [];
+              if (data.history) {
+                for (const history of data.history) {
+                  if (history.messagesAdded) {
+                    const filteredMessages = history.messagesAdded
+                      .map(item => item.message)
+                      .filter(message => !message.labelIds?.includes("SENT"));
+                    messages.push(...filteredMessages);
+                  }
+                }
+              }
+
+              return { results: messages, memory: req.memory };
+            }
       options:
         emitArrayAsSingleMessage: false
         allowNet: true
