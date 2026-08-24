@@ -51,7 +51,8 @@ Do not maintain both a bundle and out-of-band batch patches for the same canvas.
 │   │       └── ACTR.../
 │   │           ├── actor.yaml
 │   │           └── code/
-│   │               └── mod.ts
+│   │               ├── main.ts        # required entrypoint
+│   │               └── lib/format.ts  # helper files are yours to arrange
 │   └── other/
 ├── AGENTS.md
 └── .gitignore
@@ -70,7 +71,7 @@ Actor paths are `actors/<category>/<type-folder>/<ACTOR_ID>/`. The CLI has an ex
 | Surface | Ownership | Editing rule |
 |---|---|---|
 | `actor.yaml` | Agent/user | Edit actor semantics, configuration, schemas, ports, names, and msgVars. Do not add position, edges, or externalized code. |
-| `code/*` | Agent/user | Edit the canonical source entrypoint here. |
+| `code/*` | Agent/user | Edit actor source here: the required entrypoint plus any helper files. |
 | `canvas.yaml` `canvas`, `actors[]`, `graph.nodes`, `graph.edges` | Agent/user | Edit metadata, index entries, positions, and wiring. |
 | `canvas.yaml` `dependencies`, `exportErrors`, `warnings`, `sync` | CLI-owned/informational | Read them, but do not hand-edit them; pack/pull/push regenerate or refresh them. |
 | In-bundle `AGENTS.md` | CLI-owned companion | Read it first. It defines format/layout mechanics for the installed CLI version and is never overwritten by pull/unpack. |
@@ -88,7 +89,9 @@ webhook-processor.borgiq-canvas/
 ├── actors/triggers/webhook/ACTR01kx4amhthtq7e17vx2ab3q53z/actor.yaml
 └── actors/tasks/deno/ACTR01kx4amhtje3y49waaevm7zsw7/
     ├── actor.yaml
-    └── code/mod.ts
+    └── code/
+        ├── main.ts
+        └── lib/shape.ts
 ```
 
 `canvas.yaml` owns the positions, edge, and actor index:
@@ -198,14 +201,21 @@ schemas:
     type: any
 ```
 
-`code/mod.ts` is native, byte-preserved source:
+`code/main.ts` is native, byte-preserved source, and imports its siblings relatively:
 
 ```typescript
 import type { Request, Response } from '@borgiq/actors';
 
+import { shapeEvent } from './lib/shape.ts';
+
 export default async function receive(req: Request): Promise<Response> {
-  return { results: { event: req.inputs }, memory: req.memory };
+  return { results: { event: shapeEvent(req.inputs) }, memory: req.memory };
 }
+```
+
+```typescript
+// code/lib/shape.ts
+export const shapeEvent = (inputs: unknown) => ({ receivedAt: new Date().toISOString(), inputs });
 ```
 
 ## Add and remove actors: the three-edit rule
@@ -219,7 +229,7 @@ borgiq generate id edge
 
 Adding an actor requires three structural edits, plus optional wiring:
 
-1. Create `actors/<category>/<type-folder>/<newId>/actor.yaml` and its canonical `code/` entrypoint when applicable.
+1. Create `actors/<category>/<type-folder>/<newId>/actor.yaml` and, when the type carries code, its `code/` entrypoint (`main.ts` / `main.py`, or App's three fixed files).
 2. Add the actor to `canvas.yaml` `actors[]`.
 3. Add one position to `canvas.yaml` `graph.nodes`.
 4. Add `graph.edges` entries to wire it.
@@ -282,24 +292,63 @@ For every edge:
 
 ## External code and codeDir
 
-When code is externalized, `actor.yaml` must contain `configuration.codeDir: code`, and the code must live only at the canonical entrypoint path.
+When code is externalized, `actor.yaml` carries the marker `configuration.codeDir: code` and the source lives in files under the actor's `code/` directory. That directory is either a **project tree** the actor owns freely, or a **fixed set of files** for the one type that still has one:
 
-| Actor type | Canonical file(s) under `code/` | Inline field restored on pack |
+| Actor type | Shape of `code/` | Restored on pack |
 |---|---|---|
-| `DenoActor` | `mod.ts` | `configuration.code` |
-| `DenoTestActor` | `mod.ts` | `configuration.code` |
-| `UniversalTriggerActor` | `mod.ts` | `configuration.code` |
-| `PythonActor` | `mod.py` | `configuration.code` |
-| `AppTriggerActor` | `index.html`, `styles.css`, `script.js` | `configuration.options.html`, `.css`, `.script` when those values are inline strings |
+| `DenoActor` | project tree; required entrypoint `main.ts` | `configuration.codeDir` — an array of `{path, content}` |
+| `DenoTestActor` | project tree; required entrypoint `main.ts` | `configuration.codeDir` |
+| `UniversalTriggerActor` | project tree; required entrypoint `main.ts` | `configuration.codeDir` |
+| `PythonActor` | project tree; required entrypoint `main.py` | `configuration.codeDir` |
+| `ReactAppTriggerActor` | a whole Vite project (no required entrypoint filename) | `configuration.codeDir` |
+| `AppTriggerActor` | the three fixed files `index.html`, `styles.css`, `script.js` | `configuration.options.html`, `.css`, `.script` when those values are inline strings |
 
 Rules:
 
 - Edit code in `code/`, never inline in `actor.yaml`.
-- `codeDir` must be exactly `code`.
-- Do not keep `configuration.code` and `codeDir` together; that dual source is a hard error.
-- Only canonical entrypoints are allowed. Helper files and directories are not supported in v1.
-- Reserved extras such as `server.ts`, `handler.ts`, `actor.ts`, `deno.jsonc`, `deno.lock`, `mod_test.ts`, and `shared/` are rejected.
+- `codeDir` in `actor.yaml` must be exactly the marker string `code`.
+- Do not keep `configuration.code` and `code/` files together; that dual source is a hard error.
 - App fields that are BorgIQ file-reference objects remain in `actor.yaml`; only inline string fields are externalized.
+
+### Code actor project trees
+
+Deno, Deno Test, Universal Trigger, and Python actors hold a small project, not one file: the entrypoint at the root of `code/`, plus any helper files and folders.
+
+```text
+actors/tasks/deno/ACTR.../
+├── actor.yaml            # configuration.codeDir: code
+└── code/
+    ├── main.ts           # required — exports the default handler
+    ├── lib/format.ts
+    └── lib/nested/constants.ts
+```
+
+- **The entrypoint is required and matched exactly**: `code/main.ts` for Deno, Deno Test, and Universal Trigger actors, `code/main.py` for Python actors. `bundle validate` errors when it is absent; `Main.ts` is a different file, not a near-miss.
+- **Import between your own files with ordinary relative imports** — `import { format } from './lib/format.ts'` in Deno (extension included), `from lib.format import format` in Python (a package directory needs `__init__.py`). Imports may not leave `code/`; reach anything else through registry specifiers (`npm:`, `jsr:`, `https`) in Deno, or `configuration.options.dependencies` in Python.
+- **UTF-8 text only**, at most **200 files** and **1 MiB** of source in total across the tree.
+- **Reserved filenames** — the BorgIQ runtime writes its own files into the same directory, so these names are rejected (case-insensitively) by `bundle validate` and by the API on save:
+
+  | Family | Reserved |
+  |---|---|
+  | Deno, Deno Test, Universal Trigger | `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, anything under `shared/` or `node_modules/` |
+  | Python | `server.py`, `handler.py`, `borgiq.py`, `pyproject.toml`, `.python-version`, `uv.lock`, anything under `.borgiq/`, `.venv/` or `borgiq/` |
+
+  Python dependencies belong in `configuration.options.dependencies`, which is why a `pyproject.toml` of your own is reserved rather than merged.
+- **Local tooling output is never synced.** `node_modules/`, `dist/`, `.vite/`, `.venv/`, `__pycache__/`, `.git/`, and lockfiles (`deno.lock`, `uv.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock*`) under `code/` are left alone by pull, push, and `--replace`.
+- **Two paths that differ only in letter case** cannot both exist on a case-insensitive filesystem, so the bundle rejects them.
+
+### Multi-file requires a current CLI
+
+Multi-file code needs a `@borgiq/cli` new enough to represent it. Detect the capability rather than guessing:
+
+```bash
+borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+```
+
+- An **older CLI** pulling a canvas whose code actors are multi-file leaves the file list inline in `actor.yaml` and then refuses to pack or push it (`configuration.codeDir must be 'code'`). Upgrade; do not hand-edit around it. A current CLI fails such a pull outright with an explicit upgrade message instead of writing a bundle that would lose files.
+- A **bundle pulled before multi-file support** has `code/mod.ts` (or `code/mod.py`). Rename it to `main.ts` (or `main.py`) — `bundle validate` says so in the error — and push. The old name is just another project file now.
+- A canvas whose code actors the platform has **not converted yet** pulls into the same project layout, with the actor's source written to its entrypoint file; the first push afterwards converts the actor. Expect one pending update per such actor even before you edit anything.
+- The bundle's generated `AGENTS.md` and `.gitignore` are only created when missing, so a bundle created before this release keeps its old copies. Update them by hand or delete them and re-pull.
 
 ## Lifecycle commands
 
@@ -426,7 +475,7 @@ Bundle validation is offline and reports every finding against the responsible p
   "valid": false,
   "errors": [
     {
-      "path": "actors/tasks/deno/ACTR.../code/mod.ts",
+      "path": "actors/tasks/deno/ACTR.../code/main.ts",
       "message": "..."
     }
   ],
@@ -434,7 +483,17 @@ Bundle validation is offline and reports every finding against the responsible p
 }
 ```
 
-Fix the named file, not a packed export. Common misses are an indexed actor without `actor.yaml`, an actor without exactly one `graph.nodes` entry, a dangling edge, a source port not declared by the source actor, an invalid `codeDir`, or an extra helper file under `code/`.
+Fix the named file, not a packed export. Common misses are an indexed actor without `actor.yaml`, an actor without exactly one `graph.nodes` entry, a dangling edge, a source port not declared by the source actor, an invalid `codeDir` marker, a code actor whose `code/` tree has no entrypoint file, or a reserved filename under `code/`.
+
+### Code actor code/ errors
+
+| Message | Fix |
+|---|---|
+| `DenoActor needs an entrypoint file at code/main.ts` | Add it. If the message continues `- rename code/mod.ts to code/main.ts`, the bundle predates multi-file support: rename that file. |
+| `'server.ts' is reserved by the BorgIQ runtime and may not appear in a bundle.` | Rename the file. The runtime owns that name — see the reserved table above. |
+| `Both configuration.code and codeDir project files are present - remove one source.` | Delete the inline `configuration.code` from `actor.yaml`; the files under `code/` are the source of truth. |
+| `Inline configuration.code is not supported for DenoActor - move the source into code/main.ts and set configuration.codeDir: code.` | Move the string into the entrypoint file and set the marker. |
+| `Actor type DenoActor carries multi-file actor code, which this CLI version cannot represent - upgrade @borgiq/cli.` | Upgrade the CLI; this bundle was written by a newer one. |
 
 ### Unknown actor type
 
