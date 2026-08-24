@@ -339,13 +339,9 @@ actors/tasks/deno/ACTR.../
 
 ### Multi-file requires a current CLI
 
-Multi-file code needs a `@borgiq/cli` new enough to represent it. Detect the capability rather than guessing:
+Multi-file code needs a `@borgiq/cli` new enough to represent it. There is no separate probe for that — `borgiq bundle --help` only tells you the bundle commands exist at all. What you get instead is a clear failure at the moment it matters, so upgrade (`npm install -g @borgiq/cli`) when you see one:
 
-```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
-```
-
-- An **older CLI** pulling a canvas whose code actors are multi-file leaves the file list inline in `actor.yaml` and then refuses to pack or push it (`configuration.codeDir must be 'code'`). Upgrade; do not hand-edit around it. A current CLI fails such a pull outright with an explicit upgrade message instead of writing a bundle that would lose files.
+- An **older CLI** pulling a canvas whose code actors are multi-file leaves the file list inline in `actor.yaml` and then refuses to pack or push it (`configuration.codeDir must be 'code'`). Upgrade; do not hand-edit around it. A CLI that supports multi-file never does that silently: when it meets a code shape it cannot represent it fails the operation with an explicit "upgrade `@borgiq/cli`" message rather than writing a bundle that would drop files on the next push.
 - A **bundle pulled before multi-file support** has `code/mod.ts` (or `code/mod.py`). Rename it to `main.ts` (or `main.py`) — `bundle validate` says so in the error — and push. The old name is just another project file now.
 - A canvas whose code actors the platform has **not converted yet** pulls into the same project layout, with the actor's source written to its entrypoint file; the first push afterwards converts the actor. Expect one pending update per such actor even before you edit anything.
 - The bundle's generated `AGENTS.md` and `.gitignore` are only created when missing, so a bundle created before this release keeps its old copies. Update them by hand or delete them and re-pull.
