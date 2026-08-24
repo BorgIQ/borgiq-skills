@@ -69,7 +69,7 @@ An incoming webhook that routes by condition to a 200 success or 400 error respo
 
 **button-deno** -- ButtonTriggerActor -> DenoActor
 
-A manual trigger that runs custom TypeScript code. The DenoActor includes starter code with inputs/outputs wired up.
+A manual trigger that runs custom TypeScript code. The DenoActor includes a starter `configuration.codeDir` holding its `main.ts` entrypoint, with inputs/outputs wired up. Add further files to that array as the actor grows -- see [deno-actor.md](../deno-actor.md#code-files).
 
 ### Examples
 
@@ -198,8 +198,9 @@ The script generates type-appropriate default configuration for these actor type
 | Actor type | Default options (YAML string) |
 |-----------|-------------------------------|
 | `HttpRequestActor` | `method: GET\nurl: https://example.com` |
-| `DenoActor` | Empty options, starter code included |
-| `PythonActor` | Empty options, starter code included |
+| `DenoActor`, `DenoTestActor` | Empty options, plus a starter `configuration.codeDir` with the `main.ts` entrypoint |
+| `UniversalTriggerActor` | Empty options, plus a starter `configuration.codeDir` with the `main.ts` entrypoint (typed `TriggerRequest`) |
+| `PythonActor` | Empty options, plus a starter `configuration.codeDir` with the `main.py` entrypoint |
 | `AiActor` | Model, maxTokens, systemPrompt, prompt |
 | `AiAgentActor` | Model, systemPrompt, prompt (see [ai-agent-actor.md](../ai-agent-actor.md) for sessionId, timeoutInMinutes, tool filters, etc.) |
 | `RouterActor` | emitType, conditions (from `--routes` or default) |

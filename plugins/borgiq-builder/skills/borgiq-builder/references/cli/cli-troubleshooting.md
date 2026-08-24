@@ -201,7 +201,7 @@ borgiq canvases validate --canvas <id>
 
 ```
 Validation errors:
-  - DenoActor "my-actor" is missing required "code" field
+  - configuration.codeDir: An entrypoint file named 'main.ts' is required for DenoActor
   - Duplicate msgVar "response" in actors: ACTR..., ACTR...
   - Edge EDGE... references non-existent actor ACTR...
   - Actor ACTR... has no incoming connections
@@ -209,7 +209,7 @@ Validation errors:
 
 **Cause:** The canvas structure has logical errors:
 
-- A DenoActor is missing its `code` field
+- A code actor's `configuration.codeDir` has no entrypoint file (`main.ts`, or `main.py` for PythonActor)
 - Two actors use the same `msgVar` name, causing variable collisions
 - An edge references an actor ID that does not exist on the canvas
 - An actor has no connections (orphaned)

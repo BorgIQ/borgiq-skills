@@ -377,8 +377,8 @@ borgiq canvases validate CANV01kd6gr3vjxm2rs0k8s3fjq4nl --json
     {
       "actorId": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl",
       "actorName": "Process Data",
-      "field": "configuration.code",
-      "message": "Code is required for DenoActor"
+      "field": "configuration.codeDir",
+      "message": "An entrypoint file named 'main.ts' is required for DenoActor"
     }
   ],
   "warnings": [
@@ -748,12 +748,23 @@ borgiq actors schema MessageProcessorActor --action dedupeByCount --json
   },
   "defaultOptions": { "url": "https://www.example.com", "method": "GET" },
   "sourcePorts": { "type": "singleDefault", "fixedPorts": [{ "id": "SPRTdefault" }] },
-  "code": { "supported": false },
+  "code": { "supported": false, "language": null, "entrypoint": null, "multiFile": false },
   "supportsConnection": true,
   "enableLTM": false,
   "enableSTM": false
 }
 ```
+
+The `code` block describes how the type carries source. For an actor that runs code it names the
+language and the entrypoint filename, and says whether the source is a file list:
+
+```json
+  "code": { "supported": true, "language": "typescript", "entrypoint": "main.ts", "multiFile": true }
+```
+
+`multiFile: true` means the actor's source belongs in `configuration.codeDir` — a list of
+`{path, content}` files including one at `entrypoint`. `borgiq scaffold` reads these fields rather
+than hardcoding per-type rules, so scaffolding stays correct as the platform adds types.
 
 ---
 

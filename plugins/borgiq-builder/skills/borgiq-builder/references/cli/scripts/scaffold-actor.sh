@@ -98,13 +98,20 @@ build_configuration() {
     HttpRequestActor)
       echo '"options": "method: GET\nurl: https://example.com"'
       ;;
-    DenoActor)
+    # Code actors carry their source as configuration.codeDir: a JSON array of
+    # {path, content} files (never a YAML string) whose entrypoint is main.ts /
+    # main.py. Add further files to the array as the actor grows.
+    DenoActor|DenoTestActor)
       echo '"options": "",
-      "code": "const { input } = inputs;\n\nreturn {\n  result: input,\n};"'
+      "codeDir": [{ "path": "main.ts", "content": "import type { Request, Response } from \"@borgiq/actors\";\n\nexport default async function receive(req: Request): Promise<Response> {\n  return { results: req.inputs };\n}\n" }]'
+      ;;
+    UniversalTriggerActor)
+      echo '"options": "",
+      "codeDir": [{ "path": "main.ts", "content": "import type { TriggerRequest, Response } from \"@borgiq/actors\";\n\nexport default async function receive(req: TriggerRequest): Promise<Response> {\n  return { results: { firedBy: req.trigger.type } };\n}\n" }]'
       ;;
     PythonActor)
       echo '"options": "",
-      "code": "result = inputs.get(\"input\", None)\nreturn {\"result\": result}"'
+      "codeDir": [{ "path": "main.py", "content": "from borgiq import Request, Response\n\n\ndef receive(req: Request) -> Response:\n    return Response(results=req.inputs)\n" }]'
       ;;
     AiActor)
       echo '"options": "model: claude-sonnet-4-5-20250514\nmaxTokens: 4096\nsystemPrompt: You are a helpful assistant.\nprompt: ${{ inputs.prompt }}"'
