@@ -13,6 +13,7 @@ The DenoActor executes custom TypeScript/JavaScript code in a sandboxed Deno run
 - [Input Schemas](#input-schemas)
 - [Options Reference](#options-reference)
 - [TypeScript Schema Definition](#typescript-schema-definition)
+- [Code Files](#code-files)
 - [Code Template](#code-template)
 - [Logging](#logging)
 - [Request and Response](#request-and-response)
@@ -189,12 +190,21 @@ actors:
         env:
           - name: ENV_VAR
             value: some_value
-      code: |
-        import type { Request, Response } from "@borgiq/actors";
+      # Source is a list of files, sibling of `options`, never interpolated.
+      # Exactly one entry must have path `main.ts` — it is the entrypoint.
+      codeDir:
+        - path: main.ts
+          content: |
+            import type { Request, Response } from "@borgiq/actors";
 
-        export default async function receive(req: Request): Promise<Response> {
-          return { results: { result: "success" } };
-        }
+            import { shape } from "./lib/shape.ts";
+
+            export default async function receive(req: Request): Promise<Response> {
+              return { results: shape("success") };
+            }
+        - path: lib/shape.ts
+          content: |
+            export const shape = (result: string) => ({ result });
     schemas:
       inputs:
         type: object
@@ -277,24 +287,26 @@ actors:
         data: ${{ msg.upstream_actor.body }}
       options:
         allowNet: true
-      code: |
-        import type { Request, Response } from "@borgiq/actors";
+      codeDir:
+        - path: main.ts
+          content: |
+            import type { Request, Response } from "@borgiq/actors";
 
-        export default async function receive(req: Request): Promise<Response> {
-          const { apiKey, timeout, data } = req.inputs;
+            export default async function receive(req: Request): Promise<Response> {
+              const { apiKey, timeout, data } = req.inputs;
 
-          const response = await fetch('https://api.example.com/process', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data),
-            signal: AbortSignal.timeout(timeout * 1000),
-          });
+              const response = await fetch('https://api.example.com/process', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+                signal: AbortSignal.timeout(timeout * 1000),
+              });
 
-          return { results: await response.json() };
-        }
+              return { results: await response.json() };
+            }
     schemas:
       inputs:
         type: object
@@ -342,8 +354,22 @@ The complete TypeScript schema for DenoActor options:
 ```typescript
 import { z } from 'zod';
 
-/** The code for the DenoActor */
-export const DenoActorCodeSchema = z.string().min(1);
+/** One source file of the actor's project tree. */
+export const CodeFileSchema = z.object({
+  /** path relative to the project root; '/' separates nested folders, e.g. 'lib/util.ts' */
+  path: z.string().min(1).max(255),
+  /** raw file content, UTF-8 text */
+  content: z.string(),
+});
+
+/**
+ * The DenoActor's `configuration.codeDir`: at most 200 files and 1 MiB of content in total,
+ * exactly one of them at `main.ts`, none of them using a filename the runtime reserves.
+ */
+export const DenoActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.ts',
+  reservedPaths: DENO_RESERVED_PATHS,
+});
 
 /** The options for the DenoActor */
 export const DenoActorOptionsSchema = z.object({
@@ -393,7 +419,51 @@ options:
       value: "true"
 ```
 
+## Code Files
+
+A Deno Actor's source is a small project, held in `configuration.codeDir` as a list of `{path, content}` files:
+
+```yaml
+configuration:
+  codeDir:
+    - path: main.ts            # required entrypoint — exports the default handler
+      content: |
+        import type { Request, Response } from "@borgiq/actors";
+
+        import { normalize } from "./lib/normalize.ts";
+        import { LIMIT } from "./lib/constants.ts";
+
+        export default async function receive(req: Request): Promise<Response> {
+          return { results: normalize(req.inputs, LIMIT) };
+        }
+    - path: lib/normalize.ts
+      content: |
+        export const normalize = (input: unknown, limit: number) => ({ input, limit });
+    - path: lib/constants.ts
+      content: |
+        export const LIMIT = 50;
+```
+
+Rules:
+
+- **`main.ts` is required** and must be at the root of the tree — exactly one entry may have that path. The runtime imports it; a tree without it is rejected on save.
+- **Import your own files relatively, with the extension**: `./lib/normalize.ts`, `../shared-helpers/x.ts` (relative to the importing file, never escaping the tree). Everything else comes from registry specifiers (`npm:`, `jsr:`, `https`) or `@borgiq/actors`, exactly as before.
+- **`codeDir` is never interpolated.** `${{ }}` in your source is literal text, not an expression — pass runtime values through `configuration.inputs` and read them from `req.inputs`. This is also why credentials can never leak through source text.
+- **Removing an entry removes the file.** The runtime rebuilds the actor's directory from the list on every code change, so a deleted helper stops being importable immediately.
+- **Reserved filenames** — the runtime writes its own files into the same directory, so these are rejected on save: `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, and anything under `shared/` or `node_modules/`. Comparison is case-insensitive (`Server.ts` collides with `server.ts`). There is no user-managed dependency manifest: pin versions in the import specifiers instead.
+- **Limits:** UTF-8 text only, at most 200 files, 1 MiB of content across the whole tree. Paths are relative, `/`-separated, and may not contain `.` or `..` segments.
+
+Editing surfaces:
+
+- **Bundle:** real files under the actor folder's `code/` directory — see [Canvas Bundles → Code actor project trees](cli/canvas-bundles.md#code-actor-project-trees).
+- **Direct document / batch payload:** the `configuration.codeDir` list itself, as shown above. It is a structured array in both formats, not a YAML string.
+- **Web editor:** the actor's Code page shows a file tree beside the editor; the right-hand panel on the canvas edits the entrypoint inline. The **AI code assist works on the selected file only** — it cannot see sibling files, so prompt it per file and wire the pieces together yourself.
+
+An actor written before multi-file support carries a single `configuration.code` string. It keeps running, and saving it from the editor (or pushing it from a bundle) converts it to a one-entry `codeDir`. Never set both fields.
+
 ## Code Template
+
+The entrypoint file, `main.ts`:
 
 ```typescript
 import { concat, indexOfNeedle, endsWith } from "jsr:@std/bytes@1.0.4";
@@ -581,6 +651,19 @@ This mirrors a real incremental-poll trigger: read a `historyId`/cursor from `lt
 > a supply-chain risk and makes deploys non-deterministic. An exact pin
 > (`npm:lodash@4.17.21`) is immune to both. BorgIQ-internal specifiers
 > (`@borgiq/actors`, `node:*`) are exempt — they are provided by the runtime.
+
+### Your Own Files
+
+Files in the same actor (see [Code Files](#code-files)) are imported relatively, **with the file extension**, the way Deno resolves any module:
+
+```typescript
+// in main.ts
+import { normalize } from "./lib/normalize.ts";
+// in lib/normalize.ts
+import { LIMIT } from "./constants.ts";      // relative to lib/, not to the root
+```
+
+Imports must stay inside the actor's own files. An import that resolves outside them — an absolute path, a `..` escape, a symlink out of the tree — is rejected before the code runs, with an error naming the offending specifier. Reach anything external through `npm:` / `jsr:` / `https` specifiers below.
 
 ### NPM Libraries
 

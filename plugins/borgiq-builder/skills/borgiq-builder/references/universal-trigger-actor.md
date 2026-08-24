@@ -10,6 +10,7 @@ The UniversalTriggerActor is a programmable trigger: user-supplied TypeScript ru
 - [Configuration Structure](#configuration-structure)
 - [Options Reference](#options-reference)
 - [TypeScript Schema Definition](#typescript-schema-definition)
+- [Code Files](#code-files)
 - [Code Template](#code-template)
 - [Emitted Message](#emitted-message)
 - [Responding to Webhook Firings](#responding-to-webhook-firings)
@@ -92,12 +93,16 @@ actors:
             headers:
               content-type: text/plain; charset=utf-8
             body: OK
-      code: |
-        import type { TriggerRequest, Response } from "@borgiq/actors";
+      # Source is a list of files, sibling of `options`, never interpolated.
+      # Exactly one entry must have path `main.ts` — it is the entrypoint.
+      codeDir:
+        - path: main.ts
+          content: |
+            import type { TriggerRequest, Response } from "@borgiq/actors";
 
-        export default async function receive(req: TriggerRequest): Promise<Response> {
-          return { results: { firedBy: req.trigger.type }, memory: req.memory };
-        }
+            export default async function receive(req: TriggerRequest): Promise<Response> {
+              return { results: { firedBy: req.trigger.type }, memory: req.memory };
+            }
     schemas: {}
     id: ACTR01xxxxx
     position:
@@ -164,12 +169,52 @@ export const UniversalTriggerActorOptionsSchema = z.object({
   webhook: WebhookBehaviorOptionsSchema.nullish(),
 });
 
-export const UniversalTriggerActorCodeSchema = z.string().min(1);
+/**
+ * The UniversalTriggerActor's `configuration.codeDir`: at most 200 files and 1 MiB of content in
+ * total, exactly one of them at `main.ts`, none using a filename the runtime reserves.
+ */
+export const UniversalTriggerActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.ts',
+  reservedPaths: DENO_RESERVED_PATHS,
+});
 ```
 
 Full definitions: [typescript/actor-schemas-triggers.md → universalTrigger](typescript/actor-schemas-triggers.md#actorschemastriggeruniversaltrigger) (options), [typescript/actor-schemas-triggers.md → triggerConfig](typescript/actor-schemas-triggers.md#actorschemastriggertriggerconfig) (static webhook/schedule/lifecycle config), and [typescript/schemas.md → schemas/trigger](typescript/schemas.md#schemastrigger) (the `TriggerEvent` union).
 
+## Code Files
+
+The trigger's source is a project tree in `configuration.codeDir` — a list of `{path, content}` files with the required entrypoint `main.ts` at its root, plus any helper files you add. The rules are the DenoActor's, which this trigger shares: relative imports between your own files (extension included), no imports leaving the tree, no interpolation of `codeDir`, and the reserved filenames `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, `shared/…`, `node_modules/…`. See [deno-actor.md → Code Files](deno-actor.md#code-files) for the full contract, limits, and editing surfaces.
+
+Splitting per trigger source is the common shape:
+
+```yaml
+configuration:
+  codeDir:
+    - path: main.ts
+      content: |
+        import type { TriggerRequest, Response } from "@borgiq/actors";
+
+        import { onWebhook } from "./handlers/webhook.ts";
+        import { onSchedule } from "./handlers/schedule.ts";
+
+        export default async function receive(req: TriggerRequest): Promise<Response> {
+          if (req.trigger.type === "webhook") return onWebhook(req);
+          if (req.trigger.type === "schedule") return onSchedule(req);
+          return { results: undefined };
+        }
+    - path: handlers/webhook.ts
+      content: |
+        …
+    - path: handlers/schedule.ts
+      content: |
+        …
+```
+
+Note the reserved `main_test.ts`: the runtime owns that name for this trigger's variant, so name your own test helpers something else.
+
 ## Code Template
+
+The entrypoint file, `main.ts`:
 
 ```typescript
 import type { TriggerRequest, Response } from "@borgiq/actors";
@@ -299,22 +344,24 @@ actors:
           response:
             statusCode: 200
             body: OK
-      code: |
-        import type { TriggerRequest, Response } from "@borgiq/actors";
+      codeDir:
+        - path: main.ts
+          content: |
+            import type { TriggerRequest, Response } from "@borgiq/actors";
 
-        export default async function receive(req: TriggerRequest): Promise<Response> {
-          if (req.trigger.type === "webhook") {
-            return { results: { event: req.trigger.request.headers["x-github-event"], payload: req.trigger.request.body }, memory: req.memory };
-          }
-          if (req.trigger.type === "schedule") {
-            const since = (req.memory.ltm.lastPolledAt as string) ?? null;
-            return {
-              results: { event: "poll", since },
-              memory: { stm: req.memory.stm, ltm: { ...req.memory.ltm, lastPolledAt: req.trigger.triggeredAt } },
-            };
-          }
-          return { results: undefined };  // manual fire: emit nothing
-        }
+            export default async function receive(req: TriggerRequest): Promise<Response> {
+              if (req.trigger.type === "webhook") {
+                return { results: { event: req.trigger.request.headers["x-github-event"], payload: req.trigger.request.body }, memory: req.memory };
+              }
+              if (req.trigger.type === "schedule") {
+                const since = (req.memory.ltm.lastPolledAt as string) ?? null;
+                return {
+                  results: { event: "poll", since },
+                  memory: { stm: req.memory.stm, ltm: { ...req.memory.ltm, lastPolledAt: req.trigger.triggeredAt } },
+                };
+              }
+              return { results: undefined };  // manual fire: emit nothing
+            }
     schemas: {}
     id: ACTR01kd298e3vrbdazn9x5etv4r7a
     position:

@@ -11,6 +11,7 @@ The PythonActor executes custom Python code in a sandboxed Python runtime within
 - [Input Schemas](#input-schemas)
 - [Options Reference](#options-reference)
 - [TypeScript Schema Definition](#typescript-schema-definition)
+- [Code Files](#code-files)
 - [Code Template](#code-template)
 - [Logging](#logging)
 - [Request and Response](#request-and-response)
@@ -106,12 +107,22 @@ actors:
         env:
           - name: ENV_VAR
             value: some_value
-      code: |
-        from typing import Any
-        from borgiq import Request, Response, biq_api, mount_file, stash_file, RetryableError
+      # Source is a list of files, sibling of `options`, never interpolated.
+      # Exactly one entry must have path `main.py` — it is the entrypoint.
+      codeDir:
+        - path: main.py
+          content: |
+            from typing import Any
+            from borgiq import Request, Response, biq_api, mount_file, stash_file, RetryableError
 
-        def receive(req: Request) -> Response:
-            return Response(results={"result": "success"})
+            from utils import shape
+
+            def receive(req: Request) -> Response:
+                return Response(results=shape("success"))
+        - path: utils.py
+          content: |
+            def shape(result: str) -> dict:
+                return {"result": result}
     schemas:
       inputs:
         type: object
@@ -195,28 +206,30 @@ actors:
       options:
         dependencies:
           - requests==2.32.3
-      code: |
-        from typing import Any
-        import requests
-        from borgiq import Request, Response, RetryableError
+      codeDir:
+        - path: main.py
+          content: |
+            from typing import Any
+            import requests
+            from borgiq import Request, Response, RetryableError
 
-        def receive(req: Request) -> Response:
-            api_key = req.inputs.get('apiKey')
-            timeout = req.inputs.get('timeout', 30)
-            data = req.inputs.get('data')
+            def receive(req: Request) -> Response:
+                api_key = req.inputs.get('apiKey')
+                timeout = req.inputs.get('timeout', 30)
+                data = req.inputs.get('data')
 
-            response = requests.post(
-                'https://api.example.com/process',
-                headers={
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json',
-                },
-                json=data,
-                timeout=timeout,
-            )
-            response.raise_for_status()
+                response = requests.post(
+                    'https://api.example.com/process',
+                    headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'Content-Type': 'application/json',
+                    },
+                    json=data,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
 
-            return Response(results=response.json())
+                return Response(results=response.json())
     schemas:
       inputs:
         type: object
@@ -261,8 +274,22 @@ The complete TypeScript schema for PythonActor options:
 ```typescript
 import { z } from 'zod';
 
-/** The code for the PythonActor */
-export const PythonActorCodeSchema = z.string().min(1);
+/** One source file of the actor's project tree. */
+export const CodeFileSchema = z.object({
+  /** path relative to the project root; '/' separates nested folders, e.g. 'lib/util.py' */
+  path: z.string().min(1).max(255),
+  /** raw file content, UTF-8 text */
+  content: z.string(),
+});
+
+/**
+ * The PythonActor's `configuration.codeDir`: at most 200 files and 1 MiB of content in total,
+ * exactly one of them at `main.py`, none of them using a filename the runtime reserves.
+ */
+export const PythonActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.py',
+  reservedPaths: PYTHON_RESERVED_PATHS,
+});
 
 /** The options for the PythonActor */
 export const PythonActorOptionsSchema = z.object({
@@ -307,7 +334,55 @@ options:
       value: "true"
 ```
 
+## Code Files
+
+A Python Actor's source is a small project, held in `configuration.codeDir` as a list of `{path, content}` files:
+
+```yaml
+configuration:
+  codeDir:
+    - path: main.py            # required entrypoint — defines receive()
+      content: |
+        from borgiq import Request, Response
+
+        from utils import normalize
+        from lib.report import summarize
+
+        def receive(req: Request) -> Response:
+            return Response(results=summarize(normalize(req.inputs)))
+    - path: utils.py           # a sibling module: import it by name
+      content: |
+        def normalize(inputs: dict) -> dict:
+            return {k: v for k, v in inputs.items() if v is not None}
+    - path: lib/__init__.py    # a package needs its __init__.py
+      content: ""
+    - path: lib/report.py
+      content: |
+        def summarize(data: dict) -> dict:
+            return {"count": len(data), "data": data}
+```
+
+Rules:
+
+- **`main.py` is required** and must be at the root of the tree — exactly one entry may have that path. The runtime imports it; a tree without it is rejected on save.
+- **The tree root is on `sys.path`**, so a root-level `utils.py` is `import utils`, and a folder is a package once it contains `__init__.py` (`from lib.report import summarize`, nested packages included). Declared dependencies are importable from any of your modules, not just the entrypoint.
+- **`codeDir` is never interpolated.** `${{ }}` in your source is literal text — pass runtime values through `configuration.inputs` and read them from `req.inputs`. This is also why credentials can never leak through source text.
+- **Removing an entry removes the file.** The runtime rebuilds the actor's directory from the list on every code change, so a deleted module stops being importable immediately.
+- **Reserved filenames** — the runtime puts its own modules in the same directory, and the tree root wins on `sys.path`, so a file of your own with one of these names would shadow it. Rejected on save: `server.py`, `handler.py`, `borgiq.py`, `pyproject.toml`, `.python-version`, `uv.lock`, and anything under `.borgiq/`, `.venv/` or `borgiq/`. Comparison is case-insensitive. Dependencies stay in `options.dependencies`, which is why a `pyproject.toml` of your own is reserved rather than merged.
+- **Shadowing a third-party package is your call, not an error.** A root `requests.py` wins over the installed `requests` — normal Python behavior, and only runtime-critical names are reserved. Name modules distinctly to avoid surprising yourself.
+- **Limits:** UTF-8 text only, at most 200 files, 1 MiB of content across the whole tree. Paths are relative, `/`-separated, and may not contain `.` or `..` segments.
+
+Editing surfaces:
+
+- **Bundle:** real files under the actor folder's `code/` directory — see [Canvas Bundles → Code actor project trees](cli/canvas-bundles.md#code-actor-project-trees).
+- **Direct document / batch payload:** the `configuration.codeDir` list itself, as shown above. It is a structured array in both formats, not a YAML string.
+- **Web editor:** the actor's Code page shows a file tree beside the editor; the right-hand panel on the canvas edits the entrypoint inline. The **AI code assist works on the selected file only** — it cannot see sibling files, so prompt it per file and wire the pieces together yourself.
+
+An actor written before multi-file support carries a single `configuration.code` string. It keeps running, and saving it from the editor (or pushing it from a bundle) converts it to a one-entry `codeDir`. Never set both fields.
+
 ## Code Template
+
+The entrypoint file, `main.py`:
 
 ```python
 from typing import Any, Dict, List, Optional, Union, BinaryIO
