@@ -28,6 +28,7 @@ Zod schemas and TypeScript types for core task actors: AgentHarnessActor, AiActo
 ```typescript
 import { z } from 'zod';
 
+import { BIQActorType } from '../../canvas.js';
 import { BIQSandboxProviders, BIQAgentHarnessType } from '../../sandbox.js';
 import { BIQFileSchema, BIQJsonSchema, BIQJsonSchemaType, McpAuthDataSchema } from '../../schemas/index.js';
 import { AiModel, AiModelInformationMap, AiToolCallSchema, BIQAiToolMessageOutputSchema, AiAgentModels, AnthropicAgentModels, OpenAiAgentModels } from '../../ai/index.js';
@@ -534,9 +535,20 @@ export const AgentHarnessActorOptionsJsonSchema: BIQJsonSchema = {
               },
               actorId: {
                 type: BIQJsonSchemaType.String,
-                title: 'MCP server actor ID',
-                description: 'The actor id of the MCP Server Actor to expose to the harness.',
+                title: 'MCP server',
+                description: 'The MCP Server Actor to expose to the harness.',
                 pattern: 'ACTR[0123456789abcdefghjkmnpqrstvwxyz]{26}$',
+                // the picker also writes workspaceSlug / canvasSlug below; leaving them blank
+                // targets this actor's own canvas, which is what the runtime resolves to
+                ui: {
+                  component: 'actorSelect',
+                  options: {
+                    actorTypes: [BIQActorType.McpServerActor],
+                    workspaceKey: 'workspaceSlug',
+                    canvasKey: 'canvasSlug',
+                    entityLabel: 'MCP server',
+                  },
+                },
               },
               workspaceSlug: {
                 type: BIQJsonSchemaType.String,
@@ -1589,6 +1601,7 @@ export type AiActorResult = z.infer<typeof AiActorResultSchema>;
 ```typescript
 import { z } from 'zod';
 
+import { BIQActorType } from '../../canvas.js';
 import { BIQFileSchema, BIQJsonSchema, BIQJsonSchemaType, McpAuthDataSchema } from '../../schemas/index.js';
 import { AiModel, AiModelInformationMap, AiAgentModels } from '../../ai/index.js';
 import { DeprecatedAiAgentStatusPortResultSchema } from './deprecatedAiAgent.js';
@@ -1596,20 +1609,41 @@ import { DeprecatedAiAgentStatusPortResultSchema } from './deprecatedAiAgent.js'
 /** The ai agent done source port id */
 export const AI_AGENT_DONE_SOURCE_PORT_ID = 'SPRTdone000';
 
-/** The opt-in code-execution tool's name. Unlike the always-on built-ins it is only registered —
- * and therefore only reserved — when `enableDenoTool` is set; see AI_AGENT_BUILTIN_TOOLS. */
-export const AI_AGENT_DENO_TOOL_NAME = 'deno';
+/** The opt-in Code Execution tool's model-facing name. Anthropic tool names must match
+ * ^[a-zA-Z0-9_-]{1,64}$ (no spaces), so the wire-level name is `code_execution`; human-facing
+ * labels say "Code Execution". Registered — and therefore reserved — only when
+ * `enableCodeExecution` is set; see AI_AGENT_BUILTIN_TOOLS. */
+export const AI_AGENT_CODE_EXECUTION_TOOL_NAME = 'code_execution';
+
+/** The always-on built-in tools, and the only names `allowedTools`/`disallowedTools` control.
+ * `code_execution` is deliberately absent: it is governed solely by `enableCodeExecution`, and the
+ * segment host never consults the filters for it, so listing it either way does nothing. */
+export const AI_AGENT_FILTERABLE_TOOLS = [
+  'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls',
+] as const;
+
+/** One-line descriptions of the filterable built-ins, shown as the option labels on the
+ * allowed/disallowed tool pickers so an author choosing between them does not have to guess. */
+export const AI_AGENT_FILTERABLE_TOOL_LABELS: Record<typeof AI_AGENT_FILTERABLE_TOOLS[number], string> = {
+  read: 'read — read a file from the workspace',
+  write: 'write — create or overwrite a workspace file',
+  edit: 'edit — modify part of an existing file',
+  bash: 'bash — run built-in shell commands (no external programs)',
+  grep: 'grep — search file contents',
+  find: 'find — find files by name',
+  ls: 'ls — list directory contents',
+};
 
 /** Built-in tool names of the pi coding agent running in the lambda segment host.
  * Reserved: a BorgIQ tool actor whose msgVar collides with one of these is rejected when the signal
  * is processed — at RUN time, not by this schema (the LLM sees one flat tool list, so names must be
  * unambiguous).
  *
- * `deno` is conditional. It is the one name the product itself hands out — the first DenoActor on a
- * canvas is titled "Deno", giving it the msgVar `deno` — so it is reserved only when the deno tool
- * is actually enabled. See the collision check in orchestrator/src/lib/aiAgent.ts. */
+ * `code_execution` is reserved only while `enableCodeExecution` is on, since the runtime otherwise
+ * never registers it and there is nothing to be ambiguous with. See the collision check in
+ * orchestrator/src/lib/aiAgent.ts. */
 export const AI_AGENT_BUILTIN_TOOLS = [
-  'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', AI_AGENT_DENO_TOOL_NAME,
+  ...AI_AGENT_FILTERABLE_TOOLS, AI_AGENT_CODE_EXECUTION_TOOL_NAME,
 ] as const;
 
 const AI_AGENT_MODELS = AiAgentModels as unknown as [AiModel, ...AiModel[]];
@@ -1693,13 +1727,13 @@ export const AiAgentActorOptionsSchema = z.object({
   maxLoopCount: z.number().int().positive().nullish()
     .describe('The maximum number of assistant turns, defaults to unlimited'),
   allowedTools: z.array(z.string()).nullish()
-    .describe('List of allowed built-in tools (read/write/edit/bash/grep/find/ls, plus deno when "Enable deno tool" is on). Empty means all allowed. Listing deno here does NOT enable it on its own.'),
+    .describe('Built-in tools the agent may use (read/write/edit/bash/grep/find/ls). Empty means all are allowed. Does not affect the Code Execution tool, which is controlled only by enableCodeExecution.'),
   disallowedTools: z.array(z.string()).nullish()
-    .describe('List of disallowed built-in tools'),
-  enableDenoTool: z.boolean().nullish().default(false)
-    .describe('Enable the deno tool: the agent can run a TypeScript/JavaScript file from its workspace with Deno (same sandbox permissions as the other tools; only dependencies already cached in the runtime image resolve, nothing can be installed). Defaults to false.'),
+    .describe('Built-in tools the agent may NOT use (read/write/edit/bash/grep/find/ls). Does not affect the Code Execution tool, which is controlled only by enableCodeExecution.'),
+  enableCodeExecution: z.boolean().nullish().default(false)
+    .describe('Let the agent execute code: it writes a TypeScript/JavaScript file into its workspace and runs it with Deno, sandboxed with the same filesystem and network permissions as its other tools. Only dependencies already cached in the runtime image resolve — nothing can be downloaded or installed. This is the only switch for the tool; the allowed/disallowed tool lists do not affect it. Defaults to false.'),
   allowNet: z.boolean().nullish().default(false)
-    .describe('Allow outbound network access from the Deno tool runtime and its in-process bash interpreter. Defaults to false.'),
+    .describe('Allow outbound network access from the agent\'s tool runtime (Code Execution scripts and the in-process bash interpreter). Defaults to false.'),
   allowNetList: z.array(z.string()).nullish()
     .describe('Only these hosts/CIDRs are allowed for outbound network access from the tool runtime (system endpoints are always included). Mutually exclusive with denyNetList.'),
   denyNetList: z.array(z.string()).nullish()
@@ -1726,23 +1760,10 @@ export const AiAgentActorOptionsSchema = z.object({
       message: 'allowNetList and denyNetList are mutually exclusive',
     });
   }
-  // Enabled but filtered out. The runtime detects this too, but only as a CloudWatch warning the
-  // author staring at a ticked checkbox will never read — so reject it here, where they can fix it.
-  if (data.enableDenoTool === true) {
-    if (data.disallowedTools?.includes(AI_AGENT_DENO_TOOL_NAME)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['disallowedTools'],
-        message: 'enableDenoTool is on but "deno" is in disallowedTools, so the tool would never be registered. Remove it from disallowedTools or turn the option off.',
-      });
-    } else if (data.allowedTools?.length && !data.allowedTools.includes(AI_AGENT_DENO_TOOL_NAME)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['allowedTools'],
-        message: 'enableDenoTool is on but allowedTools omits "deno", so the tool would never be registered. Add it to allowedTools or turn the option off.',
-      });
-    }
-  }
+  // No allowed/disallowed conflict check for the Code Execution tool: `enableCodeExecution` is its
+  // only switch, and the segment host never consults the filters for it, so no combination of the
+  // three can contradict itself.
+  //
   // Server names namespace tools (`mcp__{name}__{tool}`) and key the session stash, so a duplicate
   // would silently shadow one server's tools and route its calls to the other.
   const mcpNames = (data.mcpServers ?? []).map((server) => server.name);
@@ -1897,13 +1918,26 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
         order: 7,
       }
     },
+    // Both tool lists are pickers over AI_AGENT_FILTERABLE_TOOLS rather than free text: the names
+    // are a fixed runtime vocabulary, and a typo previously produced a silently ineffective filter
+    // (an allow list is a whitelist, so a misspelt entry quietly drops the real tool). An `enum` on
+    // `items` is what selects the MultiSelect renderer — arrays cannot carry `ui.component`
+    // themselves, so the component/labels live on `items.ui`.
     allowedTools: {
       type: BIQJsonSchemaType.Array,
-      description: 'List of allowed built-in tools (read/write/edit/bash/grep/find/ls, plus deno when "Enable deno tool" is on). Empty means all allowed. Listing deno here does NOT enable it on its own.',
+      description: 'Built-in tools the agent may use. Leave empty to allow all of them. Code Execution is not listed here — it is controlled only by Enable Code Execution.',
       title: 'Allowed tools',
+      uniqueItems: true,
       items: {
         type: BIQJsonSchemaType.String,
         title: 'Tool name',
+        enum: [...AI_AGENT_FILTERABLE_TOOLS],
+        ui: {
+          component: 'select',
+          options: {
+            enumLabels: AI_AGENT_FILTERABLE_TOOL_LABELS,
+          },
+        },
       },
       ui: {
         order: 10,
@@ -1911,11 +1945,19 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
     },
     disallowedTools: {
       type: BIQJsonSchemaType.Array,
-      description: 'List of disallowed built-in tools',
+      description: 'Built-in tools the agent may NOT use. Code Execution is not listed here — it is controlled only by Enable Code Execution.',
       title: 'Disallowed tools',
+      uniqueItems: true,
       items: {
         type: BIQJsonSchemaType.String,
         title: 'Tool name',
+        enum: [...AI_AGENT_FILTERABLE_TOOLS],
+        ui: {
+          component: 'select',
+          options: {
+            enumLabels: AI_AGENT_FILTERABLE_TOOL_LABELS,
+          },
+        },
       },
       ui: {
         order: 11,
@@ -1923,7 +1965,7 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
     },
     allowNet: {
       type: BIQJsonSchemaType.Boolean,
-      description: 'Allow outbound network access from the Deno tool runtime and its in-process bash interpreter. Defaults to false.',
+      description: 'Allow outbound network access from the agent\'s tool runtime (Code Execution scripts and the in-process bash interpreter). Defaults to false.',
       title: 'Allow network access',
       default: false,
       ui: {
@@ -2018,9 +2060,20 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
               },
               actorId: {
                 type: BIQJsonSchemaType.String,
-                title: 'MCP server actor ID',
-                description: 'The actor id of the MCP Server Actor whose tools the agent may call.',
+                title: 'MCP server',
+                description: 'The MCP Server Actor whose tools the agent may call.',
                 pattern: 'ACTR[0123456789abcdefghjkmnpqrstvwxyz]{26}$',
+                // the picker also writes workspaceSlug / canvasSlug below; leaving them blank
+                // targets this actor's own canvas, which is what the runtime resolves to
+                ui: {
+                  component: 'actorSelect',
+                  options: {
+                    actorTypes: [BIQActorType.McpServerActor],
+                    workspaceKey: 'workspaceSlug',
+                    canvasKey: 'canvasSlug',
+                    entityLabel: 'MCP server',
+                  },
+                },
               },
               workspaceSlug: {
                 type: BIQJsonSchemaType.String,
@@ -2071,15 +2124,16 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
         order: 18,
       }
     },
-    enableDenoTool: {
+    enableCodeExecution: {
       type: BIQJsonSchemaType.Boolean,
-      description: 'Enable the deno tool: the agent can run a TypeScript/JavaScript file from its workspace with Deno (same sandbox permissions as the other tools; only dependencies already cached in the runtime image resolve, nothing can be installed). Defaults to false.',
-      title: 'Enable deno tool',
+      description: 'Let the agent execute code: it writes a TypeScript/JavaScript file into its workspace and runs it with Deno, sandboxed with the same filesystem and network permissions as its other tools. Only dependencies already cached in the runtime image resolve — nothing can be downloaded or installed.',
+      title: 'Enable Code Execution',
       default: false,
       ui: {
-        // Grouped with the controls it interacts with — allowedTools (10), disallowedTools (11) and
-        // allowNet (12) — rather than stranded at the bottom of the form after the return-file
-        // toggles. Either filter can suppress this tool, so the author needs to see them together.
+        // Sits with the other tool controls — allowedTools (10), disallowedTools (11), allowNet
+        // (12) — rather than stranded after the return-file toggles, since an author deciding what
+        // the agent may do reads them together. It is the sole switch for this tool; the two lists
+        // beneath it cover the always-on built-ins only.
         order: 9,
       }
     },
@@ -2280,6 +2334,7 @@ export type AiRouterResult = z.infer<typeof AiRouterResultSchema>;
 ```typescript
 import { z } from 'zod';
 
+import { BIQActorType } from '../../canvas.js';
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
 
 /** The options schema for the CallFlowActor */
@@ -2316,9 +2371,20 @@ export const CallFlowActorOptionsJsonSchema: BIQJsonSchema = {
     },
     callableTriggerActorId: {
       type: BIQJsonSchemaType.String,
-      title: 'Callable trigger actor ID',
-      description: 'The actor id of the Callable Trigger Actor that wants to be triggered',
+      title: 'Callable trigger',
+      description: 'The Callable Trigger Actor this flow calls.',
       pattern: 'ACTR[0123456789abcdefghjkmnpqrstvwxyz]{26}$',
+      // the picker also writes workspaceSlug / canvasSlug above; blank coordinates mean the current
+      // workspace and canvas, which is what create-call-flow-flowrun-data resolves to
+      ui: {
+        component: 'actorSelect',
+        options: {
+          actorTypes: [BIQActorType.CallableTriggerActor],
+          workspaceKey: 'workspaceSlug',
+          canvasKey: 'canvasSlug',
+          entityLabel: 'callable trigger',
+        },
+      },
     },
     payload: {
       type: BIQJsonSchemaType.Any,
@@ -2410,8 +2476,23 @@ export type CallableResponseActorResult = z.infer<typeof CallableResponseActorRe
 import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
+import { DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
 
+/**
+ * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
+ * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
+ */
 export const DenoActorCodeSchema = z.string().min(1);
+
+/**
+ * The DenoActor's `configuration.codeDir`: a project tree whose handler lives in `main.ts`, minus the
+ * paths the Deno bootstrap owns. Both rules are actor-type knowledge, so they live here rather than on
+ * the wire-level `CodeDirSchema`.
+ */
+export const DenoActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.ts',
+  reservedPaths: DENO_RESERVED_PATHS,
+});
 
 /** The options for the DenoActor */
 export const DenoActorOptionsSchema = z.object({
@@ -2521,8 +2602,23 @@ export type DenoActorResult = z.infer<typeof DenoActorResultSchema>;
 import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
+import { DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
 
+/**
+ * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
+ * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
+ */
 export const DenoTestActorCodeSchema = z.string().min(1);
+
+/**
+ * The DenoTestActor's `configuration.codeDir`: a project tree whose handler lives in `main.ts`, minus
+ * the paths the Deno bootstrap owns. This type shares the `deno-actor` bootstrap variant with the
+ * DenoActor, so it shares that variant's reserved set too.
+ */
+export const DenoTestActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.ts',
+  reservedPaths: DENO_RESERVED_PATHS,
+});
 
 /** The options for the DenoTestActor */
 export const DenoTestActorOptionsSchema = z.object({
@@ -3715,8 +3811,24 @@ export const McpServerActorOptionsJsonSchema: BIQJsonSchema = {
 import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
+import { PYTHON_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
 
+/**
+ * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
+ * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
+ */
 export const PythonActorCodeSchema = z.string().min(1);
+
+/**
+ * The PythonActor's `configuration.codeDir`: a project tree whose handler lives in `main.py`, minus
+ * the paths the Python runtime owns. Unlike the Deno family, most of those are reserved against
+ * `sys.path` SHADOWING rather than overwriting — the actor's work dir sits ahead of `.borgiq/` on
+ * the search path, so a root `handler.py` would win over the runtime's without touching it.
+ */
+export const PythonActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.py',
+  reservedPaths: PYTHON_RESERVED_PATHS,
+});
 
 /** The options for the PythonActor */
 export const PythonActorOptionsSchema = z.object({

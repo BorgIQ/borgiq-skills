@@ -1,9 +1,10 @@
 # Common Schemas
 
-Zod schemas for IDs, files, runtime types, context variables, actor definitions, JSON schema, flowrun messages, signals, and errors.
+Zod schemas for IDs, files, runtime types, context variables, actor definitions, JSON schema, flowrun messages, signals, and errors — plus the actor-type-independent `configuration.codeDir` file model shared by every actor that carries source files.
 
 ## Table of Contents
 
+- [actorSchemas/codeDir.ts](#actorschemascodedir)
 - [schemas/actor.ts](#schemasactor)
 - [schemas/agentLambdaSegment.ts](#schemasagentlambdasegment)
 - [schemas/awsLambdaFunction.ts](#schemasawslambdafunction)
@@ -21,6 +22,240 @@ Zod schemas for IDs, files, runtime types, context variables, actor definitions,
 - [schemas/signals.ts](#schemassignals)
 - [schemas/trigger.ts](#schemastrigger)
 - [schemas/urlAllowlist.ts](#schemasurlallowlist)
+
+## actorSchemas/codeDir
+
+**Source:** `actorSchemas/codeDir.ts`
+
+```typescript
+import { z } from 'zod';
+
+/**
+ * The generic, actor-type-independent `configuration.codeDir` model: an array of
+ * `{ path, content }` source files forming a project tree, never interpolated.
+ *
+ * IMPORTANT — this module must stay a dependency-free LEAF. `schemas/runtime.ts` imports the
+ * generic schema from here, and `actorSchemas/trigger/reactApp.ts` re-exports it; importing
+ * anything but `zod` risks the same load-order cycle documented at the top of `reactApp.ts`.
+ */
+
+/** Maximum number of files allowed in `configuration.codeDir`. */
+export const MAX_CODE_DIR_FILES = 200;
+/** Maximum total UTF-8 byte size of all `configuration.codeDir` file contents (1 MiB). */
+export const MAX_CODE_DIR_TOTAL_BYTES = 1024 * 1024;
+
+/**
+ * Normalize a project-relative path to '/'-separated form and validate it is safe.
+ * Returns the normalized path, or an error string describing the first violation.
+ * Rules: reject absolute paths, '..' segments, backslashes, empty segments, and a trailing slash.
+ *
+ * Performs no trimming and no separator rewriting, so `segments.join('/')` is an identity
+ * transform for any accepted input — a valid `rawPath` is returned verbatim.
+ */
+export function normalizeCodePath(rawPath: string): { path: string } | { error: string } {
+  if (rawPath.includes('\\')) {
+    return { error: `path '${rawPath}' must use '/' separators, not backslashes` };
+  }
+  if (rawPath.startsWith('/')) {
+    return { error: `path '${rawPath}' must be relative to the project root (no leading '/')` };
+  }
+  // Guard against Windows drive-letter absolute paths (e.g. C:/...).
+  if (/^[a-zA-Z]:/.test(rawPath)) {
+    return { error: `path '${rawPath}' must be relative to the project root` };
+  }
+  const segments = rawPath.split('/');
+  for (const segment of segments) {
+    if (segment === '') {
+      return { error: `path '${rawPath}' contains an empty segment (leading, trailing, or doubled '/')` };
+    }
+    if (segment === '.' || segment === '..') {
+      return { error: `path '${rawPath}' contains a '.' or '..' segment` };
+    }
+  }
+  return { path: segments.join('/') };
+}
+
+/** A single source file in the never-interpolated project tree. */
+export const CodeFileSchema = z.object({
+  /** path relative to the project root; '/' separates nested folders, e.g. 'lib/util.ts' */
+  path: z.string().min(1).max(255),
+  /** raw file content, UTF-8 text */
+  content: z.string(),
+});
+
+export type CodeFile = z.infer<typeof CodeFileSchema>;
+
+/**
+ * Paths a user's `codeDir` may not claim, because the runtime owns them.
+ *
+ * Write ordering (user files first, borgiq files last) already makes borgiq files win any
+ * *overwrite* collision. These lists close the two cases ordering cannot fix: config
+ * **discovery precedence** (Deno prefers a user `deno.json` over the bootstrap's `deno.jsonc`)
+ * and Python **module shadowing** (the work-dir root wins on `sys.path` over `.borgiq/`).
+ */
+export interface ReservedPathSet {
+  /** whole paths that are reserved, compared case-insensitively */
+  exact: readonly string[];
+  /** directory prefixes, each written WITH its trailing '/', matched against `path + '/'` */
+  prefixes: readonly string[];
+}
+
+/**
+ * Return the reserved entry a normalized path collides with, or `null` when it is free.
+ *
+ * Comparison is case-insensitive, matching the bundle compiler's case-fold collision rule:
+ * on a case-insensitive filesystem `Server.ts` and `server.ts` are the same file. Prefixes are
+ * tested against `path + '/'`, so a prefix of `shared/` rejects both `shared/api.ts` and a file
+ * literally named `shared`.
+ */
+export function matchReservedPath(normalizedPath: string, reserved: ReservedPathSet): string | null {
+  const lowered = normalizedPath.toLowerCase();
+  for (const exact of reserved.exact) {
+    if (lowered === exact.toLowerCase()) return exact;
+  }
+  const loweredAsDir = `${lowered}/`;
+  for (const prefix of reserved.prefixes) {
+    if (loweredAsDir.startsWith(prefix.toLowerCase())) return prefix;
+  }
+  return null;
+}
+
+/** Reserved by the Deno bootstrap variant — shared by DenoActor, DenoTestActor and UniversalTriggerActor. */
+export const DENO_RESERVED_PATHS: ReservedPathSet = {
+  exact: [
+    // bootstrap entry chain; `actor.ts` is the @borgiq/actors SDK barrel mapped in deno.jsonc
+    'server.ts',
+    'handler.ts',
+    'actor.ts',
+    // bootstrap-owned test harness (universal-trigger variant)
+    'main_test.ts',
+    // bootstrap config + lockfile
+    'deno.jsonc',
+    'deno.lock',
+    // reserved even though the bootstrap ships neither: Deno config discovery would prefer a user
+    // `deno.json` over the bootstrap's `deno.jsonc`, and a `package.json` changes resolution.
+    'deno.json',
+    'package.json',
+  ],
+  prefixes: [
+    // the materialized shared kernel (dereferenced symlink)
+    'shared/',
+    // resolution surface
+    'node_modules/',
+  ],
+};
+
+/** Reserved by the Python runtime. Most of these are sys.path shadowing risks, not overwrites. */
+export const PYTHON_RESERVED_PATHS: ReservedPathSet = {
+  exact: [
+    // runtime-generated (dependencies come from configuration.options.dependencies)
+    'pyproject.toml',
+    '.python-version',
+    'uv.lock',
+    // the work-dir root wins on sys.path over `.borgiq/`, so a root file with a runtime module's
+    // name shadows it without overwriting anything
+    'server.py',
+    'handler.py',
+    'borgiq.py',
+  ],
+  prefixes: [
+    // the copied runtime (server.py, handler.py, borgiq/)
+    '.borgiq/',
+    // uv-managed environment
+    '.venv/',
+    // shadows the borgiq SDK package
+    'borgiq/',
+  ],
+};
+
+export interface CodeDirSchemaOptions {
+  /** exactly one entry must carry this path, e.g. 'main.ts' / 'main.py'. Omitted ⇒ no entrypoint rule. */
+  requiredEntrypoint?: string;
+  /** paths the runtime owns; rejected case-insensitively. Omitted ⇒ no reserved-path rule. */
+  reservedPaths?: ReservedPathSet;
+}
+
+/**
+ * Build a `codeDir` array schema. The shape rules (safe paths, no duplicates, file-count and
+ * total-byte caps) always apply; the entrypoint and reserved-path rules are opt-in because they
+ * are properties of a specific actor type's runtime, not of the wire format.
+ */
+export function makeCodeDirSchema(opts: CodeDirSchemaOptions = {}): z.ZodType<CodeFile[]> {
+  const { requiredEntrypoint, reservedPaths } = opts;
+  return z.array(CodeFileSchema)
+    .max(MAX_CODE_DIR_FILES, `codeDir may contain at most ${MAX_CODE_DIR_FILES} files`)
+    .superRefine((files, ctx) => {
+      const seen = new Set<string>();
+      const entrypointIndexes: number[] = [];
+      let totalBytes = 0;
+      // TextEncoder (not Buffer) so this schema stays portable between Node and the Deno runtime mirror.
+      const encoder = new TextEncoder();
+      files.forEach((file, index) => {
+        const result = normalizeCodePath(file.path);
+        if ('error' in result) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: result.error, path: [index, 'path'] });
+          return;
+        }
+        if (seen.has(result.path)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `duplicate path '${result.path}' in codeDir`,
+            path: [index, 'path'],
+          });
+        }
+        seen.add(result.path);
+        if (requiredEntrypoint !== undefined && result.path === requiredEntrypoint) {
+          entrypointIndexes.push(index);
+        }
+        if (reservedPaths) {
+          const reserved = matchReservedPath(result.path, reservedPaths);
+          if (reserved !== null) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `path '${result.path}' is reserved by the runtime ('${reserved}') and cannot be used`,
+              path: [index, 'path'],
+            });
+          }
+        }
+        totalBytes += encoder.encode(file.content).length;
+      });
+      if (totalBytes > MAX_CODE_DIR_TOTAL_BYTES) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `codeDir total content size ${totalBytes} exceeds the ${MAX_CODE_DIR_TOTAL_BYTES}-byte limit`,
+          path: [],
+        });
+      }
+      if (requiredEntrypoint !== undefined) {
+        if (entrypointIndexes.length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `codeDir must contain an entrypoint file named '${requiredEntrypoint}'`,
+            path: [],
+          });
+        }
+        // A duplicate entrypoint is already flagged by the duplicate-path check, but flag the
+        // extra entries too so the error points at the offending file, not just the array.
+        entrypointIndexes.slice(1).forEach((index) => {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `codeDir must contain exactly one entrypoint file named '${requiredEntrypoint}'`,
+            path: [index, 'path'],
+          });
+        });
+      }
+    });
+}
+
+/**
+ * The generic, type-independent `codeDir` shape used by the shared transport schemas. Per-type
+ * entrypoint and reserved-path rules are deliberately NOT wire-level — they run where actor-type
+ * context exists (save-time warnings, canvas validation, and the runtime).
+ */
+export const CodeDirSchema = makeCodeDirSchema();
+
+export type CodeDir = z.infer<typeof CodeDirSchema>;
+```
 
 ## schemas/actor
 
@@ -78,8 +313,9 @@ export type RuntimeEnvironment = z.infer<typeof RuntimeEnvironmentSchema>;
 ```typescript
 /**
  * NOTE:
- * Shared between the platform (the orchestrator builds the invoke event) and
- * the lambda runtime (the segment host consumes it).
+ * Shared between the platform (orchestrator builds the invoke event) and
+ * the lambda runtime (the segment host consumes it). This file is mirrored into the
+ * lambda runtime via `npm run copy-runtime-types`.
  *
  * An agent lambda segment runs one time-boxed slice of a pi coding-agent session inside the
  * workspace's own runtime Lambda function. Unlike a normal actor invoke (which carries a full
@@ -152,7 +388,7 @@ export const AgentLambdaSegmentPayloadSchema = z.object({
    * from — carried forward by the orchestrator from the previous segment's `checkpointed`
    * post. Absent on the first segment of a session. */
   restoreFromCheckpointFileId: z.string().optional(),
-  /** User-provided env exposed to the Deno tool subprocess (and bash). Decrypted by the
+  /** User-provided env exposed to the agent-tools subprocess (and bash). Decrypted by the
    * orchestrator from `signal.encryptedEnv` via KMS and passed as plaintext here — it never
    * persists (the payload rides the Event invoke, not Redis), mirroring how the harness tier
    * decrypts before handing env to the sandbox. Values are stringified. */
@@ -1091,6 +1327,11 @@ export type InterfaceOnSubmit = z.infer<typeof InterfaceOnSubmitSchema>;
 
 import { z } from 'zod';
 
+// canvas.js is itself import-free, so this file stays cycle-safe to import directly — which
+// actorSchemas/trigger/reactApp.ts relies on (it imports this leaf rather than the schemas barrel to
+// break a cycle). Keep any future import here to leaf modules only.
+import { BIQActorType } from '../canvas.js';
+
 /** The BIQ Json Schema Types for each component in the form rendered by the JSON schema */
 export enum BIQJsonSchemaType {
   /** different string type schemas */
@@ -1323,6 +1564,77 @@ const BIQSelectJsonSchemaZodSchema = BIQBaseJsonSchemaZodSchema.extend({
 });
 
 export type BIQSelectJsonSchema = z.infer<typeof BIQSelectJsonSchemaZodSchema>;
+
+/**
+ * An actor picker: a compact control that opens a modal to browse workspace → canvas → actor,
+ * filtered to the declared actor type(s).
+ *
+ * The value written into THIS property is the selected actor's id — so the property key is the
+ * actor-id key, and needs no configuring (`callableTriggerActorId` and `actorId` both work). The
+ * picker also writes the target coordinates into the SIBLING keys named by
+ * `ui.options.workspaceKey` / `canvasKey` in the same object: flat siblings, not a nested value,
+ * because that is the shape every consumer already persists.
+ *
+ * An absent workspace/canvas sibling means "the current canvas" — the picker never writes them
+ * eagerly. Every coordinate, the actor id included, may hold a `${{ }}` expression; the picker
+ * degrades to manual entry when it cannot query a list.
+ */
+const BIQActorSelectJsonSchemaZodSchema = BIQBaseJsonSchemaZodSchema.extend({
+  /** The type of the schema */
+  type: z.literal(BIQJsonSchemaType.String),
+  /** validation pattern for the actor id (e.g. `ACTR[0-9a-z]{26}$`) */
+  pattern: z.string().optional(),
+  /** other options to format the ui for the component */
+  ui: z.object({
+    /** if the component is hidden */
+    hidden: z.boolean().optional(),
+    /** the order level where 0 is closer to the top and higher numbers are closer to the bottom order between same number wont be guaranteed */
+    order: z.number().optional(),
+    /** Make sure its rendered as an actor picker */
+    component: z.literal('actorSelect'),
+    /** other options to format the ui for the component */
+    options: z.object({
+      /** the actor types the picker offers. Omit or leave empty to offer every type. */
+      actorTypes: z.array(z.enum(BIQActorType)).optional(),
+      /**
+       * An eligibility filter applied on top of `actorTypes`, for targets whose eligibility depends
+       * on their configuration rather than their type — e.g. a UniversalTriggerActor only counts as
+       * a webhook endpoint when its webhook source is enabled and it has a routing triggerKey.
+       */
+      capability: z.enum(['webhookEndpointTarget']).optional(),
+      /** sibling key holding the target workspace slug. Omit to hide the workspace step. */
+      workspaceKey: z.string().optional(),
+      /** sibling key holding the target canvas slug. Omit to hide the canvas step. */
+      canvasKey: z.string().optional(),
+      /** the noun for the thing being picked — drives the modal title, primary action and empty state. Defaults to 'actor'. */
+      entityLabel: z.string().optional(),
+      /** the placeholder on the collapsed control when nothing is selected */
+      placeholder: z.string().optional(),
+    }).optional(),
+  }),
+});
+
+export type BIQActorSelectJsonSchema = z.infer<typeof BIQActorSelectJsonSchemaZodSchema>;
+
+/**
+ * The sibling keys the actorSelect pickers in `properties` own.
+ *
+ * Renderers must skip these: the coordinates belong to the picker, which writes all three together
+ * and clears the ones a change invalidates (a new workspace voids the canvas and the actor beneath
+ * it). Rendering them as their own inputs as well would both duplicate the control and give the user
+ * a way to change a workspace or canvas WITHOUT the dependent values being cleared — leaving an
+ * actor id pointing into a canvas it doesn't live in, which CallFlow only discovers at run time.
+ */
+export function getActorSelectCoordinateKeys(properties?: Record<string, unknown>): Set<string> {
+  const keys = new Set<string>();
+  for (const schema of Object.values(properties ?? {})) {
+    const ui = (schema as BIQActorSelectJsonSchema | undefined)?.ui;
+    if (!ui || ui.component !== 'actorSelect') continue;
+    if (ui.options?.workspaceKey) keys.add(ui.options.workspaceKey);
+    if (ui.options?.canvasKey) keys.add(ui.options.canvasKey);
+  }
+  return keys;
+}
 
 /** a diff input schema that would return a string of the "new" code in the diff */
 const BIQDiffJsonSchemaZodSchema = BIQBaseJsonSchemaZodSchema.extend({
@@ -1696,7 +2008,7 @@ const BIQObjectJsonSchemaZodSchema: z.ZodObject<Record<string, z.ZodTypeAny>> = 
   /** The properties of the object */
   properties: z.record(z.string(), z.lazy(() => z.union(
     [
-      BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
+      BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQActorSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
       BIQNumberJsonSchemaZodSchema,
       BIQBooleanJsonSchemaZodSchema,
       BIQAnyJsonSchemaZodSchema, BIQObjectJsonSchemaZodSchema, BIQArrayJsonSchemaZodSchema, BIQAnyOfJsonSchemaZodSchema,
@@ -1737,7 +2049,7 @@ const BIQArrayJsonSchemaZodSchema: z.ZodObject<Record<string, z.ZodTypeAny>> = B
   /** The items of the array */
   items: z.lazy(() => z.union(
     [
-      BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
+      BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQActorSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
       BIQNumberJsonSchemaZodSchema,
       BIQBooleanJsonSchemaZodSchema,
       BIQAnyJsonSchemaZodSchema, BIQObjectJsonSchemaZodSchema, BIQArrayJsonSchemaZodSchema, BIQAnyOfJsonSchemaZodSchema,
@@ -1775,7 +2087,7 @@ export const BIQAnyOfJsonSchemaZodSchema = BIQBaseJsonSchemaZodSchema.extend({
   /** The array of the anyOf */
   anyOf: z.array(z.lazy(() => z.union(
     [
-      BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
+      BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQActorSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
       BIQNumberJsonSchemaZodSchema,
       BIQBooleanJsonSchemaZodSchema,
       BIQAnyJsonSchemaZodSchema, BIQObjectJsonSchemaZodSchema, BIQArrayJsonSchemaZodSchema, BIQAnyJsonSchemaZodSchema,
@@ -1848,7 +2160,7 @@ export interface BIQAnyOfJsonSchema extends BIQBaseJsonSchema {
 }
 
 export const BIQPropertiesJsonSchemaZodSchema = z.union([
-  BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
+  BIQStringJsonSchemaZodSchema, BIQCodeJsonSchemaZodSchema, BIQDateTimeJsonSchemaZodSchema, BIQSuggestionJsonSchemaZodSchema, BIQSelectJsonSchemaZodSchema, BIQActorSelectJsonSchemaZodSchema, BIQDiffJsonSchemaZodSchema,
   BIQNumberJsonSchemaZodSchema,
   BIQBooleanJsonSchemaZodSchema,
   BIQAnyJsonSchemaZodSchema, BIQObjectJsonSchemaZodSchema, BIQArrayJsonSchemaZodSchema, BIQAnyOfJsonSchemaZodSchema,
@@ -1857,7 +2169,7 @@ export const BIQPropertiesJsonSchemaZodSchema = z.union([
 ]);
 
 /** the BIQ schema across all the different types */
-export type BIQPropertyJsonSchemas = BIQStringJsonSchema | BIQCodeJsonSchema | BIQDateTimeJsonSchema | BIQSuggestionJsonSchema | BIQSelectJsonSchema | BIQNumberJsonSchema | BIQBooleanJsonSchema |
+export type BIQPropertyJsonSchemas = BIQStringJsonSchema | BIQCodeJsonSchema | BIQDateTimeJsonSchema | BIQSuggestionJsonSchema | BIQSelectJsonSchema | BIQActorSelectJsonSchema | BIQNumberJsonSchema | BIQBooleanJsonSchema |
 BIQAnyJsonSchema | BIQObjectJsonSchema | BIQArrayJsonSchema | BIQFileJsonSchema | BIQAudioRecordingFileJsonSchema | BIQDisplayTextJsonSchema | BIQDividerJsonSchema |
 BIQButtonJsonSchema | BIQImageJsonSchema | BIQPdfViewerJsonSchema | BIQMarkdownViewerJsonSchema | BIQCodeViewerJsonSchema | BIQDiffJsonSchema | BIQAnyOfJsonSchema;
 
@@ -2100,7 +2412,7 @@ import { z } from 'zod';
 import { BIQRuntimeInvocationType } from '../runtime.js';
 
 import { WebhookConfigSchema, ScheduleConfigSchema, LifecycleConfigSchema, LIFECYCLE_TRIGGER_EVENTS } from '../actorSchemas/trigger/triggerConfig.js';
-import { ReactAppCodeDirSchema } from '../actorSchemas/trigger/reactApp.js';
+import { CodeDirSchema } from '../actorSchemas/codeDir.js';
 
 import { BIQFileSchema } from './file.js';
 import { idSchema } from './idSchema.js';
@@ -2338,9 +2650,11 @@ export const ActorConfigurationSchema = z.object({
   schedule: ScheduleConfigSchema.optional(),
   /** Static, admission-consumed lifecycle subscription for universal triggers. Absent ⇒ unsubscribed. */
   lifecycle: LifecycleConfigSchema.optional(),
-  /** ReactAppTriggerActor project source tree. NEVER interpolated (§2.1) — stripped before the
-   *  interpolator runs and read from the pre-interpolated config by the actor (§4.3.5). */
-  codeDir: ReactAppCodeDirSchema.optional(),
+  /** The actor's project source tree ({path, content}[]) — ReactAppTriggerActor and the code actors.
+   *  NEVER interpolated: stripped before the interpolator runs and read back from the pre-interpolated
+   *  config by the actor. Per-type entrypoint/reserved-path rules are deliberately not wire-level;
+   *  they run where the actor type is known (save-time warnings, canvas validation, the runtime). */
+  codeDir: CodeDirSchema.optional(),
   /** indicates if the actor will emit errors downstream instead of halting the flowrun */
   continueOnError: z.boolean(),
   /** indicates if the actor has long term memory (canvas memory). When enabled, the actor's messages are processed one at a time across all flowruns */
@@ -2695,8 +3009,9 @@ export const RuntimeAgentLambdaSignalSchema = z.object({
   disallowedTools: z.array(z.string()).optional(),
   /** Whether the tool runtime (Deno + in-process bash) may access the network (default false) */
   allowNet: z.boolean().optional().default(false),
-  /** Whether the deno one-shot script tool is enabled (default false) */
-  enableDenoTool: z.boolean().optional().default(false),
+  /** Whether the Code Execution tool (`code_execution` — runs a workspace TS/JS file with Deno) is
+   *  enabled (default false). Its only switch: the allow/deny tool lists do not apply to it. */
+  enableCodeExecution: z.boolean().optional().default(false),
   /** If set, only these hosts/CIDRs are allowed for the tool runtime (plus system endpoints) */
   allowNetList: z.array(z.string()).optional(),
   /** Hosts/CIDRs to block for the tool runtime (system endpoints are auto-excluded) */
