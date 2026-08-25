@@ -551,8 +551,8 @@ GET /v1/orgs/{org}/workspaces/{workspace}/canvases/{canvasId}/validate
     {
       "actorId": "ACTR01kmka7ws4xn8jrz3c7bq1d2y6",
       "actorName": "Transform Data",
-      "field": "configuration.code",
-      "message": "Code is required for DenoActor"
+      "field": "configuration.codeDir",
+      "message": "An entrypoint file named 'main.ts' is required for DenoActor"
     },
     {
       "actorId": "ACTR01kmka7wqwan6fh6k5hgfpyv59",
@@ -625,7 +625,7 @@ Returns only the repositioned actors with their new coordinates.
 
 ## Step 4: Edit a Flow
 
-> **Bundle first:** with shell access, edit a deployed canvas through its [canvas bundle](cli/canvas-bundles.md) (`bundle pull` → edit files → `bundle push`) instead of calling these endpoints directly. Use the raw API below only when no bundle is possible, and never patch out of band a canvas that is maintained as a local bundle.
+> **Bundle first:** with shell access, edit a deployed canvas through its canvas bundle (`bundle pull` → edit files → `bundle push`) instead of calling these endpoints directly. Use the raw API below only when no bundle is possible, and never patch out of band a canvas that is maintained as a local bundle.
 
 ### Batch Actor Operations
 

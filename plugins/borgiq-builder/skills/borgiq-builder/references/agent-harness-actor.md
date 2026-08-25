@@ -133,23 +133,25 @@ ACTR01context:
   name: Build Context
   msgVar: build_context
   configuration:
-    code: |
-      import JSZip from "npm:jszip@3.10.1";
-      import type { Request, Response } from "@borgiq/actors";
-      import { stashFile } from "@borgiq/actors";
-      export default async function receive(req: Request): Promise<Response> {
-        const zip = new JSZip();
-        // Add CLAUDE.md with instructions
-        zip.file("CLAUDE.md", "# Instructions\nUse /analyze to process the input data.");
-        // Add the skill
-        zip.file(".claude/skills/analyze/SKILL.md", req.inputs.skillContent);
-        // Add input data
-        zip.file("input/data.json", JSON.stringify(req.inputs.data));
-        // Generate the zip and stash it to BorgIQ storage (requires allowNet: true)
-        const zipBuffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
-        const contextZip = await stashFile(zipBuffer, "context.zip", "application/zip");
-        return { results: { contextZip } };
-      }
+    codeDir:
+      - path: main.ts
+        content: |
+          import JSZip from "npm:jszip@3.10.1";
+          import type { Request, Response } from "@borgiq/actors";
+          import { stashFile } from "@borgiq/actors";
+          export default async function receive(req: Request): Promise<Response> {
+            const zip = new JSZip();
+            // Add CLAUDE.md with instructions
+            zip.file("CLAUDE.md", "# Instructions\nUse /analyze to process the input data.");
+            // Add the skill
+            zip.file(".claude/skills/analyze/SKILL.md", req.inputs.skillContent);
+            // Add input data
+            zip.file("input/data.json", JSON.stringify(req.inputs.data));
+            // Generate the zip and stash it to BorgIQ storage (requires allowNet: true)
+            const zipBuffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+            const contextZip = await stashFile(zipBuffer, "context.zip", "application/zip");
+            return { results: { contextZip } };
+          }
     options:
       allowNet: true  # required for stashFile
 
@@ -659,31 +661,33 @@ ACTR01extract:
   name: Extract Output
   msgVar: extract_output
   configuration:
-    code: |
-      import JSZip from "npm:jszip@3.10.1";
-      import type { Request, Response } from "@borgiq/actors";
-      import { mountFile } from "@borgiq/actors";
+    codeDir:
+      - path: main.ts
+        content: |
+          import JSZip from "npm:jszip@3.10.1";
+          import type { Request, Response } from "@borgiq/actors";
+          import { mountFile } from "@borgiq/actors";
 
-      export default async function receive(req: Request): Promise<Response> {
-        const { file, paths } = req.inputs;
-        const filePath = await mountFile(file);
-        const fileBytes = await Deno.readFile(filePath);
-        const zip = await JSZip.loadAsync(fileBytes);
+          export default async function receive(req: Request): Promise<Response> {
+            const { file, paths } = req.inputs;
+            const filePath = await mountFile(file);
+            const fileBytes = await Deno.readFile(filePath);
+            const zip = await JSZip.loadAsync(fileBytes);
 
-        const extracted = [];
-        for (const requestedPath of paths) {
-          const normalizedPath = requestedPath.replace(/^\/+/, "");
-          const zipEntry = zip.files[normalizedPath];
-          if (!zipEntry || zipEntry.dir) {
-            extracted.push({ fileName: normalizedPath, content: "" });
-            continue;
+            const extracted = [];
+            for (const requestedPath of paths) {
+              const normalizedPath = requestedPath.replace(/^\/+/, "");
+              const zipEntry = zip.files[normalizedPath];
+              if (!zipEntry || zipEntry.dir) {
+                extracted.push({ fileName: normalizedPath, content: "" });
+                continue;
+              }
+              const content = await zipEntry.async("string");
+              extracted.push({ fileName: normalizedPath.split("/").pop() || normalizedPath, content });
+            }
+
+            return { results: { files: extracted } };
           }
-          const content = await zipEntry.async("string");
-          extracted.push({ fileName: normalizedPath.split("/").pop() || normalizedPath, content });
-        }
-
-        return { results: { files: extracted } };
-      }
     inputs:
       file: ${{ msg.research_agent.outputZipFile }}
       paths:
@@ -883,34 +887,36 @@ actors:
     sourcePorts:
       - id: SPRTdefault
     configuration:
-      code: |
-        import JSZip from "npm:jszip@3.10.1";
-        import type { Request, Response } from "@borgiq/actors";
-        import { stashFile } from "@borgiq/actors";
+      codeDir:
+        - path: main.ts
+          content: |
+            import JSZip from "npm:jszip@3.10.1";
+            import type { Request, Response } from "@borgiq/actors";
+            import { stashFile } from "@borgiq/actors";
 
-        export default async function receive(req: Request): Promise<Response> {
-          const { skills, claudeMd } = req.inputs;
-          if (!Array.isArray(skills) || skills.length === 0) {
-            throw new Error("Missing required input: skills (array of GitHub URLs)");
-          }
+            export default async function receive(req: Request): Promise<Response> {
+              const { skills, claudeMd } = req.inputs;
+              if (!Array.isArray(skills) || skills.length === 0) {
+                throw new Error("Missing required input: skills (array of GitHub URLs)");
+              }
 
-          const zip = new JSZip();
-          zip.file("CLAUDE.md", claudeMd);
-          zip.folder("inputs");
-          zip.folder("outputs");
+              const zip = new JSZip();
+              zip.file("CLAUDE.md", claudeMd);
+              zip.folder("inputs");
+              zip.folder("outputs");
 
-          // Download and add skills to .claude/skills/
-          // (skill downloading logic here — fetch from GitHub tree API)
+              // Download and add skills to .claude/skills/
+              // (skill downloading logic here — fetch from GitHub tree API)
 
-          const zipBuffer = await zip.generateAsync({
-            type: "uint8array",
-            compression: "DEFLATE",
-            compressionOptions: { level: 6 },
-          });
+              const zipBuffer = await zip.generateAsync({
+                type: "uint8array",
+                compression: "DEFLATE",
+                compressionOptions: { level: 6 },
+              });
 
-          const biqFile = await stashFile(zipBuffer, "skills-directory.zip", "application/zip");
-          return { results: { success: true, file: biqFile } };
-        }
+              const biqFile = await stashFile(zipBuffer, "skills-directory.zip", "application/zip");
+              return { results: { success: true, file: biqFile } };
+            }
       inputs:
         skills:
           - https://github.com/vm0-ai/vm0-skills/tree/main/firecrawl
@@ -1013,42 +1019,44 @@ actors:
     sourcePorts:
       - id: SPRTdefault
     configuration:
-      code: |
-        import JSZip from "npm:jszip@3.10.1";
-        import type { Request, Response } from "@borgiq/actors";
-        import { mountFile } from "@borgiq/actors";
+      codeDir:
+        - path: main.ts
+          content: |
+            import JSZip from "npm:jszip@3.10.1";
+            import type { Request, Response } from "@borgiq/actors";
+            import { mountFile } from "@borgiq/actors";
 
-        export default async function receive(req: Request): Promise<Response> {
-          const { file, paths } = req.inputs;
-          if (!file) throw new Error("Missing required input: file");
-          if (!paths?.length) throw new Error("Missing required input: paths");
+            export default async function receive(req: Request): Promise<Response> {
+              const { file, paths } = req.inputs;
+              if (!file) throw new Error("Missing required input: file");
+              if (!paths?.length) throw new Error("Missing required input: paths");
 
-          const filePath = await mountFile(file);
-          const fileBytes = await Deno.readFile(filePath);
-          const zip = await JSZip.loadAsync(fileBytes);
+              const filePath = await mountFile(file);
+              const fileBytes = await Deno.readFile(filePath);
+              const zip = await JSZip.loadAsync(fileBytes);
 
-          const extracted = [];
-          for (const requestedPath of paths) {
-            const normalizedPath = requestedPath.replace(/^\/+/, "");
-            const zipEntry = zip.files[normalizedPath];
-            if (!zipEntry || zipEntry.dir) {
-              extracted.push({ fileName: normalizedPath, content: "" });
-              continue;
+              const extracted = [];
+              for (const requestedPath of paths) {
+                const normalizedPath = requestedPath.replace(/^\/+/, "");
+                const zipEntry = zip.files[normalizedPath];
+                if (!zipEntry || zipEntry.dir) {
+                  extracted.push({ fileName: normalizedPath, content: "" });
+                  continue;
+                }
+                const content = await zipEntry.async("string");
+                extracted.push({
+                  fileName: normalizedPath.split("/").pop() || normalizedPath,
+                  content,
+                });
+              }
+
+              return {
+                results: {
+                  totalExtracted: extracted.filter(r => r.content.length > 0).length,
+                  files: extracted,
+                },
+              };
             }
-            const content = await zipEntry.async("string");
-            extracted.push({
-              fileName: normalizedPath.split("/").pop() || normalizedPath,
-              content,
-            });
-          }
-
-          return {
-            results: {
-              totalExtracted: extracted.filter(r => r.content.length > 0).length,
-              files: extracted,
-            },
-          };
-        }
       inputs:
         file: ${{ msg.deep_research_agent.outputZipFile }}
         paths:

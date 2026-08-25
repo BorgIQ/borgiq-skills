@@ -246,8 +246,10 @@ configuration:
   inputs: ${{ msg.interface_trigger }}
   options:
     allowNet: true
-  code: |
-    // code goes here...
+  codeDir:
+    - path: main.ts
+      content: |
+        // code goes here...
 ```
 
 ```typescript

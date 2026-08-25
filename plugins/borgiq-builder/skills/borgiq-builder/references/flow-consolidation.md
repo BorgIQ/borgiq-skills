@@ -12,12 +12,14 @@ If all actors in the flow use the same `connection`, use that connection in the 
 
 ```yaml
 configuration:
-  options:
-    code: |
-      // Access connection via the connection object
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${connection.auth.accessToken}` }
-      });
+  options: {}
+  codeDir:
+    - path: main.ts
+      content: |
+        // Inside receive(req): the single connection's resolved auth
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${req.connection.auth.accessToken}` }
+        });
   connection:
     key: my-google-connection
 ```
@@ -28,19 +30,21 @@ If the flow uses multiple different connections, use `credentials` instead of `c
 
 ```yaml
 configuration:
-  options:
-    code: |
-      // Access connections via credentials
-      const googleAuth = credentials['google-sheets-connection'].auth;
-      const slackAuth = credentials['slack-connection'].auth;
+  options: {}
+  codeDir:
+    - path: main.ts
+      content: |
+        // Inside receive(req): each connection arrives as a credential
+        const googleAuth = req.credentials['google-sheets-connection'].auth;
+        const slackAuth = req.credentials['slack-connection'].auth;
 
-      // Use each connection for its respective API
-      const sheetsResponse = await fetch(sheetsUrl, {
-        headers: { Authorization: `Bearer ${googleAuth.accessToken}` }
-      });
-      const slackResponse = await fetch(slackUrl, {
-        headers: { Authorization: `Bearer ${slackAuth.accessToken}` }
-      });
+        // Use each connection for its respective API
+        const sheetsResponse = await fetch(sheetsUrl, {
+          headers: { Authorization: `Bearer ${googleAuth.accessToken}` }
+        });
+        const slackResponse = await fetch(slackUrl, {
+          headers: { Authorization: `Bearer ${slackAuth.accessToken}` }
+        });
   credentials:
     google-sheets-connection:
       workspaceKey: my-google-sheets-connection

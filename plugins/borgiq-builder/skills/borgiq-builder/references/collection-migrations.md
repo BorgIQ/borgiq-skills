@@ -86,137 +86,139 @@ actors:
         enabled: false
       options:
         allowNet: true
-        code: |
-          import { biqApi } from "@borgiq/actors";
-          import type { TriggerRequest, Response } from "@borgiq/actors";
+      codeDir:
+        - path: main.ts
+          content: |
+            import { biqApi } from "@borgiq/actors";
+            import type { TriggerRequest, Response } from "@borgiq/actors";
 
-          // ONE collection for the whole app — entity types are separated by key
-          // prefix (task:, user:, config:), per single-collection design. System
-          // rows use the $ prefix so they sort to the top of the collection view:
-          // $meta (manifest), $migration:<id> (ledger), $counter:<name>.
-          const COLLECTION = "taskapp";
-          const LEDGER_PREFIX = "$migration:";
+            // ONE collection for the whole app — entity types are separated by key
+            // prefix (task:, user:, config:), per single-collection design. System
+            // rows use the $ prefix so they sort to the top of the collection view:
+            // $meta (manifest), $migration:<id> (ledger), $counter:<name>.
+            const COLLECTION = "taskapp";
+            const LEDGER_PREFIX = "$migration:";
 
-          // Every key prefix the app writes. This is what $meta publishes — if a
-          // prefix is missing here, nobody opening the collection can find it.
-          const ENTITIES = {
-            task:   { prefix: "task:",   key: "task:<ulid>",   description: "Tasks" },
-            user:   { prefix: "user:",   key: "user:<id>",     description: "Users" },
-            config: { prefix: "config:", key: "config:<name>", description: "Settings and status lookup rows" },
-          };
-          const LABELS = { type: "entity name (task, user, config)", status: "task status", owner: "assignee user id" };
+            // Every key prefix the app writes. This is what $meta publishes — if a
+            // prefix is missing here, nobody opening the collection can find it.
+            const ENTITIES = {
+              task:   { prefix: "task:",   key: "task:<ulid>",   description: "Tasks" },
+              user:   { prefix: "user:",   key: "user:<id>",     description: "Users" },
+              config: { prefix: "config:", key: "config:<name>", description: "Settings and status lookup rows" },
+            };
+            const LABELS = { type: "entity name (task, user, config)", status: "task status", owner: "assignee user id" };
 
-          async function collectionsApi<T = unknown>(body: Record<string, unknown>): Promise<T> {
-            const res = await biqApi("/collections", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-            });
-            const json = (await res.json()) as { ok: boolean; value: T; error?: { code: string; message: string } };
-            if (!json.ok) {
-              const err = new Error(json.error?.message || "Collection action failed");
-              (err as any).code = json.error?.code;
-              throw err;
-            }
-            return json.value;
-          }
-
-          // createCollection that treats "already exists" as success (idempotent).
-          async function ensureCollection(spec: Record<string, unknown>): Promise<void> {
-            try {
-              await collectionsApi({ action: "createCollection", ...spec });
-            } catch (e) {
-              if ((e as any).code !== "COLLECTION_ALREADY_EXISTS") throw e;
-            }
-          }
-
-          // Seed putItem: create-only (the default), and "already exists" = success.
-          async function seed(key: string, value: unknown): Promise<void> {
-            try {
-              await collectionsApi({ action: "putItem", collection: COLLECTION, key, value });
-            } catch (e) {
-              // putItem defaults to overwrite: false, so an existing key throws
-              // ITEM_ALREADY_EXISTS — for seed data that is a no-op, not an error.
-              if ((e as any).code !== "ITEM_ALREADY_EXISTS") throw e;
-            }
-          }
-
-          // --- The ordered migration list. Append new entries; never reorder/rename ids. ---
-          const MIGRATIONS: { id: string; run: () => Promise<void> }[] = [
-            {
-              id: "0001_seed_defaults",
-              run: async () => {
-                await seed("config:settings", {
-                  version: 1, theme: "system", createdAt: new Date().toISOString(),
-                });
-                // Status lookup rows the UI depends on:
-                for (const s of ["pending", "active", "done"]) {
-                  await seed(`config:status:${s}`, { label: s });
-                }
-              },
-            },
-            {
-              id: "0002_seed_admin_user",
-              run: async () => {
-                await seed("user:admin", {
-                  name: "Admin", role: "admin", createdAt: new Date().toISOString(),
-                });
-              },
-            },
-          ];
-
-          export default async function receive(req: TriggerRequest): Promise<Response> {
-            // Manual invoke only. Webhook/schedule are disabled in config, but guard
-            // anyway so migrations can never run off an HTTP request or cron tick.
-            if (req.trigger.type !== "manual") return { results: undefined };
-
-            // The app's single collection must exist before anything else — including
-            // the ledger keys. Declare labels up front: the label slots (15 max) are
-            // shared by every entity type in the collection, so keep the names generic
-            // and declare only the ones the app filters on — each is a GSI write.
-            await ensureCollection({
-              slug: COLLECTION, name: "Task App",
-              description: "All Task App data — entities separated by key prefix (task:, user:, config:)",
-              labels: ["type", "status", "owner"],
-            });
-
-            const applied: string[] = [];
-            const skipped: string[] = [];
-
-            for (const m of MIGRATIONS) {
-              const existing = await collectionsApi<{ key: string; value: unknown } | null>({
-                action: "getItem", collection: COLLECTION, key: LEDGER_PREFIX + m.id,
+            async function collectionsApi<T = unknown>(body: Record<string, unknown>): Promise<T> {
+              const res = await biqApi("/collections", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
               });
-              if (existing) { skipped.push(m.id); continue; }
+              const json = (await res.json()) as { ok: boolean; value: T; error?: { code: string; message: string } };
+              if (!json.ok) {
+                const err = new Error(json.error?.message || "Collection action failed");
+                (err as any).code = json.error?.code;
+                throw err;
+              }
+              return json.value;
+            }
 
-              await m.run(); // throws -> actor fails -> nothing recorded -> safe re-run
+            // createCollection that treats "already exists" as success (idempotent).
+            async function ensureCollection(spec: Record<string, unknown>): Promise<void> {
+              try {
+                await collectionsApi({ action: "createCollection", ...spec });
+              } catch (e) {
+                if ((e as any).code !== "COLLECTION_ALREADY_EXISTS") throw e;
+              }
+            }
+
+            // Seed putItem: create-only (the default), and "already exists" = success.
+            async function seed(key: string, value: unknown): Promise<void> {
+              try {
+                await collectionsApi({ action: "putItem", collection: COLLECTION, key, value });
+              } catch (e) {
+                // putItem defaults to overwrite: false, so an existing key throws
+                // ITEM_ALREADY_EXISTS — for seed data that is a no-op, not an error.
+                if ((e as any).code !== "ITEM_ALREADY_EXISTS") throw e;
+              }
+            }
+
+            // --- The ordered migration list. Append new entries; never reorder/rename ids. ---
+            const MIGRATIONS: { id: string; run: () => Promise<void> }[] = [
+              {
+                id: "0001_seed_defaults",
+                run: async () => {
+                  await seed("config:settings", {
+                    version: 1, theme: "system", createdAt: new Date().toISOString(),
+                  });
+                  // Status lookup rows the UI depends on:
+                  for (const s of ["pending", "active", "done"]) {
+                    await seed(`config:status:${s}`, { label: s });
+                  }
+                },
+              },
+              {
+                id: "0002_seed_admin_user",
+                run: async () => {
+                  await seed("user:admin", {
+                    name: "Admin", role: "admin", createdAt: new Date().toISOString(),
+                  });
+                },
+              },
+            ];
+
+            export default async function receive(req: TriggerRequest): Promise<Response> {
+              // Manual invoke only. Webhook/schedule are disabled in config, but guard
+              // anyway so migrations can never run off an HTTP request or cron tick.
+              if (req.trigger.type !== "manual") return { results: undefined };
+
+              // The app's single collection must exist before anything else — including
+              // the ledger keys. Declare labels up front: the label slots (15 max) are
+              // shared by every entity type in the collection, so keep the names generic
+              // and declare only the ones the app filters on — each is a GSI write.
+              await ensureCollection({
+                slug: COLLECTION, name: "Task App",
+                description: "All Task App data — entities separated by key prefix (task:, user:, config:)",
+                labels: ["type", "status", "owner"],
+              });
+
+              const applied: string[] = [];
+              const skipped: string[] = [];
+
+              for (const m of MIGRATIONS) {
+                const existing = await collectionsApi<{ key: string; value: unknown } | null>({
+                  action: "getItem", collection: COLLECTION, key: LEDGER_PREFIX + m.id,
+                });
+                if (existing) { skipped.push(m.id); continue; }
+
+                await m.run(); // throws -> actor fails -> nothing recorded -> safe re-run
+                await collectionsApi({
+                  action: "putItem", collection: COLLECTION, key: LEDGER_PREFIX + m.id,
+                  value: { appliedAt: new Date().toISOString() },
+                });
+                applied.push(m.id);
+              }
+
+              // Publish the manifest LAST, on every run. $meta is derived from code,
+              // so overwrite: true is correct here (and only here). Reaching this line
+              // means every migration is applied (a failure throws above), so the
+              // declared count IS the applied schemaVersion the app checks against.
+              const schemaVersion = MIGRATIONS.length;
               await collectionsApi({
-                action: "putItem", collection: COLLECTION, key: LEDGER_PREFIX + m.id,
-                value: { appliedAt: new Date().toISOString() },
+                action: "putItem", collection: COLLECTION, key: "$meta",
+                value: {
+                  app: "taskapp",
+                  schemaVersion,
+                  entities: ENTITIES,
+                  system: { [LEDGER_PREFIX]: "Applied migration ledger" },
+                  labels: LABELS,
+                  updatedAt: new Date().toISOString(),
+                },
+                options: { overwrite: true },
               });
-              applied.push(m.id);
+
+              return { results: { ok: true, applied, skipped, schemaVersion } };
             }
-
-            // Publish the manifest LAST, on every run. $meta is derived from code,
-            // so overwrite: true is correct here (and only here). Reaching this line
-            // means every migration is applied (a failure throws above), so the
-            // declared count IS the applied schemaVersion the app checks against.
-            const schemaVersion = MIGRATIONS.length;
-            await collectionsApi({
-              action: "putItem", collection: COLLECTION, key: "$meta",
-              value: {
-                app: "taskapp",
-                schemaVersion,
-                entities: ENTITIES,
-                system: { [LEDGER_PREFIX]: "Applied migration ledger" },
-                labels: LABELS,
-                updatedAt: new Date().toISOString(),
-              },
-              options: { overwrite: true },
-            });
-
-            return { results: { ok: true, applied, skipped, schemaVersion } };
-          }
     schemas: {}
     id: ACTR01migrationmgr0000000000
     position:

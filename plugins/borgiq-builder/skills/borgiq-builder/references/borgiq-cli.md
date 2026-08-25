@@ -17,7 +17,7 @@ Use the `borgiq` CLI to deploy workflows to the platform, trigger flows, monitor
 
 ## Canvas bundles
 
-The canvas bundle is the default way to build and edit canvases: actor configuration lives in parsed-object `actor.yaml` files, code in native files, the graph in `canvas.yaml`, and push/pull synchronize with three-way sync (a per-actor content-hash + edit-version baseline in `sync.actors`). Direct export documents and CanvasActor batch payloads are the fallback for environments without shell access or bundle support.
+The canvas bundle is the default way to build and edit canvases: actor configuration lives in parsed-object `actor.yaml` files, code in native files under `code/` (a project tree, entrypoint plus helpers, for the actors that run code), the graph in `canvas.yaml`, and push/pull synchronize with three-way sync (a per-actor content-hash + edit-version baseline in `sync.actors`). Direct export documents and CanvasActor batch payloads are the fallback for environments without shell access or bundle support.
 
 ```bash
 borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
@@ -33,7 +33,7 @@ borgiq bundle push ./my-flow.borgiq-canvas --dry-run
 borgiq bundle push ./my-flow.borgiq-canvas   # add --auto-layout when actors were added, removed, or rewired
 ```
 
-Read [Canvas Bundles](cli/canvas-bundles.md) before hand-editing the layout. It defines the three-edit rule, `codeDir` contract, root graph ownership, incremental sync verdicts, and conflict recovery. Bundle commands require a CLI build containing BorgIQ CLI PR #37; until a release version is published, the capability check above is authoritative. If the command is unavailable, use the direct document/batch workflow below.
+Read [Canvas Bundles](cli/canvas-bundles.md) before hand-editing the layout. It defines the three-edit rule, the `codeDir` contract — including the [project tree](cli/canvas-bundles.md#code-actor-project-trees) that Deno, Deno Test, Universal Trigger, and Python actors keep under `code/`, with its required `main.ts` / `main.py` entrypoint and reserved filenames — root graph ownership, incremental sync verdicts, and conflict recovery. Bundle commands require a CLI build containing BorgIQ CLI PR #37; until a release version is published, the capability check above is authoritative. If the command is unavailable, use the direct document/batch workflow below.
 
 ## Setup
 

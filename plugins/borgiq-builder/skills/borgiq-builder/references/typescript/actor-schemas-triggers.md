@@ -432,97 +432,32 @@ import { z } from 'zod';
 // `runtime.js`, which imports THIS file (for ReactAppCodeDirSchema, added in §4.1). Going through the
 // barrel forms a cycle that leaves `BIQJsonSchemaType` undefined when the JSON-schema literal below
 // evaluates at module load. jsonSchema.js is a dependency-free leaf, so importing it directly is cycle-safe.
+import { BIQActorType } from '../../canvas.js';
 import { BIQJsonSchemaType } from '../../schemas/jsonSchema.js';
 import type { BIQJsonSchema } from '../../schemas/jsonSchema.js';
 import { BIQFileSchema } from '../../schemas/file.js';
 import { idSchema } from '../../schemas/idSchema.js';
 import { PermissionsPolicyDirective, PermissionsPolicyDirectiveZodSchema } from './permissionsPolicy.js';
+import { CodeDirSchema, CodeFileSchema, normalizeCodePath } from '../codeDir.js';
+import type { CodeDir, CodeFile } from '../codeDir.js';
 
-/** Maximum number of files allowed in `configuration.codeDir`. */
-export const MAX_CODE_DIR_FILES = 200;
-/** Maximum total UTF-8 byte size of all `configuration.codeDir` file contents (1 MiB). */
-export const MAX_CODE_DIR_TOTAL_BYTES = 1024 * 1024;
 /** Maximum number of interpolatable overlay files in `configuration.options.files`. */
 export const MAX_OPTIONS_FILES = 50;
 /** Maximum number of endpoints declared on a ReactAppTriggerActor (Phase II). */
 export const MAX_REACT_APP_ENDPOINTS = 50;
 
 /**
- * Normalize a project-relative path to '/'-separated form and validate it is safe.
- * Returns the normalized path, or an error string describing the first violation.
- * Rules (shared by `codeDir` and `options.files`): reject absolute paths, '..' segments,
- * backslashes, empty segments, and a trailing slash.
+ * React-app back-compat aliases over the generic `codeDir` module (`../codeDir.ts`), which owns
+ * the path normalizer, the file schema and the size caps for every actor type that carries a
+ * `configuration.codeDir`. React-app keeps the plain schema — no entrypoint requirement and no
+ * reserved paths: its tree never shares a directory with runtime files, it is materialized into
+ * a per-build temp dir.
  */
-export function normalizeReactAppPath(rawPath: string): { path: string } | { error: string } {
-  if (rawPath.includes('\\')) {
-    return { error: `path '${rawPath}' must use '/' separators, not backslashes` };
-  }
-  if (rawPath.startsWith('/')) {
-    return { error: `path '${rawPath}' must be relative to the project root (no leading '/')` };
-  }
-  // Guard against Windows drive-letter absolute paths (e.g. C:/...).
-  if (/^[a-zA-Z]:/.test(rawPath)) {
-    return { error: `path '${rawPath}' must be relative to the project root` };
-  }
-  const segments = rawPath.split('/');
-  for (const segment of segments) {
-    if (segment === '') {
-      return { error: `path '${rawPath}' contains an empty segment (leading, trailing, or doubled '/')` };
-    }
-    if (segment === '.' || segment === '..') {
-      return { error: `path '${rawPath}' contains a '.' or '..' segment` };
-    }
-  }
-  return { path: segments.join('/') };
-}
-
-/** A single source file in the never-interpolated project tree. */
-export const ReactAppCodeFileSchema = z.object({
-  /** path relative to the project root; '/' separates nested folders, e.g. 'src/App.tsx' */
-  path: z.string().min(1).max(255),
-  /** raw file content, UTF-8 text */
-  content: z.string(),
-});
-
-export type ReactAppCodeFile = z.infer<typeof ReactAppCodeFileSchema>;
-
-/**
- * The full project source tree. Never interpolated (§2.1) — React/TS source is full of
- * `{{ }}`-shaped JSX/template expressions that the interpolator would corrupt.
- */
-export const ReactAppCodeDirSchema = z.array(ReactAppCodeFileSchema)
-  .max(MAX_CODE_DIR_FILES, `codeDir may contain at most ${MAX_CODE_DIR_FILES} files`)
-  .superRefine((files, ctx) => {
-    const seen = new Set<string>();
-    let totalBytes = 0;
-    // TextEncoder (not Buffer) so this schema stays portable between Node and the Deno runtime mirror.
-    const encoder = new TextEncoder();
-    files.forEach((file, index) => {
-      const result = normalizeReactAppPath(file.path);
-      if ('error' in result) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: result.error, path: [index, 'path'] });
-        return;
-      }
-      if (seen.has(result.path)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `duplicate path '${result.path}' in codeDir`,
-          path: [index, 'path'],
-        });
-      }
-      seen.add(result.path);
-      totalBytes += encoder.encode(file.content).length;
-    });
-    if (totalBytes > MAX_CODE_DIR_TOTAL_BYTES) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `codeDir total content size ${totalBytes} exceeds the ${MAX_CODE_DIR_TOTAL_BYTES}-byte limit`,
-        path: [],
-      });
-    }
-  });
-
-export type ReactAppCodeDir = z.infer<typeof ReactAppCodeDirSchema>;
+export const ReactAppCodeFileSchema = CodeFileSchema;
+export type ReactAppCodeFile = CodeFile;
+export const ReactAppCodeDirSchema = CodeDirSchema;
+export type ReactAppCodeDir = CodeDir;
+export const normalizeReactAppPath = normalizeCodePath;
 
 /** An interpolatable overlay file: inline text OR a BIQFile handle (typically `${{ assets.<key> }}`). */
 export const ReactAppOptionsFileSchema = z.object({
@@ -625,9 +560,22 @@ export const ReactAppTriggerActorOptionsJsonSchema: BIQJsonSchema = {
           },
           actorId: {
             type: BIQJsonSchemaType.String,
-            title: 'Webhook trigger actor id',
-            description: 'The id of the target trigger — a WebhookTriggerActor, or a UniversalTriggerActor with its webhook source enabled.',
-            ui: { options: { placeholder: 'ACTR…' } },
+            title: 'Trigger',
+            description: 'The target trigger — a WebhookTriggerActor, or a UniversalTriggerActor with its webhook source enabled.',
+            // the picker also writes workspaceSlug / canvasSlug below; blank coordinates target the
+            // app actor's own canvas. `capability` is what narrows UniversalTriggers to the ones
+            // whose webhook source is on and that carry a routing key — a configuration rule the
+            // actorTypes list alone cannot express.
+            ui: {
+              component: 'actorSelect',
+              options: {
+                actorTypes: [BIQActorType.WebhookTriggerActor, BIQActorType.UniversalTriggerActor],
+                capability: 'webhookEndpointTarget',
+                workspaceKey: 'workspaceSlug',
+                canvasKey: 'canvasSlug',
+                entityLabel: 'trigger',
+              },
+            },
           },
           workspaceSlug: {
             type: BIQJsonSchemaType.String,
@@ -1003,13 +951,29 @@ export const WebhookBehaviorOptionsJsonSchema: BIQObjectJsonSchema = {
 import { z } from 'zod';
 
 import { BIQJsonSchema } from '../../schemas/jsonSchema.js';
+import { DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
 import { DenoActorOptionsJsonSchema } from '../task/deno.js';
 
 import { WebhookBehaviorOptionsSchema, WebhookBehaviorOptionsJsonSchema } from './triggerConfig.js';
 
 export { TriggerEventSchema, type TriggerEvent } from '../../schemas/trigger.js';
 
+/**
+ * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
+ * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
+ */
 export const UniversalTriggerActorCodeSchema = z.string().min(1);
+
+/**
+ * The UniversalTriggerActor's `configuration.codeDir`: a project tree whose handler lives in
+ * `main.ts`, minus the paths the Deno bootstrap owns. This type has its own `universal-trigger`
+ * bootstrap variant, but that variant is the `deno-actor` one plus a trigger-aware handler — same
+ * entry chain, same shared kernel, and its own `main_test.ts` harness — so it reserves the same set.
+ */
+export const UniversalTriggerActorCodeDirSchema = makeCodeDirSchema({
+  requiredEntrypoint: 'main.ts',
+  reservedPaths: DENO_RESERVED_PATHS,
+});
 
 /**
  * The options for the UniversalTriggerActor (the interpolated `options` blob).

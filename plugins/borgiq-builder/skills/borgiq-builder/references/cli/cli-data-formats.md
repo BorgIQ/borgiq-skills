@@ -96,6 +96,7 @@ The same actor configuration fields exist in two different representations depen
 | `configuration.outputs` | `any` — JSON object | No | `string` — YAML string | No |
 | `configuration.credentials` | `Record<string, { type?, workspaceKey?, source? }>` — JSON object | No | `string` — YAML string | No |
 | `configuration.error` | `any` — JSON object | No | `string` — YAML string | No |
+| `configuration.codeDir` | `Array<{ path, content }>` — JSON array | No | `Array<{ path, content }>` — JSON array (**not** a YAML string) | No |
 | `configuration.code` | `string` — plain string | No | `string` — plain string | No |
 | `configuration.connection` | `{ type?: string \| string[], key? }` — JSON object | No | `{ type?: string \| string[], key? }` — JSON object | No |
 | `configuration.webhookTriggerKey` | `string` — plain string | No | `string` — plain string | No |
@@ -105,6 +106,8 @@ The same actor configuration fields exist in two different representations depen
 | `schemas.outputs` | `any` — JSON object | No | `string` — YAML string | No |
 
 **Key difference:** `configuration.options` is **required** in `CanvasActor` format (must be a YAML string, can be `""`) but **optional** in `ExportedCanvasData` format (can be omitted or `{}`).
+
+**`configuration.codeDir` is the same shape in both formats** — a JSON array of `{ path, content }` source files, one entry per file, never a YAML string and never interpolated. It is how Deno, Deno Test, Universal Trigger, Python, and React App actors carry their source. For the four code actors exactly one entry must be the entrypoint (`main.ts`, or `main.py` for Python); see [deno-actor.md → Code Files](../deno-actor.md#code-files) and [python-actor.md → Code Files](../python-actor.md#code-files). `configuration.code` is the single-string shape those actors used before multi-file support: documents that still carry it keep working, but write `codeDir` for new and edited actors, and never send both fields for the same actor.
 
 **When to use which format:**
 
@@ -217,7 +220,8 @@ Zod schema: `CanvasCreateWithDataInputSchema` with `ExportedCanvasDataSchema` fo
           // "vars": [{ "myVar": "${{ ... }}" }]   // JSON array
           // "credentials": { "key": { "workspaceKey": "..." } }
           // "error": { "if": false }
-          // "code": "..."                   // for DenoActor/PythonActor
+          // "codeDir": [{ "path": "main.ts", "content": "..." }]  // Deno/Python/Universal Trigger source files
+          //                                    // (main.py for PythonActor); array in BOTH formats
           // "webhookTriggerKey": "..."       // for WebhookTriggerActor
           // "webhookAuthorizationLevel": "public"  // for WebhookTriggerActor
           // "aiAgentToolActorIds": ["ACTR..."]     // for AiAgentActor
@@ -303,7 +307,7 @@ borgiq canvas-actors create <canvasSlugOrId> ACTR01kd6gr3vjxm2rs0k8s3fjq4nl --fi
     // "vars": "- myVar: ${{ ... }}"         // YAML string
     // "credentials": "key:\n  workspaceKey: ..."  // YAML string
     // "error": "if: false"                  // YAML string
-    // "code": "const x = 1; ..."            // plain string (DenoActor/PythonActor)
+    // "codeDir": [{ "path": "main.ts", "content": "..." }]  // JSON array, NOT a YAML string (Deno/Python/Universal Trigger)
     // "webhookTriggerKey": "01KD298..."      // plain string (WebhookTriggerActor)
     // "webhookAuthorizationLevel": "public"  // enum (WebhookTriggerActor)
     // "aiAgentToolActorIds": ["ACTR..."]     // string array (AiAgentActor)

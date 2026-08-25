@@ -348,7 +348,12 @@ generate_button_deno() {
         "sourcePorts": [{ "id": "SPRTdefault" }],
         "configuration": {
           "options": {},
-          "code": "const { message } = inputs;\n\nreturn {\n  processed: true,\n  result: message,\n  timestamp: new Date().toISOString(),\n};",
+          "codeDir": [
+            {
+              "path": "main.ts",
+              "content": "import type { Request, Response } from \"@borgiq/actors\";\n\nexport default async function receive(req: Request): Promise<Response> {\n  return {\n    results: {\n      processed: true,\n      result: req.inputs.message,\n      timestamp: new Date().toISOString(),\n    },\n  };\n}\n"
+            }
+          ],
           "inputs": {
             "message": "\${{ msg.$trigger_var.body }}"
           },

@@ -187,13 +187,15 @@ ACTR01processactor:
       param: ${{ msg.api_handler.queryParams.param }}
     options:
       allowNet: true
-    code: |
-      import type { Request, Response } from "@borgiq/actors";
-      export default async function receive(req: Request): Promise<Response> {
-        // Process the request
-        const result = await someOperation(req.inputs.param);
-        return { results: result };
-      }
+    codeDir:
+      - path: main.ts
+        content: |
+          import type { Request, Response } from "@borgiq/actors";
+          export default async function receive(req: Request): Promise<Response> {
+            // Process the request
+            const result = await someOperation(req.inputs.param);
+            return { results: result };
+          }
 ```
 
 ### 4. WebhookResponseActor (Return Response)
@@ -316,12 +318,14 @@ actors:
         query: ${{ msg.api_handler.queryParams }}
       options:
         allowNet: true
-      code: |
-        import type { Request, Response } from "@borgiq/actors";
-        export default async function receive(req: Request): Promise<Response> {
-          // Business logic here
-          return { results: { result: "success", data: req.inputs.query } };
-        }
+      codeDir:
+        - path: main.ts
+          content: |
+            import type { Request, Response } from "@borgiq/actors";
+            export default async function receive(req: Request): Promise<Response> {
+              // Business logic here
+              return { results: { result: "success", data: req.inputs.query } };
+            }
     schemas: {}
     id: ACTR01process
     position:
@@ -711,24 +715,26 @@ ACTR01usershandler:
       body: ${{ msg.users_api.body }}
     options:
       allowNet: true
-    code: |
-      import type { Request, Response } from "@borgiq/actors";
-      import { Signal, biqApi } from "@borgiq/actors";
+    codeDir:
+      - path: main.ts
+        content: |
+          import type { Request, Response } from "@borgiq/actors";
+          import { Signal, biqApi } from "@borgiq/actors";
 
-      export default async function receive(req: Request): Promise<Response> {
-        const { method, query, body } = req.inputs;
-        // Handle user CRUD — this actor only deals with users
-        let result;
-        if (method === 'get') {
-          result = await listUsers(query);
-        } else if (method === 'post') {
-          result = await createUser(body);
-        }
-        return {
-          results: result,
-          signal: Signal.webhookRespond({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: result }),
-        };
-      }
+          export default async function receive(req: Request): Promise<Response> {
+            const { method, query, body } = req.inputs;
+            // Handle user CRUD — this actor only deals with users
+            let result;
+            if (method === 'get') {
+              result = await listUsers(query);
+            } else if (method === 'post') {
+              result = await createUser(body);
+            }
+            return {
+              results: result,
+              signal: Signal.webhookRespond({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: result }),
+            };
+          }
 
 # Tickets API — same pattern, separate pipeline
 ACTR01ticketswebhook:

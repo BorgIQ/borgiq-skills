@@ -50,7 +50,7 @@ Then:
 
 Adding an actor follows the three-edit rule:
 
-1. Mint an ID with `borgiq generate id actor` and create `actors/<category>/<type>/<id>/actor.yaml` plus canonical `code/` files when applicable.
+1. Mint an ID with `borgiq generate id actor` and create `actors/<category>/<type>/<id>/actor.yaml` plus its `code/` entrypoint (`main.ts` / `main.py`, or App's three fixed files) when the type carries code.
 2. Add its `actors[]` index entry in `canvas.yaml`.
 3. Add exactly one `graph.nodes` position entry in `canvas.yaml`.
 4. Wire it in `graph.edges`; mint edge IDs with `borgiq generate id edge` and use a `sourcePortId` declared by the source actor.
@@ -59,7 +59,16 @@ Removing an actor is the inverse: delete its folder, index entry, node, and all 
 
 ### Edit code in a bundle
 
-For Deno, Deno Test, Universal Trigger, Python, and App actors, edit the canonical files under the actor's `code/` directory. Keep `configuration.codeDir: code` in `actor.yaml`; do not add inline code or helper files. Update `configuration.inputs`, schemas, and downstream expressions if the code contract changes.
+Edit the files under the actor's `code/` directory, never inline in `actor.yaml`; keep the marker `configuration.codeDir: code`. Update `configuration.inputs`, schemas, and downstream expressions if the code contract changes.
+
+Deno, Deno Test, Universal Trigger, and Python actors hold a project tree there — the required entrypoint (`main.ts`, or `main.py` for Python) at the root of `code/`, plus whatever helper files and folders you add:
+
+- **Split a growing entrypoint** by adding files beside it and importing them relatively: `import { format } from './lib/format.ts'` in Deno (extension included), `from lib.format import format` in Python (a package folder needs `__init__.py`). Imports may not leave `code/`.
+- **Deleting a file from the tree removes it from the actor** on the next push — that is how you retire a helper. Nothing stale is left behind to be imported.
+- **Do not rename or delete the entrypoint.** `bundle validate` rejects a tree without it; if the bundle predates multi-file support it has `code/mod.ts` (or `mod.py`), which you rename to `main.ts` (`main.py`) once.
+- **Reserved filenames** (`server.ts`, `handler.ts`, `actor.ts`, `deno.json`, `shared/…`, and the Python equivalents) are rejected — see [Canvas Bundles → Code actor project trees](cli/canvas-bundles.md#code-actor-project-trees) for the full lists, size caps, and version requirements.
+
+App actors keep their three fixed files (`index.html`, `styles.css`, `script.js`); a React App actor's `code/` is a whole Vite project.
 
 ## Semantic rules for any edit (bundle or direct)
 
@@ -107,13 +116,35 @@ msgVar: gpt52_response
 # Reference: ${{ msg.gpt52_response.body }}
 ```
 
-### Update inline DenoActor/PythonActor code
+### Update DenoActor/PythonActor code in a document
 
 1. Update `configuration.inputs` when input names change.
-2. Update inline `configuration.code`.
+2. Edit the entry in `configuration.codeDir` whose `path` is the file you mean — the entrypoint is `main.ts` (`main.py` for Python). Add an entry to introduce a helper file; drop an entry to retire one.
 3. Ensure variable access/destructuring matches the inputs.
 4. Update schemas, returned output, and downstream consumers when the result shape changes.
-5. Validate; use `--skip-typecheck` only for faster intermediate iterations.
+5. Validate. `borgiq validate` checks that `codeDir` is a list of `{path, content}` files containing the entrypoint; the BorgIQ API is the authority on the rest.
+
+A document written before multi-file support carries a single `configuration.code` string instead. It still runs, and the platform converts it; to edit it as a file list, replace the field:
+
+```yaml
+# Before
+configuration:
+  options: {}
+  code: |
+    import type { Request, Response } from "@borgiq/actors";
+    export default async function receive(req: Request): Promise<Response> { … }
+
+# After
+configuration:
+  options: {}
+  codeDir:
+    - path: main.ts
+      content: |
+        import type { Request, Response } from "@borgiq/actors";
+        export default async function receive(req: Request): Promise<Response> { … }
+```
+
+Never send both fields for the same actor.
 
 ### Common direct-document changes
 

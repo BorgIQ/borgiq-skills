@@ -34,7 +34,9 @@ borgiq bundle validate <dir>
 # Add --strict when requested or before deployment to make warnings fatal.
 ```
 
-Bundle validation is offline and reports errors/warnings against bundle-relative paths such as `canvas.yaml`, `actors/.../actor.yaml`, or `actors/.../code/mod.ts`. Fix the named file and rerun. Consult `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/canvas-bundles.md` for the three-edit and `codeDir` contracts.
+Bundle validation is offline and reports errors/warnings against bundle-relative paths such as `canvas.yaml`, `actors/.../actor.yaml`, or `actors/.../code/main.ts`. Fix the named file and rerun. Consult `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/canvas-bundles.md` for the three-edit and `codeDir` contracts.
+
+Code actors (Deno, Deno Test, Universal Trigger, Python) hold a project tree under `code/`, so validation additionally reports a missing entrypoint (`code/main.ts`, or `code/main.py` for Python), a filename reserved by the BorgIQ runtime, and an actor that carries both inline `configuration.code` and `code/` files. [Canvas Bundles → Code actor `code/` errors](../borgiq-builder/references/cli/canvas-bundles.md#code-actor-code-errors) lists each message with its fix; a bundle pulled before multi-file support needs its `code/mod.ts` renamed to `code/main.ts`.
 
 For a direct YAML/YML document:
 

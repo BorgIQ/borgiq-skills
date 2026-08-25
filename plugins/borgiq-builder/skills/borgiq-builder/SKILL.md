@@ -20,6 +20,7 @@ Build Actors and Triggers that power BorgIQ automation workflows.
 - [BorgIQ Expressions](#borgiq-expressions)
 - [Context Variables](#context-variables)
 - [Q-lib Functions](#q-lib-functions)
+- [Actor Source Files](#actor-source-files)
 - [Actor Memory](#actor-memory)
 - [Authentication](#authentication)
 - [Actor ID, Validation, and Post-Processing](#actor-id-validation-and-post-processing)
@@ -495,6 +496,36 @@ For error handling patterns (continueOnError, split/collect, fork/forkJoin), see
 Access utility functions via `Q.*`. See [references/q-lib.md](references/q-lib.md) for complete reference.
 
 **Common functions:** `Q.toJSON()`, `Q.toBase64()`, `Q.isHTTPStatusInRange()`, `Q.lo.*` (Lodash), `Q.dateFns.*` (date-fns)
+
+## Actor Source Files
+
+Code-running actors — **DenoActor, DenoTestActor, UniversalTriggerActor, PythonActor** — carry their source in `configuration.codeDir`: a list of `{path, content}` files forming a small project, a sibling of `options` and **never interpolated**.
+
+```yaml
+configuration:
+  options: {}
+  codeDir:
+    - path: main.ts          # required entrypoint (main.py for PythonActor)
+      content: |
+        import type { Request, Response } from "@borgiq/actors";
+
+        import { format } from "./lib/format.ts";
+
+        export default async function receive(req: Request): Promise<Response> {
+          return { results: format(req.inputs) };
+        }
+    - path: lib/format.ts
+      content: |
+        export const format = (inputs: unknown) => ({ inputs });
+```
+
+- Exactly one entry must be the **entrypoint**: `main.ts` for the three Deno-family types, `main.py` for PythonActor. Everything else is yours to arrange in folders.
+- Import your own files relatively — `./lib/format.ts` in Deno (extension included), `from lib.format import format` in Python (packages need `__init__.py`). Imports may not leave the actor's own files.
+- `${{ }}` inside source is literal text, never an expression: pass runtime values through `configuration.inputs` and read `req.inputs`.
+- Some filenames are reserved by the runtime, and the tree is capped at 200 files / 1 MiB. Per-type details: [deno-actor.md → Code Files](references/deno-actor.md#code-files), [python-actor.md → Code Files](references/python-actor.md#code-files), [universal-trigger-actor.md → Code Files](references/universal-trigger-actor.md#code-files). In a canvas bundle the same tree is real files under the actor's `code/` directory ([canvas-bundles.md](references/cli/canvas-bundles.md#code-actor-project-trees)).
+- Actors written before multi-file support carry a single `configuration.code` string instead. They keep running and convert on the next save; write `codeDir` for anything new, and never set both fields.
+
+(ReactAppTriggerActor also uses `configuration.codeDir`, for a whole Vite project — see the `borgiq-react-app-builder` spoke. AppTriggerActor keeps `configuration.options.html` / `.css` / `.script`.)
 
 ## Actor Memory
 
