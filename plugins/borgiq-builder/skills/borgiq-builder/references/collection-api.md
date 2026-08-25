@@ -30,13 +30,13 @@ All operations go through a single `POST /collections` runtime endpoint with an 
 
 The Collection API provides persistent, structured storage organized into named collections. It is the recommended storage solution for all new workflows, including queue semantics via key ordering and conditional writes.
 
-**Built on DynamoDB:** Collections are backed by AWS DynamoDB. Each collection is a partition in a DynamoDB table with the item `key` as the sort key. This means:
-- **Keys are sorted lexicographically** — prefix queries like `user:*` and range queries like `>=user:U003` are efficient and fast
+**Built on DynamoDB:** Collections are backed by AWS DynamoDB. All collections of all workspaces live in **one shared table**: a collection is one **partition key** (`<org>#<workspace>#<slug>`, built by the API layer) and each item's `key` is the **sort key**, stored verbatim. This means:
+- **Keys are sorted lexicographically** (UTF-8 byte order) — prefix queries like `user:*` and range queries like `>=user:U003` are efficient and fast
 - **Design keys hierarchically** using delimiters (e.g., `app:R001:C004`) to enable efficient prefix-based access patterns
-- **One app = one collection** — model all of an app's entity types in a single collection with key prefixes, not one collection per entity type. See [Single-Collection Design](#single-collection-design)
-- **Single-item operations are strongly consistent** — `getItem`, `putItem`, `updateItem`, `deleteItem` always return the latest data
+- **One app = one collection** — model all of an app's entity types in a single collection with key prefixes, not one collection per entity type. See [Single-Collection Design](#single-collection-design) and its [capacity model](#capacity-model-what-one-collection-carries)
+- **Writes are durable immediately; reads are eventually consistent.** The platform does not request strongly consistent reads, so `getItem`, `query`, and `batchGetItem` use DynamoDB's default — usually current within milliseconds, but a `getItem` issued right after a `putItem`/`updateItem` *can* return the previous version. Use the value a write returns instead of re-reading it; use `transactGet` when you need a consistent snapshot
 - **Transactions are ACID** — `transactWrite` is all-or-nothing across up to 100 items, even across collections
-- **No full-table scans** — queries always operate on a single collection (partition), keeping them fast regardless of total data size
+- **No full-table scans** — queries always operate on a single collection (partition key), keeping them fast regardless of total data size
 
 **Collection Management:** Create, list, update, delete collections
 
@@ -50,7 +50,7 @@ The Collection API provides persistent, structured storage organized into named 
 
 ## Single-Collection Design
 
-**Default rule: one app, one collection.** Model *all* of an app's entity types in a single collection and separate them with key prefixes — do **not** create one collection per entity type. Collections are DynamoDB partitions inside one table, not separate tables, so this is the platform's form of DynamoDB **single-table design**, and it is the default for every app you build. Only split an app across multiple collections when a **security/access boundary** requires it or the **user explicitly asks** for separate collections (see [When multiple collections are justified](#when-multiple-collections-are-justified)).
+**Default rule: one app, one collection.** Model *all* of an app's entity types in a single collection and separate them with key prefixes — do **not** create one collection per entity type. BorgIQ is itself single-table: every collection in every workspace lives in one DynamoDB table, keyed `PK = <org>#<workspace>#<collection>`, `SK = <item key>`. A collection is therefore **one partition key**, and "one app = one collection" means the whole app lives under one partition key. That is the right default for what BorgIQ apps are — internal tools, up to ~100,000 users — and the [capacity model](#capacity-model-what-one-collection-carries) below gives the numbers and the three design rules that keep it true. Only split an app across multiple collections when a **security/access boundary** requires it, the **user explicitly asks** for separate collections, or sustained write throughput genuinely approaches the partition limit (see [When multiple collections are justified](#when-multiple-collections-are-justified)).
 
 **Wrong — one collection per entity type:**
 
@@ -63,17 +63,18 @@ tt-activity    activity records
 tt-meta        schema version + counters
 ```
 
-**Right — one collection, one key prefix per entity type:**
+**Right — one collection, one key prefix per entity type, a `$meta` manifest on top** (shown in the order the UI lists them):
 
 ```
 Collection: ticketing
+  $meta                            manifest: lists every entity prefix below — always the first row
+  $migration:<id>                  migration ledger
+  $counter:ticketNumber            atomic counters
+  activity:<ticketId>:<at>         activity, sorted under its ticket
+  comment:<ticketId>:<createdAt>   comments, sorted under their ticket
+  label:<id>                       label records
   ticket:<id>                      ticket records
   user:<id>                        user records
-  label:<id>                       label records
-  comment:<ticketId>:<createdAt>   comments, sorted under their ticket
-  activity:<ticketId>:<at>         activity, sorted under its ticket
-  meta:schema                      schema version
-  meta:counters                    counters
 ```
 
 Everything a separate collection gives you, a key prefix gives you too: `query { collection: "ticketing", expression: "ticket:*" }` is exactly as fast and exactly as isolated as `query { collection: "tt-tickets", expression: "*" }` — both are a single-partition prefix read.
@@ -82,25 +83,117 @@ Everything a separate collection gives you, a key prefix gives you too: `query {
 
 - **`<entity>:<id>`** for top-level entities: `ticket:01HQX...`, `user:demo-maya`, `label:bug`.
 - **Hierarchical keys for child entities:** `comment:<ticketId>:<createdAt>` sorts a ticket's comments together in time order — one prefix query (`comment:ticket-42:*`) fetches them, no index needed.
-- **`meta:` / `config:` prefixes for singletons:** schema version, counters, settings rows.
+- **`config:` prefix for app-level lookup rows** (settings, status enums). Schema version, counters, and the migration ledger are *system* rows and live under `$` (below), not under an entity prefix.
 - **Always query by entity prefix, never `*`.** In a shared collection a bare `*` returns every entity type. `expression: "ticket:*"` is the equivalent of `SELECT * FROM tickets`.
-- **Reserve `_`-prefixed keys for operational rows** (e.g. the `_migration:<id>` ledger — see [collection-migrations.md](collection-migrations.md)); entity prefixes never start with `_`.
+- **Reserve the `$` prefix for system rows** (`$meta`, `$migration:<id>`, `$counter:<name>` — see [The `$` system namespace and the `$meta` manifest](#the--system-namespace-and-the-meta-manifest)); entity prefixes are lowercase words and never start with `$`.
+
+### The `$` system namespace and the `$meta` manifest
+
+A shared collection has a discoverability problem that a one-entity collection doesn't: the Collections UI (and a bare `query` with `expression: "*"`) lists items in **UTF-8 byte order of the key, one page at a time**. In a ticketing collection the first page is all `activity:*` rows, and nothing tells you that `comment:`, `label:`, `ticket:`, and `user:` rows exist further down — a full listing of a large collection is exactly the scan you don't want to run. The fix is a standard, always-present **manifest item that sorts before every entity row**, so it is the first thing anyone sees and tells them which prefixes to search.
+
+**Rule: every app collection has a `$meta` item, and all system rows use the `$` prefix.**
+
+`$` is chosen deliberately. Keys sort by UTF-8 bytes, and `$` (0x24) sorts before digits (`0` = 0x30), uppercase (`A` = 0x41), underscore (`_` = 0x5F), and lowercase (`a` = 0x61) — so `$`-rows are always the first rows on page one, no matter how entities are keyed. The alternatives all fail somewhere: `_` sorts *after* digits and uppercase (so a ULID-keyed or uppercase row beats it); `!`, `-`, `&`, `%`, and `*` are YAML-special at the start of a plain scalar and break CollectionActor configs; `>`, `<`, `|`, and a trailing `*` are query-expression operators; `#` is not allowed in keys. `$` is safe in YAML plain scalars, JS template literals (only `${` is special), Python, and query expressions (`$*` lists the whole system namespace).
+
+> **"But AWS says avoid `$` in DynamoDB."** That guidance is about attribute *names* (column names), which need `ExpressionAttributeNames` aliases when they contain special characters. An item key is an attribute *value* — the `SK` value in the platform's table — and is never used as a name or parsed anywhere: it only ever appears as `SK: "$meta"` in a put or as the `:sk` value of `begins_with(#sk, :sk)` in a query. A leading `#`, `$`, or `%` in a sort-key *value* is the standard DynamoDB technique for pinning rows to the top of a partition; `#` is reserved by the platform as its partition-key delimiter, which leaves `$`.
+
+| Key | Purpose | Written by |
+|-----|---------|-----------|
+| `$meta` | **Required.** The collection manifest: app name, applied `schemaVersion`, and the `entities` index of every key prefix in the collection | Migration runner, at the end of **every** invoke, with `overwrite: true` |
+| `$migration:<id>` | Migration ledger — one row per applied migration | Migration runner |
+| `$counter:<name>` | Atomic counters (`updateItem` + `atomicCounters`), e.g. `$counter:ticketNumber` | App code |
+| `$<anything-else>` | Other operational singletons (locks, cursors, cached config) | App code |
+
+`$` rows are **never entity data** and never appear in entity prefix queries (`ticket:*`), so they cost nothing at read time.
+
+**`$meta` shape:**
+
+```json
+{
+  "app": "ticketing",
+  "schemaVersion": 3,
+  "entities": {
+    "ticket":   { "prefix": "ticket:",   "key": "ticket:<ulid>",                  "description": "Tickets" },
+    "user":     { "prefix": "user:",     "key": "user:<id>",                      "description": "Users and demo users" },
+    "label":    { "prefix": "label:",    "key": "label:<slug>",                   "description": "Ticket labels" },
+    "comment":  { "prefix": "comment:",  "key": "comment:<ticketId>:<createdAt>", "description": "Comments, sorted under their ticket", "parent": "ticket" },
+    "activity": { "prefix": "activity:", "key": "activity:<ticketId>:<at>",       "description": "Activity log, sorted under its ticket", "parent": "ticket" }
+  },
+  "system": {
+    "$migration:": "Applied migration ledger",
+    "$counter:":   "Atomic counters (ticketNumber)"
+  },
+  "labels": { "type": "entity name (ticket, user, …)", "status": "ticket status", "owner": "assignee id" },
+  "updatedAt": "2026-08-20T10:00:00.000Z"
+}
+```
+
+Rules for the manifest:
+
+- **It is derived from code, not edited by users.** The migration runner holds an `ENTITIES` constant and rewrites `$meta` with `putItem` + `options.overwrite: true` at the end of every invoke — applied migrations or not. This is the one seed-style write where `overwrite: true` is correct: clobbering a manifest with a fresher copy of itself is the point. (Seed *data* rows keep the create-only default — see [collection-migrations.md](collection-migrations.md).)
+- **Adding an entity prefix means updating `ENTITIES` and re-invoking the runner.** A prefix that isn't in `$meta` is invisible to everyone who opens the collection. Treat "new key prefix, manifest not updated" as a bug.
+- **`schemaVersion` is the *applied* version**, written after migrations succeed. App code that needs to refuse traffic until migrations run (`MIGRATIONS_PENDING`) reads `$meta` and compares `schemaVersion` to the version it was built against; a missing `$meta` means version 0.
+- **Keep the manifest small** — prefixes, key patterns, one-line descriptions, label meanings. No counts (they go stale), no data.
+
+**Access pattern — the same three steps everywhere:**
+
+1. **Read `$meta`.** In the UI it is the first row of the collection. In code: `getItem { collection, key: "$meta" }`.
+2. **Pick a prefix from `entities`.** Every entity the app stores is listed; nothing else needs to be discovered by scanning.
+3. **Prefix-query it.** UI: type `ticket:*` in the expression box. Code: `query { collection, expression: "ticket:*" }`.
+
+```typescript
+// Enumerate a collection without scanning it: manifest first, then one prefix query per entity.
+const manifest = await collectionsApi<GetItemResult<{ entities: Record<string, { prefix: string }> }>>({
+  action: "getItem", collection: "ticketing", key: "$meta",
+});
+for (const [name, entity] of Object.entries(manifest?.value.entities ?? {})) {
+  const page = await collectionsApi<QueryResult>({
+    action: "query", collection: "ticketing", expression: `${entity.prefix}*`, options: { limit: 25 },
+  });
+  console.log(name, page.count, page.lastKey ? "(more)" : "");
+}
+```
 
 ### Labels in a shared collection
 
-A collection has at most **5 label slots**, shared by every entity type in it. Choose generic label names that work across entities (`type`, `status`, `owner`) rather than entity-specific ones. A `type` label whose value is the entity name (`ticket`, `user`, …) gives you a GSI listing per entity type as an alternative access path when you need something other than key order.
+A collection has at most **15 label slots** (`MAX_LABEL_SLOTS`), shared by every entity type in it. Each slot is a physical Global Secondary Index on the shared table, so the cap is a property of the table, not a per-tenant setting. Fifteen is enough that slot *count* is rarely the constraint in single-collection design; write cost is (every label is an extra GSI write per item — see the [capacity model](#capacity-model-what-one-collection-carries)). Choose generic label names that work across entities (`type`, `status`, `owner`) rather than entity-specific ones, and declare only the ones the app actually filters on. A `type` label whose value is the entity name (`ticket`, `user`, …) gives you a GSI listing per entity type as an alternative access path when you need something other than key order.
 
 ### Why one collection
 
-- **It is DynamoDB best practice.** Single-table design keeps related data co-located and readable in one round trip. A collection is a partition, so "one collection per entity" buys no schema, index, or isolation benefit — it only fragments the data.
+- **It matches how the platform is built.** Single-table design keeps related data co-located and readable in one round trip. A collection is one partition key in a table that is already shared by every workspace, so "one collection per entity" buys no schema, index, or isolation benefit — it only fragments the data across partition keys you then have to provision and discover separately.
 - **Transactions and batch operations stay natural.** `transactWrite` across a ticket and its activity row, or `batchGetItem` for a ticket plus its assignee, address one collection with different key prefixes.
-- **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)).
-- **Workspace budget.** A workspace allows at most 100 collections; an app that burns six slots for one logical database does not scale to many apps.
+- **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)). The `$meta` manifest it writes is the single place that says what the collection contains.
+- **Collection budget.** The API reference lists a per-workspace collection limit (100, plan-configurable). Even where it is not binding, an app that burns six slots for one logical database is waste.
+
+### Capacity model — what one collection carries
+
+A collection is one DynamoDB partition key, so it inherits DynamoDB's per-partition physics. Design against these numbers, not against user counts:
+
+| Fact | Number | Design consequence |
+|------|--------|--------------------|
+| Partition throughput ceiling | ~**3,000 RCU / 1,000 WCU per second** per partition key | This is a *burst* ceiling. DynamoDB adaptive capacity splits a hot item collection across partitions by key range over time (the table has no LSIs, so splitting is allowed), but it is reactive — a sudden spike still throttles first. |
+| Write cost | **1 WCU per KB written**, rounded up, per item | A 4 KB item costs 4 WCU per `putItem`/`updateItem`. Item size, not write count, is usually what burns the budget. |
+| Read cost | **0.5 RCU per 4 KB** (eventually consistent, the platform default) | A 25-item page of 2 KB items is ~7 RCU. Reads almost never bind first. |
+| Labels | Each label on an item is an extra GSI write, on a GSI partition that is also per-collection (up to 15 slots) | An item with 5 labels costs ~6× the write capacity of the same item with none; all 15 would be ~16×. The cap is not the budget — the per-write cost is. |
+| Single hot item | One item cannot be split — it has its own ~1,000 writes/s ceiling | Counters and "last updated" singletons are per-item hotspots. |
+| Item size | **400 KB** max | An entity that embeds a growing array (a ticket holding its comments) will hit this *and* pay full-size WCU on every append. |
+| Collection size | No cap (no LSIs) | Size is never a reason to split. |
+
+**Back-of-envelope for the target profile** — an internal app, 100,000 users. Assume a generous 5% concurrently active (5,000), each writing once a minute, 2 KB items with 2 labels: ~85 writes/s × 2 KB × 3 (base + 2 GSIs) ≈ **510 WCU** — half the ceiling, before adaptive capacity does anything. Reads: the same 5,000 users each refreshing a 25-item list every 30 s ≈ 165 queries/s × ~7 RCU ≈ **1,150 RCU**, well under 3,000. One collection carries this with room to spare. What breaks it is design, not user count:
+
+1. **Keep items small; never embed growing arrays.** Children are rows under a hierarchical key (`comment:<ticketId>:<createdAt>`), each written once at its own size. Embedding them in the parent rewrites the whole parent on every append, and `updateItem` replaces nested objects wholesale (see [Nested Object Behavior](#nested-object-behavior)).
+2. **Label only what you query by.** Every label is a GSI write. The slot cap is 15, but declare only the two or three labels the UI actually filters on; use key prefixes and ranges for everything else.
+3. **Don't funnel every action into one hot item.** A `$counter:ticketNumber` hit per *create* is fine (hundreds/s). A per-request `updateItem` on one shared singleton (a global "last activity" row, a `$meta` you touch from app code) is not — keep per-user state in `user:<id>` rows, and leave `$meta` to the migration runner.
+
+**When you actually outgrow it:** sustained writes approaching ~1,000 KB/s on one collection for minutes at a time (observed as `THROUGHPUT_EXCEEDED` (429) on writes — distinct from `RATE_LIMITED`, which is the platform's per-org request cap). Then shard **by collection** — `ticketing-0` … `ticketing-3` chosen by a hash of the entity id, or move the single hottest entity type into its own collection — and give each shard its own `$meta`. That is the only throughput reason to have more than one collection per app, and the [Queue Pattern](#queue-pattern-using-collections) is the documented instance of it.
+
+**Read-after-write:** because reads are eventually consistent, don't write and immediately `getItem` the same key to "confirm" — use the `{ key, value }` the write returns. Use `conditions` for correctness under concurrency and `transactGet` when a consistent multi-item snapshot matters.
 
 ### When multiple collections are justified
 
 - **Security / access isolation** — data that must sit behind a different exposure or permission boundary than the rest of the app.
 - **The user explicitly asks** for separate collections.
+- **Sustained write throughput near the partition limit** (~1,000 WCU/s on one collection, see the [capacity model](#capacity-model-what-one-collection-carries)) — shard by collection, one `$meta` per shard. Internal apps at ~100k users do not reach this without a design mistake; fix the design (item size, labels, hot singletons) before sharding.
 - **Documented infrastructure patterns** — the [Queue Pattern](#queue-pattern-using-collections) keeps a `queue-<name>` collection because a high-churn queue benefits from its own lifecycle and can be sharded across collections for throughput. Standalone workflow state (e.g. a `callback-tokens` collection for one workflow) is already single-collection design.
 
 If none of these apply and you are about to call `createCollection` a second time for the same app, redesign the keys instead.
@@ -118,7 +211,7 @@ Creates a new named collection.
 | `slug` | string | Yes | Unique slug for the collection. Must match `^[a-z0-9_-]+$` and cannot start with `__` |
 | `name` | string | Yes | Display name for the collection |
 | `description` | string | No | Optional description |
-| `labels` | array of strings | No | Optional labels, up to 5 |
+| `labels` | array of strings | No | Optional labels, up to 15 (`MAX_LABEL_SLOTS`) |
 
 **Example:**
 ```yaml
@@ -1566,7 +1659,7 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | `INVALID_COLLECTION_SLUG` | 400 | Collection slug format is invalid |
 | `BATCH_LIMIT_EXCEEDED` | 400 | More than 25 items in batch write or 100 in batch get |
 | `QUERY_LIMIT_EXCEEDED` | 400 | Limit exceeds 1000 |
-| `LABEL_LIMIT_EXCEEDED` | 400 | Adding labels would exceed 5 active labels |
+| `LABEL_LIMIT_EXCEEDED` | 400 | Adding labels would exceed 15 active labels (`MAX_LABEL_SLOTS`). A collection created before the limit was raised from 5 keeps its original slot count until an operator runs the widen migration — hitting this at 5 on an older collection means that migration has not run yet |
 | `LABEL_NOT_FOUND` | 400 | Label name does not exist in collection |
 | `LABEL_DELETING` | 409 | Label is already being deleted |
 | `COLLECTION_NOT_FOUND` | 404 | Collection does not exist in the registry |
@@ -1581,6 +1674,7 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | `TRANSACTION_LIMIT_EXCEEDED` | 400 | More than 100 items in a transaction |
 | `TRANSACTION_DUPLICATE_ITEM` | 400 | Same collection+key appears more than once in a transaction |
 | `RATE_LIMITED` | 429 | Too many requests for this org/workspace |
+| `THROUGHPUT_EXCEEDED` | 429 | DynamoDB throttled the partition (a collection's per-partition capacity, see the [capacity model](#capacity-model-what-one-collection-carries)); retry after a brief delay |
 | `RESULT_TOO_LARGE` | 413 | Query result exceeds 1MB |
 
 ---
@@ -1593,7 +1687,7 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | Item key | 1-256 bytes (UTF-8), any characters except `#` |
 | Label name | 1-64 chars, regex `/^[a-zA-Z0-9_-]+$/` |
 | Label value | Any string or `null` |
-| Labels per collection | Max 5 |
+| Labels per collection | Max 15 (`MAX_LABEL_SLOTS`; one GSI per slot, `GSI-L1`…`GSI-L15`) |
 | Query limit | 1-1000 (default 100) |
 | Batch get size | Max 100 items |
 | Batch write size | Max 25 items |
@@ -1808,7 +1902,7 @@ Each CollectionActor action maps to a specific DynamoDB operation. Understanding
 | Action | DynamoDB Command | Behavior |
 |--------|------------------|----------|
 | `putItem` | `PutCommand` | **Full item replacement.** Overwrites the entire item including all fields. |
-| `getItem` | `GetCommand` (or `QueryCommand` if label specified) | **Strongly consistent read.** Returns the full item or null. |
+| `getItem` | `GetCommand` (or `QueryCommand` if label specified) | **Eventually consistent read** (DynamoDB default; the platform does not set `ConsistentRead`). Returns the full item or null. |
 | `updateItem` | `UpdateCommand` with `UpdateExpression` | **Shallow field-level merge.** Only specified top-level fields are updated; unmentioned fields are preserved. |
 | `deleteItem` (single key) | `DeleteCommand` | Deletes one item. Supports conditions. |
 | `deleteItem` (multiple keys) | `BatchWriteCommand` | Deletes up to 25 items per batch. **No conditions support.** |

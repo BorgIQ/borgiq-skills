@@ -4,7 +4,7 @@ CollectionActor is a **Task Actor** that provides YAML-based access to the [Coll
 
 For full API documentation including actions, parameters, DynamoDB behavior, conditions, concurrent update patterns, transactions, batch operations, error codes, and code examples (Deno/Python), see [collection-api.md](collection-api.md).
 
-> **One collection per app** — model all of an app's entity types in a **single collection** with key prefixes (`ticket:*`, `user:*`, `meta:*`), never one collection per entity type. This is DynamoDB single-table design; split into multiple collections only for a security boundary or when the user explicitly asks. See [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design).
+> **One collection per app** — model all of an app's entity types in a **single collection** with key prefixes (`ticket:*`, `user:*`), never one collection per entity type. This is DynamoDB single-table design; split into multiple collections only for a security boundary or when the user explicitly asks. Every app collection also carries a **`$meta` manifest** row (the `$` prefix sorts first in the UI) listing its entity prefixes, so the collection can be navigated without scanning it. See [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design).
 
 > **Collections must be created before use** — a `putItem`/`query` against a slug that was never created returns `COLLECTION_NOT_FOUND`. Any app backed by collections needs an idempotent **provisioning/migration** step (create the app's collection + seed defaults, safe to re-run per deploy and per workspace). See [collection-migrations.md](collection-migrations.md) for the migration-manager pattern.
 
