@@ -156,7 +156,7 @@ for (const [name, entity] of Object.entries(manifest?.value.entities ?? {})) {
 
 ### Labels in a shared collection
 
-A collection has at most **5 label slots**, shared by every entity type in it. Choose generic label names that work across entities (`type`, `status`, `owner`) rather than entity-specific ones. A `type` label whose value is the entity name (`ticket`, `user`, …) gives you a GSI listing per entity type as an alternative access path when you need something other than key order.
+A collection has at most **15 label slots** (`MAX_LABEL_SLOTS`), shared by every entity type in it. Each slot is a physical Global Secondary Index on the shared table, so the cap is a property of the table, not a per-tenant setting. Fifteen is enough that slot *count* is rarely the constraint in single-collection design; write cost is (every label is an extra GSI write per item — see the [capacity model](#capacity-model-what-one-collection-carries)). Choose generic label names that work across entities (`type`, `status`, `owner`) rather than entity-specific ones, and declare only the ones the app actually filters on. A `type` label whose value is the entity name (`ticket`, `user`, …) gives you a GSI listing per entity type as an alternative access path when you need something other than key order.
 
 ### Why one collection
 
@@ -174,7 +174,7 @@ A collection is one DynamoDB partition key, so it inherits DynamoDB's per-partit
 | Partition throughput ceiling | ~**3,000 RCU / 1,000 WCU per second** per partition key | This is a *burst* ceiling. DynamoDB adaptive capacity splits a hot item collection across partitions by key range over time (the table has no LSIs, so splitting is allowed), but it is reactive — a sudden spike still throttles first. |
 | Write cost | **1 WCU per KB written**, rounded up, per item | A 4 KB item costs 4 WCU per `putItem`/`updateItem`. Item size, not write count, is usually what burns the budget. |
 | Read cost | **0.5 RCU per 4 KB** (eventually consistent, the platform default) | A 25-item page of 2 KB items is ~7 RCU. Reads almost never bind first. |
-| Labels | Each label on an item is an extra GSI write, on a GSI partition that is also per-collection | An item with 5 labels costs ~6× the write capacity of the same item with none. |
+| Labels | Each label on an item is an extra GSI write, on a GSI partition that is also per-collection (up to 15 slots) | An item with 5 labels costs ~6× the write capacity of the same item with none; all 15 would be ~16×. The cap is not the budget — the per-write cost is. |
 | Single hot item | One item cannot be split — it has its own ~1,000 writes/s ceiling | Counters and "last updated" singletons are per-item hotspots. |
 | Item size | **400 KB** max | An entity that embeds a growing array (a ticket holding its comments) will hit this *and* pay full-size WCU on every append. |
 | Collection size | No cap (no LSIs) | Size is never a reason to split. |
@@ -182,7 +182,7 @@ A collection is one DynamoDB partition key, so it inherits DynamoDB's per-partit
 **Back-of-envelope for the target profile** — an internal app, 100,000 users. Assume a generous 5% concurrently active (5,000), each writing once a minute, 2 KB items with 2 labels: ~85 writes/s × 2 KB × 3 (base + 2 GSIs) ≈ **510 WCU** — half the ceiling, before adaptive capacity does anything. Reads: the same 5,000 users each refreshing a 25-item list every 30 s ≈ 165 queries/s × ~7 RCU ≈ **1,150 RCU**, well under 3,000. One collection carries this with room to spare. What breaks it is design, not user count:
 
 1. **Keep items small; never embed growing arrays.** Children are rows under a hierarchical key (`comment:<ticketId>:<createdAt>`), each written once at its own size. Embedding them in the parent rewrites the whole parent on every append, and `updateItem` replaces nested objects wholesale (see [Nested Object Behavior](#nested-object-behavior)).
-2. **Label only what you query by.** Every label is a GSI write. Declare the two or three labels the UI actually filters on; use key prefixes and ranges for everything else.
+2. **Label only what you query by.** Every label is a GSI write. The slot cap is 15, but declare only the two or three labels the UI actually filters on; use key prefixes and ranges for everything else.
 3. **Don't funnel every action into one hot item.** A `$counter:ticketNumber` hit per *create* is fine (hundreds/s). A per-request `updateItem` on one shared singleton (a global "last activity" row, a `$meta` you touch from app code) is not — keep per-user state in `user:<id>` rows, and leave `$meta` to the migration runner.
 
 **When you actually outgrow it:** sustained writes approaching ~1,000 KB/s on one collection for minutes at a time (observed as `THROUGHPUT_EXCEEDED` (429) on writes — distinct from `RATE_LIMITED`, which is the platform's per-org request cap). Then shard **by collection** — `ticketing-0` … `ticketing-3` chosen by a hash of the entity id, or move the single hottest entity type into its own collection — and give each shard its own `$meta`. That is the only throughput reason to have more than one collection per app, and the [Queue Pattern](#queue-pattern-using-collections) is the documented instance of it.
@@ -211,7 +211,7 @@ Creates a new named collection.
 | `slug` | string | Yes | Unique slug for the collection. Must match `^[a-z0-9_-]+$` and cannot start with `__` |
 | `name` | string | Yes | Display name for the collection |
 | `description` | string | No | Optional description |
-| `labels` | array of strings | No | Optional labels, up to 5 |
+| `labels` | array of strings | No | Optional labels, up to 15 (`MAX_LABEL_SLOTS`) |
 
 **Example:**
 ```yaml
@@ -1659,7 +1659,7 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | `INVALID_COLLECTION_SLUG` | 400 | Collection slug format is invalid |
 | `BATCH_LIMIT_EXCEEDED` | 400 | More than 25 items in batch write or 100 in batch get |
 | `QUERY_LIMIT_EXCEEDED` | 400 | Limit exceeds 1000 |
-| `LABEL_LIMIT_EXCEEDED` | 400 | Adding labels would exceed 5 active labels |
+| `LABEL_LIMIT_EXCEEDED` | 400 | Adding labels would exceed 15 active labels (`MAX_LABEL_SLOTS`). A collection created before the limit was raised from 5 keeps its original slot count until an operator runs the widen migration — hitting this at 5 on an older collection means that migration has not run yet |
 | `LABEL_NOT_FOUND` | 400 | Label name does not exist in collection |
 | `LABEL_DELETING` | 409 | Label is already being deleted |
 | `COLLECTION_NOT_FOUND` | 404 | Collection does not exist in the registry |
@@ -1687,7 +1687,7 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | Item key | 1-256 bytes (UTF-8), any characters except `#` |
 | Label name | 1-64 chars, regex `/^[a-zA-Z0-9_-]+$/` |
 | Label value | Any string or `null` |
-| Labels per collection | Max 5 |
+| Labels per collection | Max 15 (`MAX_LABEL_SLOTS`; one GSI per slot, `GSI-L1`…`GSI-L15`) |
 | Query limit | 1-1000 (default 100) |
 | Batch get size | Max 100 items |
 | Batch write size | Max 25 items |

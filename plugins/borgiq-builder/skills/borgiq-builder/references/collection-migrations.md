@@ -171,8 +171,9 @@ actors:
             if (req.trigger.type !== "manual") return { results: undefined };
 
             // The app's single collection must exist before anything else — including
-            // the ledger keys. Declare labels up front: the 5 label slots are shared
-            // by every entity type in the collection, so keep the names generic.
+            // the ledger keys. Declare labels up front: the label slots (15 max) are
+            // shared by every entity type in the collection, so keep the names generic
+            // and declare only the ones the app filters on — each is a GSI write.
             await ensureCollection({
               slug: COLLECTION, name: "Task App",
               description: "All Task App data — entities separated by key prefix (task:, user:, config:)",

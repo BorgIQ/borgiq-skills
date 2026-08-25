@@ -12,6 +12,7 @@ Zod schemas and TypeScript types for CollectionActor actions: query, getItem, pu
 - [actorSchemas/task/collection/deleteItem.ts](#actorschemastaskcollectiondeleteitem)
 - [actorSchemas/task/collection/getItem.ts](#actorschemastaskcollectiongetitem)
 - [actorSchemas/task/collection/index.ts](#actorschemastaskcollectionindex)
+- [actorSchemas/task/collection/labelSlots.ts](#actorschemastaskcollectionlabelslots)
 - [actorSchemas/task/collection/listCollections.ts](#actorschemastaskcollectionlistcollections)
 - [actorSchemas/task/collection/putItem.ts](#actorschemastaskcollectionputitem)
 - [actorSchemas/task/collection/query.ts](#actorschemastaskcollectionquery)
@@ -346,6 +347,7 @@ import { z } from 'zod';
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../../schemas/index.js';
 
 import { CollectionActorAction } from './actions.js';
+import { MAX_LABEL_SLOTS } from './labelSlots.js';
 
 /** The options schema for the createCollection action for the CollectionActor */
 export const CollectionActorCreateCollectionOptionsSchema = z.object({
@@ -358,8 +360,8 @@ export const CollectionActorCreateCollectionOptionsSchema = z.object({
     .describe('The display name for the collection'),
   description: z.string().optional()
     .describe('An optional description for the collection'),
-  labels: z.array(z.string()).max(5).optional()
-    .describe('Optional labels for the collection, up to 5'),
+  labels: z.array(z.string()).max(MAX_LABEL_SLOTS).optional()
+    .describe(`Optional labels for the collection, up to ${MAX_LABEL_SLOTS}`),
 });
 
 export type CollectionActorCreateCollectionOptions = z.infer<typeof CollectionActorCreateCollectionOptionsSchema>;
@@ -390,9 +392,9 @@ export const CollectionActorCreateCollectionOptionsJsonSchema: BIQJsonSchema = {
     labels: {
       type: BIQJsonSchemaType.Array,
       title: 'Labels',
-      description: 'Optional labels for the collection, up to 5',
+      description: `Optional labels for the collection, up to ${MAX_LABEL_SLOTS}`,
       items: { type: BIQJsonSchemaType.String, title: 'Label' },
-      maxItems: 5,
+      maxItems: MAX_LABEL_SLOTS,
     },
   },
   required: ['action', 'slug', 'name'],
@@ -664,6 +666,7 @@ export * from './batchWriteItem.js';
 export * from './transactWrite.js';
 export * from './transactGet.js';
 export * from './actions.js';
+export * from './labelSlots.js';
 
 /** The options schema for the CollectionActor with separated by actions */
 export const CollectionActorOptionsSchema = z.discriminatedUnion('action', [
@@ -689,6 +692,36 @@ export type CollectionActorResult =
   CollectionActorCreateCollectionResult | CollectionActorListCollectionsResult | CollectionActorUpdateCollectionResult | CollectionActorDeleteCollectionResult |
   CollectionActorPutItemResult | CollectionActorUpdateItemResult | CollectionActorGetItemResult | CollectionActorDeleteItemResult | CollectionActorQueryResult |
   CollectionActorBatchGetItemResult | CollectionActorBatchWriteItemResult | CollectionActorTransactWriteResult | CollectionActorTransactGetResult;
+```
+
+## actorSchemas/task/collection/labelSlots
+
+**Source:** `actorSchemas/task/collection/labelSlots.ts`
+
+```typescript
+/**
+ * The number of named label slots a collection can define.
+ *
+ * Each slot is backed by a physical Global Secondary Index on the collections
+ * table — slot n is `GSI-L{n}`, keyed on `GSI{n}PK`/`GSI{n}SK` — so this is a
+ * property of the table, not a per-tenant setting. Raising it means, in order:
+ *
+ *   1. adding the matching GSIs in internal infrastructure
+ *      (`projects/dynamodb-setup/src/collectionsTable.ts`) and letting every
+ *      index finish backfilling — they build one at a time, however many the
+ *      apply adds;
+ *   2. widening every existing collection's stored `labels` array with
+ *      `scripts/data-migrations/20260821_widen_collection_label_slots.sh` — a
+ *      collection created under the old limit keeps an array of that length,
+ *      and `updateCollection` fills the first `null` slot it finds in it;
+ *   3. deploying this constant;
+ *   4. running that migration a second time, to widen the collections created
+ *      between step 2 and step 3.
+ *
+ * DynamoDB's default quota is 20 GSIs per table, so 20 is the ceiling without a
+ * service quota increase.
+ */
+export const MAX_LABEL_SLOTS = 15;
 ```
 
 ## actorSchemas/task/collection/listCollections
