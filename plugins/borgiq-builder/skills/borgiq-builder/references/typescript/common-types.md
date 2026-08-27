@@ -2160,6 +2160,7 @@ export enum BIQActorType {
   ReactAppTriggerActor = 'ReactAppTriggerActor',
   CollectionActor = 'CollectionActor',
   McpServerActor = 'McpServerActor',
+  StreamActor = 'StreamActor',
 }
 
 /** Authorization level for webhook trigger actors */

@@ -159,6 +159,9 @@ build_configuration() {
     CollectionActor)
       echo '"options": "action: putItem\ncollectionName: my-collection\nitem:\n  id: \${{ inputs.id }}\n  data: \${{ inputs.data }}"'
       ;;
+    StreamActor)
+      echo '"options": "action: appendData\nstream: my-stream\nrecords:\n  - payload: \${{ inputs.payload }}"'
+      ;;
     CallFlowActor)
       echo '"options": "canvasId: \"\"\nactorId: \"\""'
       ;;

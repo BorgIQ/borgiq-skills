@@ -632,6 +632,8 @@ def receive(req: Request) -> Response:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/collections` | POST | All Collection API operations (action in request body) |
+| `/streams` | POST | All Stream API operations (action in request body) |
+| `/streams/{streamIdOrSlug}/tail` | GET | Tail a stream over SSE for a bounded window (`?from=&maxSeconds=&maxRecords=`) |
 | `/issueCallbackToken` | POST | Issue a callback token for async workflows |
 | `/files/{fileId}/downloadUrl` | GET | Get a signed download URL for a file (supports `?expiresInMinutes=N&downloadAsAttachment=true`) |
 | `/files/upload` | POST | Upload multiple files (multipart) |
@@ -699,6 +701,38 @@ def receive(req: Request) -> Response:
 ```
 
 See [collection-api.md](collection-api.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and DynamoDB mapping details.
+
+### Stream API
+
+The Stream API provides append-only, ordered, cursor-addressed record logs — for events, activity feeds, and incremental processing with a resumable cursor. All operations use `POST /streams` with an `action` field and return the `{ ok, value, error? }` envelope.
+
+**For full documentation** of all 7 actions, cursors, TTL/persistence, the paging loop, tailing, error codes, and limits, see [stream-api.md](stream-api.md).
+
+```python
+from borgiq import Request, Response, biq_api
+
+def receive(req: Request) -> Response:
+    # appendData — up to 500 records, stored in full or not at all
+    biq_api('/streams', method='POST', json={
+        'action': 'appendData', 'stream': 'order-events',
+        'records': [{'payload': '{"orderId": "O-1", "state": "paid"}'}],
+    })
+
+    # readStream — one bounded page from a persisted cursor (or 'start' / 'tail')
+    page = biq_api('/streams', method='POST', json={
+        'action': 'readStream', 'stream': 'order-events',
+        'from': req.inputs.get('cursor') or 'start', 'maxRecords': 500,
+    }).json()['value']
+
+    # getStreamInfo — the live tail cursor; equal to your persisted cursor means nothing new
+    info = biq_api('/streams', method='POST', json={
+        'action': 'getStreamInfo', 'stream': 'order-events',
+    }).json()['value']
+
+    return Response(results={'records': page['records'], 'nextCursor': page['nextCursor'], 'tail': info['tailCursor']})
+```
+
+Streams must be created before use (`createStream`; nothing auto-creates) and expire one hour after their last append unless created with `persistent: True` or an explicit `idleTtlSeconds` — see [stream-api.md → Lifecycle](stream-api.md#lifecycle-ttl-and-persistence). For "what happened, in order" use a stream; for "the current value of X" use a Collection ([Collections vs Streams](stream-api.md#collections-vs-streams)).
 
 ## Error Handling
 

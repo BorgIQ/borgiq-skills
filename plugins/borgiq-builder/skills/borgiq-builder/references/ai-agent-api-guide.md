@@ -203,7 +203,7 @@ Returns the list of all actor types available for use in flows, with their defau
 GET /v1/actors/{actorType}/schema
 ```
 
-Returns the options schema (BIQ JsonSchema), source port configuration, code support, default options, and capabilities for an actor type. For action-based actors (DataStoreActor, CollectionActor, MessageProcessorActor), returns the action selector but not per-action schemas — use the `?action` query param for those.
+Returns the options schema (BIQ JsonSchema), source port configuration, code support, default options, and capabilities for an actor type. For action-based actors (DataStoreActor, CollectionActor, StreamActor, MessageProcessorActor), returns the action selector but not per-action schemas — use the `?action` query param for those.
 
 **Response (non-action actor):**
 
@@ -499,7 +499,7 @@ Each actor type has specific source port requirements. The validation endpoint c
 
 **Single port actors** — most actors have exactly one port with ID `SPRTdefault`:
 
-All trigger actors (except AppTrigger), `HttpRequestActor`, `DenoActor`, `PythonActor`, `DenoTestActor`, `DataStoreActor`, `SendEmailActor`, `MessageProcessorActor`, `AiActor`, `CallFlowActor`, `WebhookResponseActor`, `CallableResponseActor`, `InterfaceStatusActor`, `CollectionActor`, `EchoActor`.
+All trigger actors (except AppTrigger), `HttpRequestActor`, `DenoActor`, `PythonActor`, `DenoTestActor`, `DataStoreActor`, `SendEmailActor`, `MessageProcessorActor`, `AiActor`, `CallFlowActor`, `WebhookResponseActor`, `CallableResponseActor`, `InterfaceStatusActor`, `CollectionActor`, `StreamActor`, `EchoActor`.
 
 ```json
 "sourcePorts": [{ "id": "SPRTdefault", "name": "output" }]

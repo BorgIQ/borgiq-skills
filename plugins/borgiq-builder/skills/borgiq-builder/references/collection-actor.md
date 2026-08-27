@@ -8,6 +8,8 @@ For full API documentation including actions, parameters, DynamoDB behavior, con
 
 > **Collections must be created before use** — a `putItem`/`query` against a slug that was never created returns `COLLECTION_NOT_FOUND`. Any app backed by collections needs an idempotent **provisioning/migration** step (create the app's collection + seed defaults, safe to re-run per deploy and per workspace). See [collection-migrations.md](collection-migrations.md) for the migration-manager pattern.
 
+> **Event-shaped data belongs in a Stream, not in key-per-event items** — things that *happened*, in order (webhook events, audit trails, activity feeds, agent progress), and any consumer that needs to resume where it left off, go in a [StreamActor](stream-actor.md). Collections hold the *current value* of things. See [Collections vs Streams](stream-api.md#collections-vs-streams).
+
 ## Table of Contents
 
 - [Configuration Structure](#configuration-structure)

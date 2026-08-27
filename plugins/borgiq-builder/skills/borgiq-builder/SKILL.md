@@ -1,6 +1,6 @@
 ---
 name: borgiq-builder
-description: Build Actors, Triggers, AI Agents, and web apps for BorgIQ. Supports HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor (serverless coding agent with filesystem/bash, sessions, and BorgIQ tools), AgentHarnessActor (sandboxed Claude Code with session persistence), CollectionActor, AppTriggerActor, InterfaceTriggerActor, WebhookTriggerActor. Use for workflow automations, REST API integrations, custom Deno/Python actors, AI-powered tasks, autonomous AI agents with tools, agent harness sandboxed execution, triggers (scheduled, webhook, email, button, interface, app, callable), or web apps with actor-backed APIs. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "set up webhook", "build a web app", "theme an app", or workflow tasks.
+description: Build Actors, Triggers, AI Agents, and web apps for BorgIQ. Supports HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor (serverless coding agent with filesystem/bash, sessions, and BorgIQ tools), AgentHarnessActor (sandboxed Claude Code with session persistence), CollectionActor, StreamActor, AppTriggerActor, InterfaceTriggerActor, WebhookTriggerActor. Use for workflow automations, REST API integrations, custom Deno/Python actors, AI-powered tasks, autonomous AI agents with tools, agent harness sandboxed execution, triggers (scheduled, webhook, email, button, interface, app, callable), or web apps with actor-backed APIs. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
 ---
 
 # BorgIQ Builder
@@ -31,6 +31,7 @@ Build Actors and Triggers that power BorgIQ automation workflows.
 - [Workflow Patterns](#workflow-patterns)
   - [Web apps and forms — handed off to spokes](#web-apps-and-forms--handed-off-to-spokes)
   - [Collection migrations and provisioning](#collection-migrations-and-provisioning)
+  - [Streams: events in order, consumed by cursor](#streams-events-in-order-consumed-by-cursor)
 - [Editing Existing Workflows](#editing-existing-workflows)
 - [Migration from Other Platforms](#migration-from-other-platforms)
 - [Deploying and Testing with the CLI](#deploying-and-testing-with-the-cli)
@@ -138,6 +139,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | [actor-schemas-task-http.md](references/typescript/actor-schemas-task-http.md) | HttpRequestActor options and authentication types |
 | [actor-schemas-task-datastore.md](references/typescript/actor-schemas-task-datastore.md) | DataStoreActor actions (legacy — kept for TypeScript type reference) |
 | [actor-schemas-task-collection.md](references/typescript/actor-schemas-task-collection.md) | CollectionActor actions (query, getItem, putItem, batchGet, batchWrite, etc.) |
+| [actor-schemas-task-stream.md](references/typescript/actor-schemas-task-stream.md) | StreamActor actions (createStream, appendData, readStream, getStreamInfo, etc.) |
 | [actor-schemas-task-messageprocessor.md](references/typescript/actor-schemas-task-messageprocessor.md) | MessageProcessorActor actions (inject, split, collect, fork, forkJoin, delay, etc.) |
 | [actor-schemas-comment.md](references/typescript/actor-schemas-comment.md) | CommentActor schema |
 | [form-components.md](references/typescript/form-components.md) | Interface form component schemas (InterfaceTriggerActor and InterfaceActor only, not used by AppTriggerActor) |
@@ -166,6 +168,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | **InterfaceActor** | Renders a web form/page mid-workflow with two output ports: Meta (URL info on render) and Event (form submission data) | [interface-actor.md](references/interface-actor.md) |
 | **SendEmailActor** | Sends text/HTML emails with optional attachments | [send-email-actor.md](references/send-email-actor.md) |
 | **CollectionActor** | Persistent structured storage organized into named collections with labels, TTL, queries, batch operations, and transactions. Recommended for all new storage needs. **One collection per app** — model all entity types with key prefixes ([single-collection design](references/collection-api.md#single-collection-design)). | [collection-actor.md](references/collection-actor.md) |
+| **StreamActor** | Append-only, ordered, cursor-addressed record logs — event ingestion, audit trails, activity feeds, and incremental processing that resumes from a persisted cursor. Reads return **one bounded page**, never the stream. **Streams must be created before use** and **expire one hour after the last append** unless created `persistent: true` or with an explicit `idleTtlSeconds`. Use for "what happened, in order"; use CollectionActor for "the current value of X" ([Collections vs Streams](references/stream-api.md#collections-vs-streams)). | [stream-actor.md](references/stream-actor.md) |
 | **McpServerActor** | Exposes its child tool actors as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server endpoint that external AI agents (Claude Desktop, Cursor, custom agents) can connect to. Reuses the AiAgentActor tool-actor pattern (`aiAgentToolActorIds`, `${{aiInput}}` schema filtering) — the difference is that an external MCP client drives tool invocations instead of an internal LLM loop. | [mcp-server-actor.md](references/mcp-server-actor.md) |
 | **CommentActor** | Non-functional UI element for adding notes, TODOs, and documentation to workflows | [comment-actor.md](references/comment-actor.md) |
 
@@ -254,6 +257,10 @@ If the task can be done with `${{ }}` expressions and Q-lib functions, use Messa
 | Atomic counter increment/decrement | CollectionActor (`updateItem` with `atomicCounters`) |
 | Transactional operations | CollectionActor (`transactWrite`, `transactGet`) |
 | Job queue / task queue | CollectionActor (queue pattern — `putItem` to enqueue, `query` + `updateItem` to dequeue) |
+| Record events in order (webhook events, audit trail, activity feed, agent progress) | StreamActor (`appendData`) — **not** `event:<timestamp>` Collection items |
+| Process a backlog incrementally / resume where the last run stopped | StreamActor (`readStream` from a cursor persisted in a Collection; loop `nextCursor` while `hasMore`) |
+| Only run when new records arrived | StreamActor (`getStreamInfo` — compare `tailCursor` to the persisted cursor) |
+| Look up or update the current value of something | CollectionActor — a stream is not a place for current state |
 
 ## Trigger Actor Types
 
@@ -745,6 +752,18 @@ Treat this like database migrations: when you design a collection-backed app, al
 - Run it via canvas Invoke or `borgiq triggers run` (the manual invoke) after deploying to a new workspace and after appending migrations. Re-running is always safe.
 
 A collection-backed app shipped without a migration actor is a gap: it works in the dev workspace where collections were hand-created, then 404s in prod. Full guidance, the worked migration-manager trigger, and idempotency techniques are in [collection-migrations.md](references/collection-migrations.md).
+
+### Streams: events in order, consumed by cursor
+
+**Event-shaped data goes in a Stream, not a Collection.** Anything that is "what happened, in order" — webhook deliveries, an audit trail, an activity feed, an agent's progress — is appended to a [StreamActor](references/stream-actor.md) stream and consumed by walking a cursor forward. Modelling it as `event:<timestamp>` Collection items forces client-side ordering and pagination a stream gives you for free; modelling *current state* as a stream forces a replay to find the latest value. The decision table: [Collections vs Streams](references/stream-api.md#collections-vs-streams).
+
+Three rules an agent must design around:
+
+- **Streams are not implicit and they expire.** `appendData` against a slug that was never created fails with `STREAM_NOT_FOUND`, and a stream created with neither `persistent: true` nor `idleTtlSeconds` is hard-deleted one hour after its last append. Any app or scheduled consumer that depends on a stream creates it `persistent: true` in the same idempotent provisioning step as its collection ([collection-migrations.md](references/collection-migrations.md)); scratch logs get a TTL and clean themselves up.
+- **`readStream` returns one bounded page, never the stream.** The page is budgeted by the workspace message-size limit and carries `nextCursor` and `hasMore`. Loop the cursor on a canvas edge for a backlog; persist it in the app's collection to resume across flowruns.
+- **There is no "record arrived" trigger in v1.** A ScheduledTriggerActor calls `getStreamInfo`, compares `tailCursor` to the persisted cursor, and reads only when it moved — cheap enough for a one-minute schedule. Live views (a web app, a dashboard) tail the stream over SSE from the REST API instead.
+
+Worked canvases for all three — ingestion, a chunked backlog loop, and the scheduled resumable consumer — are in [stream-actor.md](references/stream-actor.md); the full action, cursor, lifecycle, SDK, REST, and SSE reference is [stream-api.md](references/stream-api.md).
 
 ## Editing Existing Workflows
 
