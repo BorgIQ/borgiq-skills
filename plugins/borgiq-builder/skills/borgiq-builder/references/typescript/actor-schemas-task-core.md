@@ -2476,13 +2476,7 @@ export type CallableResponseActorResult = z.infer<typeof CallableResponseActorRe
 import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
-import { DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
-
-/**
- * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
- * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
- */
-export const DenoActorCodeSchema = z.string().min(1);
+import { DENO_ACTOR_ENTRYPOINT, DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
 
 /**
  * The DenoActor's `configuration.codeDir`: a project tree whose handler lives in `main.ts`, minus the
@@ -2490,7 +2484,7 @@ export const DenoActorCodeSchema = z.string().min(1);
  * the wire-level `CodeDirSchema`.
  */
 export const DenoActorCodeDirSchema = makeCodeDirSchema({
-  requiredEntrypoint: 'main.ts',
+  requiredEntrypoint: DENO_ACTOR_ENTRYPOINT,
   reservedPaths: DENO_RESERVED_PATHS,
 });
 
@@ -2602,13 +2596,7 @@ export type DenoActorResult = z.infer<typeof DenoActorResultSchema>;
 import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
-import { DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
-
-/**
- * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
- * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
- */
-export const DenoTestActorCodeSchema = z.string().min(1);
+import { DENO_RESERVED_PATHS, DENO_TEST_ACTOR_ENTRYPOINT, makeCodeDirSchema } from '../codeDir.js';
 
 /**
  * The DenoTestActor's `configuration.codeDir`: a project tree whose handler lives in `main.ts`, minus
@@ -2616,7 +2604,7 @@ export const DenoTestActorCodeSchema = z.string().min(1);
  * DenoActor, so it shares that variant's reserved set too.
  */
 export const DenoTestActorCodeDirSchema = makeCodeDirSchema({
-  requiredEntrypoint: 'main.ts',
+  requiredEntrypoint: DENO_TEST_ACTOR_ENTRYPOINT,
   reservedPaths: DENO_RESERVED_PATHS,
 });
 
@@ -3811,13 +3799,7 @@ export const McpServerActorOptionsJsonSchema: BIQJsonSchema = {
 import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
-import { PYTHON_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
-
-/**
- * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
- * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
- */
-export const PythonActorCodeSchema = z.string().min(1);
+import { PYTHON_ACTOR_ENTRYPOINT, PYTHON_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
 
 /**
  * The PythonActor's `configuration.codeDir`: a project tree whose handler lives in `main.py`, minus
@@ -3826,7 +3808,7 @@ export const PythonActorCodeSchema = z.string().min(1);
  * the search path, so a root `handler.py` would win over the runtime's without touching it.
  */
 export const PythonActorCodeDirSchema = makeCodeDirSchema({
-  requiredEntrypoint: 'main.py',
+  requiredEntrypoint: PYTHON_ACTOR_ENTRYPOINT,
   reservedPaths: PYTHON_RESERVED_PATHS,
 });
 

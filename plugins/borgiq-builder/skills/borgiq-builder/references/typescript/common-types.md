@@ -2159,8 +2159,8 @@ export enum BIQActorType {
   AppTriggerActor = 'AppTriggerActor',
   ReactAppTriggerActor = 'ReactAppTriggerActor',
   CollectionActor = 'CollectionActor',
-  McpServerActor = 'McpServerActor',
   StreamActor = 'StreamActor',
+  McpServerActor = 'McpServerActor',
 }
 
 /** Authorization level for webhook trigger actors */
@@ -2365,6 +2365,7 @@ enum Prefix {
   SourcePort = 'SPRT',
   StorageBucket = 'STBU',
   StorageFile = 'STFI',
+  Stream = 'STRM',
   TargetPort = 'TPRT',
   TemplateApp = 'TAPP',
   TemplateCategory = 'TCTG',
@@ -2446,8 +2447,6 @@ export interface BIQRuntimeActorConfiguration<O> {
   vars: { [key: string]: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
   // the interpolated options
   options: O;
-  // store the code that is to be run in the runtime for the actor (ONLY NodeJS actor)
-  code: string;
   // the interpolated assets
   assets: { [key: string]: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
