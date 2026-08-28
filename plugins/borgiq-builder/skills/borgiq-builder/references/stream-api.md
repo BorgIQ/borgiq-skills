@@ -5,7 +5,7 @@ The Stream API provides **append-only, ordered, cursor-addressed record logs** s
 - **StreamActor** — YAML configuration with `action` field. See [stream-actor.md](stream-actor.md).
 - **DenoActor** — `biqApi('/streams')` from `@borgiq/actors`. See [deno-actor.md](deno-actor.md).
 - **PythonActor** — `biq_api('/streams')` from `borgiq`. See [python-actor.md](python-actor.md).
-- **REST API** — `/orgs/:org/workspaces/:workspace/streams` with a Personal Access Token, for external systems, scripts, and the CLI. See [Public REST API](#public-rest-api).
+- **REST API** — `/v1/orgs/:org/workspaces/:workspace/streams` with a Personal Access Token, for external systems, scripts, and the CLI. See [Public REST API](#public-rest-api).
 
 From actor code, every operation goes through a single `POST /streams` runtime endpoint with an `action` field in the request body, exactly like `POST /collections`. Authentication and tenant scoping are handled automatically.
 
@@ -79,7 +79,7 @@ Details worth designing around:
 - **The clock measures appends, not reads.** Reading or tailing a stream does not keep it alive.
 - **A never-appended stream gets a 15-minute grace.** Before the first record, the deadline is `createdAt + max(idleTtlSeconds, 15 min)`, so a flow that creates a stream in one actor and appends in a later one (behind an AI call or a retry) does not lose the stream in between. After the first append the idle TTL applies untouched.
 - **`expiresAt` and `lastActivityAt` in list responses are hints**, refreshed asynchronously — treat them as approximate. `getStreamInfo` reads the tail live from storage and is the truth.
-- **Deletion is hard.** No tombstone, no undo, no confirmation. An expired stream returns `STREAM_NOT_FOUND` (404) from every surface, including an open tail.
+- **Deletion is hard.** No tombstone, no undo, no confirmation. An expired stream returns `STREAM_NOT_FOUND` (404) from every request surface; an open tail on it is closed, and the 404 arrives on the reconnect.
 - **Streams must be created before use.** An append to a slug that was never created — or that has expired — fails with `STREAM_NOT_FOUND`; nothing auto-creates. Provision streams the way you provision collections (see [collection-migrations.md](collection-migrations.md)), and use `persistent: true` for anything an app depends on.
 
 ## Cursors
@@ -134,7 +134,7 @@ configuration:
   "lastActivityAt": null,
   "expiresAt": null,
   "createdAt": "2026-08-27T10:00:00.000Z",
-  "updatedAt": null
+  "updatedAt": "2026-08-27T10:00:00.000Z"
 }
 ```
 
@@ -192,12 +192,12 @@ Lists every stream in the workspace (at most 100). No pagination and no filter �
     "lastActivityAt": "2026-08-27T10:41:12.000Z",
     "expiresAt": "2026-08-27T11:41:12.000Z",
     "createdAt": "2026-08-27T10:00:00.000Z",
-    "updatedAt": null
+    "updatedAt": "2026-08-27T10:00:00.000Z"
   }
 ]
 ```
 
-`storedBytes`, `lastActivityAt`, and `expiresAt` are asynchronously refreshed hints. `updatedAt` moves only on `editMetadata`, never on an append.
+`storedBytes`, `lastActivityAt`, and `expiresAt` are asynchronously refreshed hints. `updatedAt` is set at creation (equal to `createdAt`) and moves only on `editMetadata`, never on an append.
 
 ---
 
@@ -246,9 +246,9 @@ configuration:
 {
   "streamId": "STRM01...",
   "recordsAccepted": 1,
-  "firstCursor": "s2:...",
-  "lastCursor": "s2:...",
-  "tailCursor": "s2:..."
+  "firstCursor": "<opaque-cursor>",
+  "lastCursor": "<opaque-cursor>",
+  "tailCursor": "<opaque-cursor>"
 }
 ```
 
@@ -275,7 +275,7 @@ configuration:
   options:
     action: readStream
     stream: order-events
-    from: ${{ msg.load_cursor.value ?? 'start' }}
+    from: ${{ msg.load_cursor ? msg.load_cursor.value.cursor : 'start' }}
     maxRecords: 200
 ```
 
@@ -284,14 +284,14 @@ configuration:
 {
   "streamId": "STRM01...",
   "records": [
-    { "cursor": "s2:...", "timestamp": "2026-08-27T10:41:12.317Z", "payload": "{\"orderId\":\"O-1\",\"state\":\"paid\"}" },
-    { "cursor": "s2:...", "timestamp": "2026-08-27T10:41:13.002Z", "payload": "{\"orderId\":\"O-1\",\"state\":\"shipped\"}" }
+    { "cursor": "<opaque-cursor>", "timestamp": "2026-08-27T10:41:12.317Z", "payload": "{\"orderId\":\"O-1\",\"state\":\"paid\"}" },
+    { "cursor": "<opaque-cursor>", "timestamp": "2026-08-27T10:41:13.002Z", "payload": "{\"orderId\":\"O-1\",\"state\":\"shipped\"}" }
   ],
   "count": 2,
   "hasMore": false,
-  "cursor": "s2:...",
-  "nextCursor": "s2:...",
-  "tailCursor": "s2:...",
+  "cursor": "<opaque-cursor>",
+  "nextCursor": "<opaque-cursor>",
+  "tailCursor": "<opaque-cursor>",
   "skippedRecords": 0
 }
 ```
@@ -324,7 +324,7 @@ The cheap "is there anything new?" probe. It reads the tail **live** from storag
   "slug": "order-events",
   "name": "Order Events",
   "description": null,
-  "tailCursor": "s2:...",
+  "tailCursor": "<opaque-cursor>",
   "lastRecordAt": "2026-08-27T10:41:13.002Z",
   "storedBytes": 18342,
   "persistent": false,
@@ -462,11 +462,11 @@ External systems, scripts, and the CLI reach streams over the workspace REST API
 ### URL pattern
 
 ```
-/orgs/:orgSlugOrId/workspaces/:workspaceSlugOrId/streams
+/v1/orgs/:orgSlugOrId/workspaces/:workspaceSlugOrId/streams
 ```
 
 ```http
-POST /orgs/my-org/workspaces/my-workspace/streams/order-events/records
+POST /v1/orgs/my-org/workspaces/my-workspace/streams/order-events/records
 Authorization: Bearer biq_abc123...
 Content-Type: application/json
 
@@ -498,7 +498,7 @@ Auth failures use HTTP status codes: `401` for a missing or invalid token, `403`
 ### Request
 
 ```http
-GET /orgs/my-org/workspaces/my-workspace/streams/order-events/tail?from=start
+GET /v1/orgs/my-org/workspaces/my-workspace/streams/order-events/tail?from=start
 Authorization: Bearer biq_abc123...
 Accept: text/event-stream
 ```
@@ -511,21 +511,21 @@ Accept: text/event-stream
 Every record is one SSE event whose `id` **is** its cursor:
 
 ```
-id: s2:...
+id: <opaque-cursor>
 event: record
-data: {"cursor":"s2:...","timestamp":"2026-08-27T10:41:12.317Z","payload":"{\"orderId\":\"O-1\",\"state\":\"paid\"}"}
+data: {"cursor":"<opaque-cursor>","timestamp":"2026-08-27T10:41:12.317Z","payload":"{\"orderId\":\"O-1\",\"state\":\"paid\"}"}
 
 : heartbeat
 
 event: end
-data: {"nextCursor":"s2:...","records":2}
+data: {"nextCursor":"<opaque-cursor>","records":2}
 ```
 
 | Frame | When | What to do |
 |---|---|---|
 | `event: record` | a record landed | handle `data`; remember `data.cursor` |
 | `: heartbeat` (comment) | every 15 s while quiet | nothing — it keeps proxies from reaping the connection. Treat 45 s of silence as a dead connection |
-| `event: end` | the server closed the session cleanly | **reconnect with `from = data.nextCursor`**. `nextCursor` is absent when the session emitted no records — reuse the `from` you sent |
+| `event: end` | the server closed the session cleanly | **reconnect with `from = data.nextCursor`**. `nextCursor` is always present; after a session that emitted nothing it equals the position you resumed from, so reconnecting with it is always correct |
 | `event: error` | a failure after the headers were sent | reconnect with backoff from the last cursor you received |
 
 **A clean `end` is the normal path, not a failure.** The public tail closes after **60 s without a record** or **300 s in total**; a consumer that stays subscribed simply reconnects from `nextCursor` and misses nothing. Records are never duplicated across a correct resume because the cursor names an exact position.

@@ -154,6 +154,7 @@ actors:
       options:
         action: readStream
         stream: order-events
+        # Self-loop: on the loop pass the actor's own previous emission arrives as msg.read_page
         from: ${{ msg.read_page ? msg.read_page.nextCursor : 'start' }}
         maxRecords: 200
     sourcePorts:
@@ -179,14 +180,14 @@ actors:
         conditions:
           More: ${{ msg.read_page.hasMore === true }}
     sourcePorts:
-      - id: SPRTmore0000
+      - id: SPRTmore000
         name: More
         description: Another page remains
       - id: SPRTdefault
         name: Default
         description: Caught up
     edges:
-      ACTR01read: SPRTmore0000
+      ACTR01read: SPRTmore000
 ```
 
 Every page is bounded by the workspace message budget, so a 10,000-record stream becomes fifty 200-record messages rather than one enormous one. A single record larger than the budget fails with `RECORD_EXCEEDS_MESSAGE_BUDGET` instead of being truncated.
@@ -242,14 +243,14 @@ actors:
         conditions:
           Changed: ${{ !msg.load_cursor || msg.load_cursor.value.cursor !== msg.tail_moved.tailCursor }}
     sourcePorts:
-      - id: SPRTchanged0
+      - id: SPRTchange0
         name: Changed
         description: The tail moved since the persisted cursor
       - id: SPRTdefault
         name: Default
         description: Nothing new
     edges:
-      ACTR01readnew: SPRTchanged0
+      ACTR01readnew: SPRTchange0
 
   ACTR01readnew:
     type: StreamActor
@@ -304,7 +305,7 @@ actors:
     configuration:
       options:
         action: createStream
-        slug: run-${{ ctx.flowrun.id }}
+        slug: run-${{ ctx.flowrun.id.toLowerCase() }}
         name: Agent run log
         idleTtlSeconds: 7200
     sourcePorts:
@@ -393,7 +394,7 @@ Bounded pages looped on a canvas edge. The stream never enters a flowrun message
 StreamActor createStream (idleTtlSeconds) → long-running work → StreamActor appendData (Status port)
 ```
 
-Slug from `ctx.flowrun.id`, expiry does the cleanup, a UI tails it live while the run is active.
+Slug from the lower-cased flow-run id (`ctx.flowrun.id.toLowerCase()`) — ids carry an upper-case prefix, slugs are lower-case only. Expiry does the cleanup, a UI tails it live while the run is active.
 
 ### Pattern 5: Provisioning
 
