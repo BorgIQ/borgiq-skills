@@ -381,6 +381,18 @@ borgiq canvases validate my-flow --json
 borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
 ```
 
+**On a deployed workspace, add `--runtime-build`.** Deployed workspaces run each canvas's last
+runtime build rather than its current code, so a push alone does not change what triggers execute:
+
+```bash
+borgiq workspaces deployment --json                       # is this workspace deployed?
+borgiq bundle push ./my-flow.borgiq-canvas --runtime-build  # push, then build, and wait
+```
+
+`--runtime-build` is ignored with `--dry-run` and `--mode`, and a build failure does not fail the
+push — the canvas simply keeps running its previous build. See
+[deployment.md](../deployment.md).
+
 ### Iterate and debug
 
 ```bash

@@ -523,9 +523,21 @@ configuration:
 - Import your own files relatively — `./lib/format.ts` in Deno (extension included), `from lib.format import format` in Python (packages need `__init__.py`). Imports may not leave the actor's own files.
 - `${{ }}` inside source is literal text, never an expression: pass runtime values through `configuration.inputs` and read `req.inputs`.
 - Some filenames are reserved by the runtime, and the tree is capped at 200 files / 1 MiB. Per-type details: [deno-actor.md → Code Files](references/deno-actor.md#code-files), [python-actor.md → Code Files](references/python-actor.md#code-files), [universal-trigger-actor.md → Code Files](references/universal-trigger-actor.md#code-files). In a canvas bundle the same tree is real files under the actor's `code/` directory ([canvas-bundles.md](references/cli/canvas-bundles.md#code-actor-project-trees)).
+- **Imports may not leave the actor's own files, and this is enforced.** A relative import that
+  escapes the actor's tree fails when the actor loads — the error tells the user that the actor
+  imports something outside its own code directory, and (on a deployed workspace) the build names the
+  specifier. Use relative imports between your own files, `@borgiq/actors`, `npm:`/`jsr:`/`node:`
+  packages, or an approved `https:` host.
+- **Pin `npm:` and `jsr:` versions exactly** — `npm:escape-html@1.0.3`, never bare or a `^` range. On
+  a deployed workspace a build resolves each specifier once and every run uses that resolution, so an
+  unpinned specifier makes what you get depend on when the canvas was last built.
 - Actors written before multi-file support carry a single `configuration.code` string instead. They keep running and convert on the next save; write `codeDir` for anything new, and never set both fields.
 
 (ReactAppTriggerActor also uses `configuration.codeDir`, for a whole Vite project — see the `borgiq-react-app-builder` spoke. AppTriggerActor keeps `configuration.options.html` / `.css` / `.script`.)
+
+On a **deployed** workspace, a canvas's code actors are compiled ahead of time and triggers run that
+build rather than the canvas's current code — so an edit reaches triggers only after the next build.
+See [references/deployment.md](references/deployment.md).
 
 ## Actor Memory
 

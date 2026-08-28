@@ -3,12 +3,19 @@ name: test
 description: Trigger a deployed BorgIQ flow with a sample payload, wait for it to complete, and report pass/fail with the final actor output. Does NOT deploy.
 disable-model-invocation: true
 argument-hint: "<canvasId> <triggerActorId> '<json-payload>'"
-allowed-tools: Bash(borgiq triggers*) Bash(borgiq flowruns*) Bash(borgiq flowrun-jobs*) Bash(borgiq flowrun-results*) Bash(borgiq canvases*)
+allowed-tools: Bash(borgiq triggers*) Bash(borgiq flowruns*) Bash(borgiq flowrun-jobs*) Bash(borgiq flowrun-results*) Bash(borgiq canvases*) Bash(borgiq workspaces*)
 ---
 
 # /test — trigger a flow and assert on the result
 
 Run a flow end-to-end against a deployed canvas, poll until completion, and report whether it produced the expected output. This is for verifying that a deployed flow actually works — not for deploying. Use `/borgiq-builder:deploy` first.
+
+> **On a deployed workspace, `borgiq triggers run` executes the canvas's active runtime build, not its
+> current code.** If the flow was edited since the last build, this tests the OLD code and the result
+> will not reflect your changes. Either build the canvas first
+> (`borgiq canvases runtime-build <canvas> --wait`) or, to check an edit in isolation, use an editor
+> test run — those always use current code. Check with `borgiq workspaces deployment --json`; a
+> canvas showing `outdated: true` is exactly this situation.
 
 ## Parse arguments
 
