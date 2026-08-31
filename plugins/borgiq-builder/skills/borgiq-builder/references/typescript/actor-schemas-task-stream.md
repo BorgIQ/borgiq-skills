@@ -186,17 +186,11 @@ export const StreamActorCreateStreamOptionsSchema = z.object({
     .describe('The display name for the stream. Defaults to the slug'),
   description: z.string().max(STREAM_SCHEMA_LIMITS.descriptionMaxLength).nullable().optional()
     .describe('An optional description for the stream'),
-  idleTtlSeconds: z.union([
-    z.number().int().min(STREAM_SCHEMA_LIMITS.minIdleTtlSeconds).max(STREAM_SCHEMA_LIMITS.maxIdleTtlSeconds),
-    z.string(),
-  ]).optional()
+  idleTtlSeconds: z.number().int().min(STREAM_SCHEMA_LIMITS.minIdleTtlSeconds).max(STREAM_SCHEMA_LIMITS.maxIdleTtlSeconds).optional()
     .describe('Delete the stream once it has gone this long without an append. 60s to 30 days. Mutually exclusive with persistent'),
   persistent: z.boolean().optional()
     .describe('Keep the stream until it is explicitly deleted. Mutually exclusive with idleTtlSeconds. False means the same as leaving it out: the idle TTL, or the default when none is given'),
-  maxRecordSizeInKiloBytes: z.union([
-    z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.maxRecordSizeKiloBytes),
-    z.string(),
-  ]).optional()
+  maxRecordSizeInKiloBytes: z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.maxRecordSizeKiloBytes).optional()
     .describe('The largest single record payload this stream accepts. Defaults to 256KB. Lowering it affects future appends only; records already stored are unaffected'),
 }).refine((value) => !(value.persistent === true && value.idleTtlSeconds !== undefined), {
   message: 'A stream is either persistent or has an idle TTL, not both',
@@ -343,17 +337,11 @@ export const StreamActorEditMetadataOptionsSchema = z.object({
     .describe('A new display name for the stream'),
   description: z.string().max(STREAM_SCHEMA_LIMITS.descriptionMaxLength).nullable().optional()
     .describe('A new description for the stream. Null clears it; leaving it out keeps the current one'),
-  idleTtlSeconds: z.union([
-    z.number().int().min(STREAM_SCHEMA_LIMITS.minIdleTtlSeconds).max(STREAM_SCHEMA_LIMITS.maxIdleTtlSeconds),
-    z.string(),
-  ]).optional()
+  idleTtlSeconds: z.number().int().min(STREAM_SCHEMA_LIMITS.minIdleTtlSeconds).max(STREAM_SCHEMA_LIMITS.maxIdleTtlSeconds).optional()
     .describe('A new idle TTL. Mutually exclusive with persistent'),
   persistent: z.boolean().optional()
     .describe('Convert the stream to persistent. Mutually exclusive with idleTtlSeconds. False converts a persistent stream back, applying idleTtlSeconds if given and the default TTL otherwise'),
-  maxRecordSizeInKiloBytes: z.union([
-    z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.maxRecordSizeKiloBytes),
-    z.string(),
-  ]).optional()
+  maxRecordSizeInKiloBytes: z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.maxRecordSizeKiloBytes).optional()
     .describe('A new per-record payload ceiling for this stream. Lowering it affects future appends only; records already stored are unaffected'),
 }).refine((value) => !(value.persistent === true && value.idleTtlSeconds !== undefined), {
   message: 'A stream is either persistent or has an idle TTL, not both',
@@ -681,15 +669,9 @@ export const StreamActorReadStreamOptionsSchema = z.object({
     .describe('The slug or id of the stream to read'),
   from: z.string().optional()
     .describe('Where to start: "start", "tail", or a cursor from a previous read. Defaults to start'),
-  maxRecords: z.union([
-    z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.readPageRecords),
-    z.string(),
-  ]).optional()
+  maxRecords: z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.readPageRecords).optional()
     .describe('Maximum records to return in this page'),
-  maxBytes: z.union([
-    z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.readPageBytes),
-    z.string(),
-  ]).optional()
+  maxBytes: z.number().int().min(1).max(STREAM_SCHEMA_LIMITS.readPageBytes).optional()
     .describe('Maximum bytes to return in this page, up to the 1 MiB page ceiling'),
 });
 
