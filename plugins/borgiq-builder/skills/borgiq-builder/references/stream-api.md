@@ -72,7 +72,7 @@ Every stream is in exactly one of two lifecycle modes, chosen at `createStream` 
 | **Idle TTL** (default) | `idleTtlSeconds` between `60` and `2592000` (30 days); omitting both fields gives **3600** (1 hour) | The stream — and every record in it — is hard-deleted once it has gone `idleTtlSeconds` without an append. Each append resets the clock. |
 | **Persistent** | `persistent: true` | Lives until `deleteStream` or a `DELETE` call. |
 
-`idleTtlSeconds` and `persistent: true` are **mutually exclusive**; sending both is rejected by validation with `path: ["persistent"]`.
+`idleTtlSeconds` and `persistent: true` are **mutually exclusive**; sending both is rejected by validation with `path: ["persistent"]`. `persistent` is a boolean, so `persistent: false` is also valid: on `createStream` it is the same as omitting it, and on `editMetadata` it converts a persistent stream back — applying `idleTtlSeconds` if you send one, or the 1-hour default if you do not.
 
 Details worth designing around:
 
@@ -107,7 +107,7 @@ Creates a new stream in the workspace. Fails with `STREAM_ALREADY_EXISTS` (409) 
 | `name` | string | No | Display name, max 120 chars. Defaults to the slug |
 | `description` | string | No | Max 500 chars |
 | `idleTtlSeconds` | integer | No | Delete after this long without an append, `60`–`2592000`. Mutually exclusive with `persistent`. Omit both for the 1-hour default |
-| `persistent` | `true` | No | Keep the stream until explicitly deleted. Mutually exclusive with `idleTtlSeconds` |
+| `persistent` | boolean | No | `true` keeps the stream until explicitly deleted; mutually exclusive with `idleTtlSeconds`. `false` is the same as omitting it |
 | `maxRecordSizeInKiloBytes` | integer | No | Largest single payload this stream accepts. Defaults to `256` |
 
 **Example:**
@@ -151,10 +151,10 @@ Changes a stream's name, description, record-size ceiling, or lifecycle mode. Sw
 | `action` | `"editMetadata"` | Yes | Must be `editMetadata` |
 | `stream` | string | Yes | Slug or id of the stream |
 | `name` | string | No | New display name, max 120 chars |
-| `description` | string | No | New description, max 500 chars |
+| `description` | string \| null | No | New description, max 500 chars. Send `null` to clear it |
 | `idleTtlSeconds` | integer | No | New idle TTL, `60`–`2592000`. Mutually exclusive with `persistent` |
-| `persistent` | `true` | No | Convert to persistent. Mutually exclusive with `idleTtlSeconds` |
-| `maxRecordSizeInKiloBytes` | integer | No | New per-record ceiling |
+| `persistent` | boolean | No | `true` converts to persistent (mutually exclusive with `idleTtlSeconds`); `false` converts back, using `idleTtlSeconds` if sent and the 1-hour default otherwise |
+| `maxRecordSizeInKiloBytes` | integer | No | New per-record ceiling. Applies to future appends only — records already stored are unaffected |
 
 **Example:**
 ```yaml
