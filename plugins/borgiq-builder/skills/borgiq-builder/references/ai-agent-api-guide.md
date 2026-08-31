@@ -437,6 +437,8 @@ Content-Type: application/json
 | `AiAgentActor` | LLM-powered agent with tool use |
 | `AgentHarnessActor` | Multi-step agent execution harness |
 | `DataStoreActor` | CRUD operations on data collections |
+| `CollectionActor` | Key-value tables with labels, TTL, batch operations, and conditional writes |
+| `StreamActor` | Append-only, ordered record logs read by cursor |
 | `SendEmailActor` | Send emails |
 | `EchoActor` | Pass through data (useful for testing) |
 

@@ -1,6 +1,6 @@
 # Common Types and Utilities
 
-Shared TypeScript types and utilities: common types, AI model definitions (Anthropic, OpenAI, Google, xAI), canvas types, runtime types, sandbox types, file types, flowrun types, lambda types, signal types, asset types, and prefix definitions.
+Shared TypeScript types and utilities: common types, AI model definitions (Anthropic, OpenAI, Google, xAI), canvas types, connection auth types, runtime types, sandbox types, file types, flowrun types, lambda types, signal types, asset types, and prefix definitions.
 
 ## Table of Contents
 
@@ -13,6 +13,7 @@ Shared TypeScript types and utilities: common types, AI model definitions (Anthr
 - [asset.ts](#asset)
 - [canvas.ts](#canvas)
 - [common.ts](#common)
+- [connection.ts](#connection)
 - [file.ts](#file)
 - [flowrun.ts](#flowrun)
 - [lambda.ts](#lambda)
@@ -2227,6 +2228,26 @@ export enum BIQFileUsageType {
   Temporary = 'TEMPORARY',
   /** ReactAppTriggerActor built `dist/` artifacts — survive build-flowrun archival; only superseded builds are GC'd (§4.4.5) */
   ReactDistArtifact = 'REACT_DIST_ARTIFACT',
+}
+```
+
+## connection
+
+**Source:** `connection.ts`
+
+```typescript
+/** The authentication types for connections */
+export enum BIQConnectionAuthType {
+  AWS = 'awsKeyBased',
+  AWS_ROLE = 'awsRoleBased',
+  OAUTH1 = 'oauth1',
+  OAUTH2 = 'oauth2',
+  MCP_OAUTH = 'mcpOauth',
+  BEARER = 'bearer',
+  BASIC = 'basic',
+  API_KEY = 'apiKey',
+  CUSTOM = 'custom',
+  NONE = 'none',
 }
 ```
 
