@@ -89,6 +89,7 @@ A cursor is an **opaque string** that names a position in one specific stream. I
 - Treat it as a token: compare for equality, pass it back, persist it. **Never parse it, never do arithmetic on it, never construct one.**
 - A cursor is bound to the stream that issued it. Presenting it to another stream fails with `INVALID_CURSOR`.
 - Every record carries its own `cursor`. Every read returns `nextCursor` (where to resume) and `tailCursor` (the current end). Every append returns `firstCursor`, `lastCursor`, and `tailCursor`.
+- **A record's own cursor and a resume cursor name different positions.** Reads are inclusive: reading `from` a record's `cursor` returns that record again. Every "where to resume" cursor the platform hands out — a page's `nextCursor`, an SSE `id:` line, an `end` frame's `nextCursor` — already points *past* the last record it delivered, so pass it back unchanged and you neither skip nor repeat.
 - The three ways to start a read are `"start"` (the oldest retained record), `"tail"` (only records appended after now), or a cursor from a previous response.
 - A cursor stays valid across the stream's whole life. Persist `nextCursor` in a Collection or DataStore to resume across flowruns; there is no server-side "consumer offset".
 
@@ -267,7 +268,7 @@ Returns **one bounded page** of records from a position. A read is a snapshot: i
 | `stream` | string | Yes | Slug or id of the stream |
 | `from` | string | No | `"start"`, `"tail"`, or a cursor from a previous response. Defaults to `"start"` |
 | `maxRecords` | integer | No | 1–1000. The page may stop earlier when the byte budget runs out |
-| `maxBytes` | integer | No | Byte budget for the page (runtime endpoint and REST only; the StreamActor budgets by the workspace message-size limit instead) |
+| `maxBytes` | integer | No | Byte budget for the page, up to the 1 MiB page ceiling. From actor code it can only *narrow* the workspace message budget, never raise it |
 
 **Example:**
 ```yaml
@@ -338,7 +339,7 @@ The cheap "is there anything new?" probe. It reads the tail **live** from storag
 
 ## Reading a Stream: one page at a time
 
-`readStream` deliberately emits **a page, never the stream**. When called from the StreamActor, the page is budgeted against the workspace's message-size limit (`maxMessageAndSignalPayloadSizeInKiloBytes`, 64 KB by default), so a 10,000-record stream never becomes a 10,000-record flowrun message. A single record larger than that budget fails the read with `RECORD_EXCEEDS_MESSAGE_BUDGET` rather than being silently truncated — raise the workspace limit, or read from DenoActor/PythonActor code where the budget is `maxBytes` (up to 1 MiB) instead.
+`readStream` deliberately emits **a page, never the stream**. Every read made from actor code — StreamActor, DenoActor, or PythonActor, since all three go through the same runtime endpoint — is budgeted against the workspace's message-size limit (`maxMessageAndSignalPayloadSizeInKiloBytes`, 64 KB by default), so a 10,000-record stream never becomes a 10,000-record flowrun message. `maxBytes` can lower that budget, never raise it. A single record larger than the budget fails the read with `RECORD_EXCEEDS_MESSAGE_BUDGET` rather than being silently truncated — raise the workspace limit, or read over the REST route (`GET …/records`), whose only bound is `maxBytes` up to 1 MiB.
 
 The consumer loop is always the same:
 
@@ -393,7 +394,7 @@ while (true) {
   const page = await streamsApi<{
     records: { cursor: string; timestamp: string; payload: string }[];
     nextCursor: string; hasMore: boolean;
-  }>({ action: "readStream", stream: "order-events", from, maxRecords: 500, maxBytes: 512 * 1024 });
+  }>({ action: "readStream", stream: "order-events", from, maxRecords: 500 });
   for (const record of page.records) await handle(JSON.parse(record.payload));
   await saveCursor(page.nextCursor);
   if (!page.hasMore) break;
@@ -442,16 +443,18 @@ GET /streams/:streamIdOrSlug/tail?from=<start|tail|cursor>&maxSeconds=<1..120>&m
 ```
 
 - `maxSeconds` defaults to **30** and is capped at **120**. `maxRecords` closes the tail after that many records. An actor pays for the whole time it waits and has its own invocation timeout, so state the budget you mean.
-- The wire format is identical to the public tail below. The connection closes with `event: end` carrying `nextCursor` when either bound is reached, or when the idle bound (half of `maxSeconds`) passes with no record.
+- The wire format is identical to the public tail below: each record frame's `id:` line is the **successor** cursor and `data.cursor` is the record's own position. The connection closes with `event: end` carrying `nextCursor` when either bound is reached, or when the idle bound (half of `maxSeconds`) passes with no record.
 - Do not tail from a ScheduledTrigger loop when `getStreamInfo` + `readStream` would do; a tail holds one of the workspace's 20 concurrent tail slots for its whole duration.
 
 ```typescript
 const res = await biqApi("/streams/order-events/tail", { queryParams: { from: cursor, maxSeconds: "60", maxRecords: "100" } });
 const text = await res.text(); // the whole SSE transcript, since the tail closes itself at the bound
 for (const frame of text.split("\n\n")) {
-  const data = frame.split("\n").find((l) => l.startsWith("data: "))?.slice(6);
-  if (frame.includes("event: record") && data) handle(JSON.parse(data));
-  if (frame.includes("event: end") && data) cursor = JSON.parse(data).nextCursor ?? cursor;
+  const lines = frame.split("\n");
+  const data = lines.find((l) => l.startsWith("data: "))?.slice(6);
+  const id = lines.find((l) => l.startsWith("id: "))?.slice(4); // the successor: where to resume
+  if (frame.includes("event: record") && data) { handle(JSON.parse(data)); if (id) cursor = id; }
+  if (frame.includes("event: end") && data) cursor = JSON.parse(data).nextCursor;
 }
 ```
 
@@ -504,11 +507,11 @@ Accept: text/event-stream
 ```
 
 - `from` is `start`, `tail`, or a cursor. **Omitting it means `tail`** — only records appended after the connection opens.
-- A `Last-Event-ID` header **overrides `from`**. Browser `EventSource` sets it automatically on reconnect to the last `id` it received, which is why resume is free.
+- A `Last-Event-ID` header **overrides `from`**. Browser `EventSource` sets it automatically on reconnect to the last `id` it received — the successor cursor — which is why resume is free. A value that is not a cursor this stream issued is rejected with `400 INVALID_CURSOR` rather than silently ignored.
 
 ### Frames
 
-Every record is one SSE event whose `id` **is** its cursor:
+Every record is one SSE event whose `id` is the position to **resume from** — the record's successor, not the record's own cursor. `data.cursor` is the record itself. Keeping the two apart is what makes reconnecting free: replay the `id` and the next session starts at the record *after* the one you already have.
 
 ```
 id: <opaque-cursor>
@@ -518,24 +521,31 @@ data: {"cursor":"<opaque-cursor>","timestamp":"2026-08-27T10:41:12.317Z","payloa
 : heartbeat
 
 event: end
-data: {"nextCursor":"<opaque-cursor>","records":2}
+data: {"nextCursor":"<opaque-cursor>","records":2,"reason":"idle"}
+
+event: error
+data: {"code":"BACKEND_UNAVAILABLE","message":"Stream storage is temporarily unavailable","retryable":true}
 ```
 
 | Frame | When | What to do |
 |---|---|---|
-| `event: record` | a record landed | handle `data`; remember `data.cursor` |
+| `event: record` | a record landed | handle `data`; remember the **`id:` line** as your resume point. Resuming from `data.cursor` re-delivers this record, because reads are inclusive |
 | `: heartbeat` (comment) | every 15 s while quiet | nothing — it keeps proxies from reaping the connection. Treat 45 s of silence as a dead connection |
-| `event: end` | the server closed the session cleanly | **reconnect with `from = data.nextCursor`**. `nextCursor` is always present; after a session that emitted nothing it equals the position you resumed from, so reconnecting with it is always correct |
-| `event: error` | a failure after the headers were sent | reconnect with backoff from the last cursor you received |
+| `event: end` | the server closed the session cleanly | `{ nextCursor, records, reason }` — **reconnect with `from = data.nextCursor`**. It is always present: after a session that emitted nothing it is the position the session opened at. `reason` is `idle`, `total`, or `maxRecords`; `idle` means the stream was silent, so pause before coming back, while the other two mean there may be more waiting |
+| `event: error` | a failure after the headers were sent | `{ code, message, retryable }` — reconnect with backoff from your last `id:` only when `retryable` is true. A non-retryable code (a deleted stream, a cursor issued for another stream) will fail identically forever, so stop |
 
-**A clean `end` is the normal path, not a failure.** The public tail closes after **60 s without a record** or **300 s in total**; a consumer that stays subscribed simply reconnects from `nextCursor` and misses nothing. Records are never duplicated across a correct resume because the cursor names an exact position.
+**A clean `end` is the normal path, not a failure.** The public tail closes after **60 s without a record** or **300 s in total**; a consumer that stays subscribed simply reconnects from `nextCursor` and misses nothing. Records are never duplicated across a correct resume because every cursor the server hands out — the `id:` line, `end.nextCursor`, a read's `nextCursor` — names the position *after* the last record it delivered.
 
 ### Errors before the stream starts
 
+The stream is resolved before the `200` is committed, so these arrive as real HTTP statuses in the `{ ok: false, error }` envelope — never as a `200` whose first frame is an error. Only a failure *after* the headers are sent becomes an `event: error` frame.
+
 | Status | Meaning |
 |---|---|
+| `400 INVALID_CURSOR` | `from` — or `Last-Event-ID` — is malformed or was issued by another stream |
 | `404 STREAM_NOT_FOUND` | the stream does not exist — or **has idle-expired** while you were tailing it. This is lifecycle, not a transient error: stop reconnecting |
 | `429 TAIL_LIMIT_EXCEEDED` + `Retry-After: 30` | the workspace already has **20** open tails. Wait out `Retry-After`, then retry |
+| `503 BACKEND_UNAVAILABLE` | storage could not be reached to open the session. Retry with backoff |
 | `401` / `403` | token missing, invalid, or without `stream:read` |
 
 ## Response Format Reference
@@ -566,7 +576,7 @@ Each `records[]` entry is `{ cursor, timestamp, payload }` — `timestamp` is th
 | `BATCH_LIMIT_EXCEEDED` | 400 | More than 500 records in one append |
 | `BATCH_BYTES_EXCEEDED` | 400 | One append over 1 MiB in total |
 | `READ_LIMIT_EXCEEDED` | 400 | `maxRecords` above 1000 |
-| `RECORD_EXCEEDS_MESSAGE_BUDGET` | 400 | StreamActor read: a single record is larger than the workspace message budget and cannot be emitted without truncation |
+| `RECORD_EXCEEDS_MESSAGE_BUDGET` | 400 | A read from actor code: a single record is larger than the workspace message budget and cannot be emitted without truncation |
 | `STREAM_NOT_FOUND` | 404 | No such stream — never created, deleted, or **idle-expired** |
 | `BACKEND_STREAM_MISSING` | 404 | The stream's storage is gone; the platform reconciles this shortly |
 | `STREAM_ALREADY_EXISTS` | 409 | Slug already in use in this workspace |
@@ -590,7 +600,7 @@ Each `records[]` entry is `{ cursor, timestamp, payload }` — `timestamp` is th
 | Records per append | 1 – 500 |
 | Bytes per append | ≤ 1 MiB |
 | Append rate | 50/s per stream, 200/s per workspace |
-| `readStream` `maxRecords` / `maxBytes` | ≤ 1000 / ≤ 1 MiB (StreamActor: the workspace message budget) |
+| `readStream` `maxRecords` / `maxBytes` | ≤ 1000 / ≤ 1 MiB (from actor code, the workspace message budget caps it) |
 | Runtime tail `maxSeconds` / `maxRecords` | default 30, ≤ 120 / ≤ 10 000 |
 | Public tail | closes at 60 s idle or 300 s total; 20 concurrent per workspace |
 | Record `kind` | `text` only |
