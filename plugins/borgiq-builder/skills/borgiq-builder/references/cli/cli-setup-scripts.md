@@ -210,6 +210,7 @@ The script generates type-appropriate default configuration for these actor type
 | `SendEmailActor` | Empty to, subject, body |
 | `DataStoreActor` | scope: canvas, action: set |
 | `CollectionActor` | action: putItem, collectionName |
+| `StreamActor` | action: appendData, stream, one record |
 | `CallFlowActor` | Empty canvasId, actorId |
 | `ButtonTriggerActor`, `ScheduledTriggerActor`, `EmailTriggerActor`, `CallableTriggerActor`, `InterfaceTriggerActor`, `CallableResponseActor` | Empty options |
 

@@ -1,6 +1,6 @@
 # Common Schemas
 
-Zod schemas for IDs, files, runtime types, context variables, actor definitions, JSON schema, flowrun messages, signals, and errors — plus the actor-type-independent `configuration.codeDir` file model shared by every actor that carries source files.
+Zod schemas for IDs, files, runtime types, context variables, actor definitions, JSON schema, flowrun messages, signals, and errors, plus the codeDir source-file model shared by the multi-file code actors.
 
 ## Table of Contents
 
@@ -84,6 +84,28 @@ export const CodeFileSchema = z.object({
 });
 
 export type CodeFile = z.infer<typeof CodeFileSchema>;
+
+/**
+ * The entrypoint each code actor type's runtime executes: the one path in `configuration.codeDir`
+ * that must exist, and that exports the handler (`main.ts`) or defines `receive` (`main.py`).
+ *
+ * **This is the single source of truth for those filenames.** The per-type `codeDir` schemas below,
+ * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
+ * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
+ * in this module rather than a sweep across the platform and the lambda runtime. Kept as
+ * four separate constants rather than one shared value because the name is a property of each
+ * type's runtime: they coincide today, and nothing should assume they always will.
+ *
+ * A rename is NOT just this edit. It is a breaking change that also needs: a data migration (every
+ * migrated `codeDir` row names the old path), the `actors/*.yaml` seed templates, the placeholder
+ * file the Deno bootstrap ships under this name, and the static `import` specifiers in the
+ * bootstrap's `handler.ts` / `handler.py`. Test fixtures deliberately keep the literal so a rename
+ * fails loudly and surfaces that list, rather than going green while running actors break.
+ */
+export const DENO_ACTOR_ENTRYPOINT = 'main.ts';
+export const DENO_TEST_ACTOR_ENTRYPOINT = 'main.ts';
+export const UNIVERSAL_TRIGGER_ACTOR_ENTRYPOINT = 'main.ts';
+export const PYTHON_ACTOR_ENTRYPOINT = 'main.py';
 
 /**
  * Paths a user's `codeDir` may not claim, because the runtime owns them.
@@ -984,8 +1006,6 @@ const RuntimeActorConfigurationSchema = z.object({
   vars: z.record(z.string(), z.any()),
   // the interpolated options
   options: z.any(),
-  // store the code that is to be run in the runtime for the actor (ONLY NodeJS actor)
-  code: z.string(),
 });
 
 export type RuntimeActorConfiguration = z.infer<typeof RuntimeActorConfigurationSchema>;
@@ -1257,6 +1277,8 @@ export const idSchema = {
   connectionId: z.string().regex(buildIdRegex(Prefix.Connection), regMsg).length(30, lenMsg),
   // schema for data store id
   dataStoreId: z.string().regex(buildIdRegex(Prefix.DataStore), regMsg).length(30, lenMsg),
+  // schema for stream id
+  streamId: z.string().regex(buildIdRegex(Prefix.Stream), regMsg).length(30, lenMsg),
   // schema for audit log id
   auditLogId: z.string().regex(buildIdRegex(Prefix.AuditLog), regMsg).length(30, lenMsg),
   // schema for api token id (personal access token)
@@ -2637,6 +2659,8 @@ export const ActorConfigurationSchema = z.object({
   vars: z.string().optional(),
   options: z.string(),
   outputs: z.string().optional(),
+  /** Legacy single-string source — inert. Kept optional so a pre-migration configuration still parses
+   *  at the wire; the runtime reads `codeDir` only. */
   code: z.string().optional(),
   error: z.string().optional(),
   connection: z.object({

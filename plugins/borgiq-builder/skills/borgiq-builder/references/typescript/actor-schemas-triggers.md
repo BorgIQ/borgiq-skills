@@ -951,18 +951,12 @@ export const WebhookBehaviorOptionsJsonSchema: BIQObjectJsonSchema = {
 import { z } from 'zod';
 
 import { BIQJsonSchema } from '../../schemas/jsonSchema.js';
-import { DENO_RESERVED_PATHS, makeCodeDirSchema } from '../codeDir.js';
+import { DENO_RESERVED_PATHS, makeCodeDirSchema, UNIVERSAL_TRIGGER_ACTOR_ENTRYPOINT } from '../codeDir.js';
 import { DenoActorOptionsJsonSchema } from '../task/deno.js';
 
 import { WebhookBehaviorOptionsSchema, WebhookBehaviorOptionsJsonSchema } from './triggerConfig.js';
 
 export { TriggerEventSchema, type TriggerEvent } from '../../schemas/trigger.js';
-
-/**
- * Legacy single-string source. Kept for the transition window only — the runtime normalizes it into
- * a one-entry `codeDir` before validating, and it is deleted at shim-drop.
- */
-export const UniversalTriggerActorCodeSchema = z.string().min(1);
 
 /**
  * The UniversalTriggerActor's `configuration.codeDir`: a project tree whose handler lives in
@@ -971,7 +965,7 @@ export const UniversalTriggerActorCodeSchema = z.string().min(1);
  * entry chain, same shared kernel, and its own `main_test.ts` harness — so it reserves the same set.
  */
 export const UniversalTriggerActorCodeDirSchema = makeCodeDirSchema({
-  requiredEntrypoint: 'main.ts',
+  requiredEntrypoint: UNIVERSAL_TRIGGER_ACTOR_ENTRYPOINT,
   reservedPaths: DENO_RESERVED_PATHS,
 });
 

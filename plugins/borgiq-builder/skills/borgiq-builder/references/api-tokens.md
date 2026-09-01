@@ -230,6 +230,9 @@ Scopes control what a token can do. A token can only perform actions matching it
 | **Collections** | `collection:read` | Read collections |
 | | `collection:write` | Create/update collections |
 | | `collection:delete` | Delete collections |
+| **Streams** | `stream:read` | List, read, and tail streams |
+| | `stream:write` | Create/update streams, append records |
+| | `stream:delete` | Delete streams |
 | **Runtimes** | `runtime:read` | Read runtimes |
 | | `runtime:write` | Create/update runtimes |
 | | `runtime:delete` | Delete runtimes |

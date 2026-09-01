@@ -12,7 +12,7 @@ Generate a minimal valid actor in the current canvas bundle when one is present;
 
 ## Inputs
 
-`$ARGUMENTS[0]` — actor type (e.g. `HttpRequestActor`, `DenoActor`, `PythonActor`, `AiActor`, `AiAgentActor`, `AgentHarnessActor`, `CollectionActor`, `RouterActor`, `MessageProcessorActor`, `WebhookTriggerActor`, `InterfaceTriggerActor`, `AppTriggerActor`, etc.).
+`$ARGUMENTS[0]` — actor type (e.g. `HttpRequestActor`, `DenoActor`, `PythonActor`, `AiActor`, `AiAgentActor`, `AgentHarnessActor`, `CollectionActor`, `StreamActor`, `RouterActor`, `MessageProcessorActor`, `WebhookTriggerActor`, `InterfaceTriggerActor`, `AppTriggerActor`, etc.).
 
 `$ARGUMENTS[1]` (optional) — human-readable actor name. If omitted, derive one from the type.
 

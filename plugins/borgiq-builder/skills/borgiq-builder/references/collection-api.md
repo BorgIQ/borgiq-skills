@@ -37,6 +37,7 @@ The Collection API provides persistent, structured storage organized into named 
 - **Writes are durable immediately; reads are eventually consistent.** The platform does not request strongly consistent reads, so `getItem`, `query`, and `batchGetItem` use DynamoDB's default — usually current within milliseconds, but a `getItem` issued right after a `putItem`/`updateItem` *can* return the previous version. Use the value a write returns instead of re-reading it; use `transactGet` when you need a consistent snapshot
 - **Transactions are ACID** — `transactWrite` is all-or-nothing across up to 100 items, even across collections
 - **No full-table scans** — queries always operate on a single collection (partition key), keeping them fast regardless of total data size
+- **Not for event logs** — data that is "what happened, in order" (events, audit trails, feeds) and consumers that resume from a cursor belong in a [Stream](stream-api.md), not in `event:<timestamp>` items. See [Collections vs Streams](stream-api.md#collections-vs-streams)
 
 **Collection Management:** Create, list, update, delete collections
 

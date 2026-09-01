@@ -58,12 +58,12 @@ Do not maintain both a bundle and out-of-band batch patches for the same canvas.
 └── .gitignore
 ```
 
-Actor paths are `actors/<category>/<type-folder>/<ACTOR_ID>/`. The CLI has an exhaustive registry of 30 types across `triggers/` (9), `tasks/` (19), and `other/` (2). Type folders are kebab-case, such as `HttpRequestActor` → `actors/tasks/http-request/` and `WebhookTriggerActor` → `actors/triggers/webhook/`. Never guess a path for an unknown type; upgrade the CLI.
+Actor paths are `actors/<category>/<type-folder>/<ACTOR_ID>/`. The CLI has an exhaustive registry of 32 types across `triggers/` (10), `tasks/` (20), and `other/` (2). Type folders are kebab-case, such as `HttpRequestActor` → `actors/tasks/http-request/` and `WebhookTriggerActor` → `actors/triggers/webhook/`. Never guess a path for an unknown type; upgrade the CLI.
 
 | Category | Actor type → type folder |
 |---|---|
-| `triggers` | `AppTriggerActor` → `app`; `ButtonTriggerActor` → `button`; `CallableTriggerActor` → `callable`; `EmailTriggerActor` → `email`; `InterfaceTriggerActor` → `interface`; `McpServerActor` → `mcp-server`; `ScheduledTriggerActor` → `scheduled`; `UniversalTriggerActor` → `universal`; `WebhookTriggerActor` → `webhook` |
-| `tasks` | `AgentHarnessActor` → `agent-harness`; `AiActor` → `ai`; `AiAgentActor` → `ai-agent`; `AiRouterActor` → `ai-router`; `CallFlowActor` → `call-flow`; `CallableResponseActor` → `callable-response`; `CollectionActor` → `collection`; `DataStoreActor` → `data-store`; `DenoActor` → `deno`; `DenoTestActor` → `deno-test`; `DeprecatedAiAgent` → `deprecated-ai-agent`; `HttpRequestActor` → `http-request`; `InterfaceActor` → `interface`; `InterfaceStatusActor` → `interface-status`; `MessageProcessorActor` → `message-processor`; `PythonActor` → `python`; `RouterActor` → `router`; `SendEmailActor` → `send-email`; `WebhookResponseActor` → `webhook-response` |
+| `triggers` | `AppTriggerActor` → `app`; `ButtonTriggerActor` → `button`; `CallableTriggerActor` → `callable`; `EmailTriggerActor` → `email`; `InterfaceTriggerActor` → `interface`; `McpServerActor` → `mcp-server`; `ReactAppTriggerActor` → `react-app`; `ScheduledTriggerActor` → `scheduled`; `UniversalTriggerActor` → `universal`; `WebhookTriggerActor` → `webhook` |
+| `tasks` | `AgentHarnessActor` → `agent-harness`; `AiActor` → `ai`; `AiAgentActor` → `ai-agent`; `AiRouterActor` → `ai-router`; `CallFlowActor` → `call-flow`; `CallableResponseActor` → `callable-response`; `CollectionActor` → `collection`; `DataStoreActor` → `data-store`; `DenoActor` → `deno`; `DenoTestActor` → `deno-test`; `DeprecatedAiAgent` → `deprecated-ai-agent`; `HttpRequestActor` → `http-request`; `InterfaceActor` → `interface`; `InterfaceStatusActor` → `interface-status`; `MessageProcessorActor` → `message-processor`; `PythonActor` → `python`; `RouterActor` → `router`; `SendEmailActor` → `send-email`; `StreamActor` → `stream`; `WebhookResponseActor` → `webhook-response` |
 | `other` | `CommentActor` → `comment`; `EchoActor` → `echo` |
 
 `actor.yaml` uses the exported, parsed-object actor shape: `configuration.options`, `inputs`, `vars`, `outputs`, `error`, credentials, and schemas are YAML objects. The YAML-strings-in-JSON shape used by `canvas-actors batch` never appears on disk.
@@ -493,7 +493,7 @@ Fix the named file, not a packed export. Common misses are an indexed actor with
 
 ### Unknown actor type
 
-`Unknown actor type 'X' - this CLI version does not support it; upgrade @borgiq/cli` means the installed 30-type registry predates that platform actor type. Upgrade the CLI; do not invent a folder path.
+`Unknown actor type 'X' - this CLI version does not support it; upgrade @borgiq/cli` means the installed 32-type registry predates that platform actor type. Upgrade the CLI; do not invent a folder path.
 
 ### Push conflict report
 

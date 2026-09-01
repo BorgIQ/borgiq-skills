@@ -702,6 +702,7 @@ AiAgentActor              task
 AgentHarnessActor         task
 DataStoreActor            task
 CollectionActor           task
+StreamActor               task
 SendEmailActor            task
 McpServerActor            task
 MessageProcessorActor     task

@@ -847,6 +847,8 @@ const result = await response.json();
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/collections` | POST | All Collection API operations (action in request body) |
+| `/streams` | POST | All Stream API operations (action in request body) |
+| `/streams/{streamIdOrSlug}/tail` | GET | Tail a stream over SSE for a bounded window (`?from=&maxSeconds=&maxRecords=`) |
 | `/issueCallbackToken` | POST | Issue a callback token for async workflows |
 | `/files/{fileId}/downloadUrl` | GET | Get a signed download URL for a file (supports `?expiresInMinutes=N&downloadAsAttachment=true`) |
 | `/files/upload` | POST | Upload multiple files (multipart) |
@@ -936,7 +938,43 @@ await collectionsApi({ action: "deleteItem", collection: "my-col", key: "k1" });
 
 See [collection-api.md](collection-api.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and DynamoDB mapping details.
 
+### Stream API
 
+The Stream API provides append-only, ordered, cursor-addressed record logs — for events, activity feeds, and incremental processing with a resumable cursor. All operations use a single `POST /streams` endpoint with the `action` field in the request body, and share the `{ ok, value, error? }` envelope, so the same helper pattern applies.
+
+**For full documentation** of all 7 actions, cursors, TTL/persistence, the paging loop, tailing, error codes, and limits, see [stream-api.md](stream-api.md).
+
+```typescript
+import { biqApi } from "@borgiq/actors";
+
+async function streamsApi<T = unknown>(body: Record<string, unknown>): Promise<T> {
+  const res = await biqApi("/streams", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json()) as { ok: boolean; value: T; error?: { code: string; message: string } };
+  if (!json.ok) {
+    const err = new Error(json.error?.message || "Stream action failed");
+    (err as any).code = json.error?.code;
+    throw err;
+  }
+  return json.value;
+}
+
+// appendData — up to 500 records, stored in full or not at all
+await streamsApi({ action: "appendData", stream: "order-events", records: [{ payload: JSON.stringify(event) }] });
+
+// readStream — one bounded page from a cursor you persisted (or "start" / "tail")
+const page = await streamsApi<{ records: { cursor: string; payload: string }[]; nextCursor: string; hasMore: boolean }>(
+  { action: "readStream", stream: "order-events", from: cursor ?? "start", maxRecords: 500 },
+);
+
+// getStreamInfo — the live tail cursor; equal to your persisted cursor means nothing new
+const info = await streamsApi<{ tailCursor: string }>({ action: "getStreamInfo", stream: "order-events" });
+```
+
+Streams must be created before use (`createStream`; nothing auto-creates) and expire one hour after their last append unless created with `persistent: true` or an explicit `idleTtlSeconds` — see [stream-api.md → Lifecycle](stream-api.md#lifecycle-ttl-and-persistence). For "what happened, in order" use a stream; for "the current value of X" use a Collection ([Collections vs Streams](stream-api.md#collections-vs-streams)).
 
 ### Callback Token API
 
