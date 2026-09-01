@@ -42,6 +42,10 @@ node_modules/
 **/node_modules/
 jspm_packages/
 
+# Lockfile — package.json has no dependencies (publishing metadata only),
+# so the lockfile pins nothing and only drifts from release-please's bumps
+package-lock.json
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
