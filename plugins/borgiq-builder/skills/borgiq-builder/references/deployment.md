@@ -41,13 +41,17 @@ borgiq workspaces deployment                       # is this workspace deployed?
 borgiq workspaces deployment --enable --build-all  # deploy, and build every buildable canvas
 borgiq workspaces deployment --json                # full detail, including per-actor build results
 
-borgiq canvases runtime-build my-canvas --wait     # build one canvas and wait for the outcome
+borgiq canvases runtime-build my-canvas            # build one canvas — waits for the outcome
 borgiq canvases runtime-build-status my-canvas     # which build runs, and whether it is outdated
 borgiq bundle push ./my-flow.borgiq-canvas --runtime-build   # push, then build, in one command
 ```
 
+Building is synchronous: `runtime-build` holds until the build finishes (typically a minute or two)
+and prints the per-actor outcome — there is nothing to poll. `--timeout <seconds>` bounds only how
+long the command waits; the build itself finishes on the server either way.
+
 **After any push to a deployed workspace, build.** `bundle push --runtime-build` does both; otherwise
-follow the push with `borgiq canvases runtime-build <canvas> --wait`. A push that is never followed by
+follow the push with `borgiq canvases runtime-build <canvas>`. A push that is never followed by
 a build leaves triggers running the previous code, which looks exactly like the deploy silently
 failing.
 
@@ -57,7 +61,7 @@ Per actor, a build reports whether it built, whether its imports were verified, 
 actually started once:
 
 ```bash
-borgiq canvases runtime-build my-canvas --wait --json
+borgiq canvases runtime-build my-canvas --json
 ```
 
 | Field | Meaning |
@@ -74,14 +78,14 @@ start-up. It is not fatal to the build — but it will throw at run time too, so
 
 | Status | Meaning |
 |---|---|
-| `pending` / `building` | still going |
+| `building` | still going (a build someone else started; your own build command returns the finished result) |
 | `ready` | every code actor built |
 | `partially_ready` | some built; the ones that did run from the build, the rest run their current code |
 | `failed` | nothing usable came out of it; the canvas keeps running its current code |
 | `stale` | the workspace's runtime was updated after this build, so it no longer applies |
 | `expired` | the build's stored artifacts have been cleaned up |
 
-`partially_ready` is a **success** — `runtime-build --wait` exits 0 for it, and prints which actors
+`partially_ready` is a **success** — `runtime-build` exits 0 for it, and prints which actors
 did not build. Treat those as work to do, not as a failed deploy.
 
 ## Rolling back
@@ -106,7 +110,7 @@ touching the canvas's code.
 | `outdated: true` | the canvas has been edited since its running build | build again — triggers are still running the old build |
 | An actor with `guard: rejected` | the actor imports a file outside its own files | move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
 | An actor with `warm: failed` | it installed, but its code threw at start-up | run the actor with a test run and fix the error |
-| A trigger ran old code after a push | the push was not followed by a build | `borgiq canvases runtime-build <canvas> --wait` |
+| A trigger ran old code after a push | the push was not followed by a build | `borgiq canvases runtime-build <canvas>` |
 | Occasional "runtime build could not be used" in logs | transient; the run was retried without the build | nothing to do — it self-corrects |
 
 ## Writing code actors for a deployed workspace

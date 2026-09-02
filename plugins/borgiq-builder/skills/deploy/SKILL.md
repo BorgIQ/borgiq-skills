@@ -98,7 +98,7 @@ This format requires JSON with each config field as a YAML string (see the same 
    ```
    If `isDeployed` is `true`, build the canvas and report the per-actor result:
    ```bash
-   borgiq canvases runtime-build <canvasSlugOrId> --wait --json
+   borgiq canvases runtime-build <canvasSlugOrId> --json
    ```
    A `ready` build means every code actor built. A `partially_ready` build is still a success — the
    actors that built run from it — but name the ones that did not and why, so the user can fix them.
@@ -120,7 +120,7 @@ This format requires JSON with each config field as a YAML string (see the same 
 | Bundle validation reports `path` + `message` | Fix the named `canvas.yaml`, `actor.yaml`, or `code/*` file, then rerun `bundle validate` |
 | `Push aborted: ... actor conflict(s)` | Run bare `bundle pull` (safe: applies server-only changes, keeps local edits), then re-push; if the pull also aborts, ask the user to choose `pull --replace` (server wins) or `push --force-local` (local wins) |
 | `Unknown actor type 'X'` | Upgrade `@borgiq/cli`; do not guess an actor folder path |
-| Deployed workspace, but a trigger still runs the old code | The push was not followed by a build | `borgiq canvases runtime-build <canvas> --wait` |
+| Deployed workspace, but a trigger still runs the old code | The push was not followed by a build | `borgiq canvases runtime-build <canvas>` |
 | Build reports `runtime-too-small` | The canvas's runtime is configured below what a build needs | Raise the runtime's timeout, memory and ephemeral storage in the workspace's Runtimes settings, then build again |
 | Build reports `build-in-progress` (409) | A build of this canvas is already running | Wait for it — builds of one canvas are serialised |
 | An actor's build result has `guard: rejected` | The actor imports a file outside its own files | Move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |

@@ -13,7 +13,7 @@ Run a flow end-to-end against a deployed canvas, poll until completion, and repo
 > **On a deployed workspace, `borgiq triggers run` executes the canvas's active runtime build, not its
 > current code.** If the flow was edited since the last build, this tests the OLD code and the result
 > will not reflect your changes. Either build the canvas first
-> (`borgiq canvases runtime-build <canvas> --wait`) or, to check an edit in isolation, use an editor
+> (`borgiq canvases runtime-build <canvas>` — it waits for the build) or, to check an edit in isolation, use an editor
 > test run — those always use current code. Check with `borgiq workspaces deployment --json`; a
 > canvas showing `outdated: true` is exactly this situation.
 
