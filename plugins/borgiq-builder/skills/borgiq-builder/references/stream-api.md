@@ -23,6 +23,7 @@ From actor code, every operation goes through a single `POST /streams` runtime e
 - [Tailing from actor code](#tailing-from-actor-code)
 - [Public REST API](#public-rest-api)
 - [Tailing over Server-Sent Events](#tailing-over-server-sent-events)
+- [Tailing from a React app](#tailing-from-a-react-app)
 - [Response Format Reference](#response-format-reference)
 - [Error Codes](#error-codes)
 - [Input Validation Constraints](#input-validation-constraints)
@@ -547,6 +548,26 @@ The stream is resolved before the `200` is committed, so these arrive as real HT
 | `429 TAIL_LIMIT_EXCEEDED` + `Retry-After: 30` | the workspace already has **20** open tails. Wait out `Retry-After`, then retry |
 | `503 BACKEND_UNAVAILABLE` | storage could not be reached to open the session. Retry with backoff |
 | `401` / `403` | token missing, invalid, or without `stream:read` |
+| `403 STREAM_NOT_DECLARED` / `429 VIEWER_TAIL_LIMIT_EXCEEDED` | **app surface only** (`/v1/app-streams/…`, [below](#tailing-from-a-react-app)): the app's build does not declare this stream / this viewer already has **4** app tails open |
+
+## Tailing from a React app
+
+A React app served by a `ReactAppTriggerActor` tails a stream through its own route family, authenticated by the **app-actor token** the `@borgiq/actors` SDK already holds:
+
+```http
+GET /v1/app-streams/:org/:workspace/:streamIdOrSlug/tail?from=<cursor|start|tail>
+GET /v1/app-streams/:org/:workspace/:streamIdOrSlug/records?from=<cursor|start|tail>&maxRecords=&maxBytes=
+X-App-Actor-Token: <app-actor JWT>
+Accept: text/event-stream
+```
+
+- **Header only.** The token travels in `X-App-Actor-Token`, never in a query string. There is no PAT and no `stream:read` scope on this surface.
+- **Authorized by declaration, not by workspace.** The app's build manifest lists the streams it may read (`options.streams` on the actor — an exact `slug` or a `slugPrefix`, same workspace only, frozen at Build). Anything else is `403 STREAM_NOT_DECLARED`, including a stream declared after the last Build.
+- **Same frames, same pre-commit statuses** as the [public tail](#tailing-over-server-sent-events): `id:` / `event: record` / heartbeat / `end` / `error`, the same 60 s idle / 300 s total budgets, and the same `{ ok: false, error }` envelope before the `200`. The one difference: **no `Last-Event-ID`** — the client is `fetch`, not `EventSource`, and the SDK always states `from`.
+- **A separate cap pool.** App tails draw from their own pool of **100 per workspace** (`TAIL_LIMIT_EXCEEDED`), never from the 20 public/actor tails, plus a per-viewer ceiling of **4** open tails per app (`VIEWER_TAIL_LIMIT_EXCEEDED`) and **30 opens/min** per viewer. All carry `Retry-After: 30`.
+- **Read only.** There is no app-token append; an app writes to a stream by calling an endpoint whose flow appends.
+
+Do not call these routes by hand from app code — use the SDK, which attaches the token, dedupes connections per stream, resumes from its cursor, and falls back to polling `…/records` while capped. `useStreamTail`, `tailStream` and `readStream` are documented in the [React app builder skill](../../borgiq-react-app-builder/SKILL.md#following-a-stream--usestreamtail).
 
 ## Response Format Reference
 
@@ -577,12 +598,14 @@ Each `records[]` entry is `{ cursor, timestamp, payload }` — `timestamp` is th
 | `BATCH_BYTES_EXCEEDED` | 400 | One append over 1 MiB in total |
 | `READ_LIMIT_EXCEEDED` | 400 | `maxRecords` above 1000 |
 | `RECORD_EXCEEDS_MESSAGE_BUDGET` | 400 | A read from actor code: a single record is larger than the workspace message budget and cannot be emitted without truncation |
+| `STREAM_NOT_DECLARED` | 403 | App surface only: the React app's build manifest does not declare this stream (`options.streams`) — declare it and rebuild |
 | `STREAM_NOT_FOUND` | 404 | No such stream — never created, deleted, or **idle-expired** |
 | `BACKEND_STREAM_MISSING` | 404 | The stream's storage is gone; the platform reconciles this shortly |
 | `STREAM_ALREADY_EXISTS` | 409 | Slug already in use in this workspace |
 | `STREAM_LIMIT_EXCEEDED` | 409 | Workspace already has 100 streams |
 | `APPEND_RATE_EXCEEDED` | 429 | Over 50 appends/s on the stream or 200/s in the workspace — retry after a brief delay |
-| `TAIL_LIMIT_EXCEEDED` | 429 | 20 tails already open in the workspace — honour `Retry-After` |
+| `TAIL_LIMIT_EXCEEDED` | 429 | 20 tails already open in the workspace — or, on the app surface, 100 in its separate **app-tail pool** — honour `Retry-After` |
+| `VIEWER_TAIL_LIMIT_EXCEEDED` | 429 | App surface only: this viewer already has 4 app tails open on this app — close a tab, then honour `Retry-After` |
 | `RECORD_DECRYPTION_FAILED`, `INTERNAL_ERROR` | 500 | Platform-side failure — retry, then report |
 | `BACKEND_UNSUPPORTED` | 501 | The stream's storage backend cannot perform this operation |
 | `BACKEND_UNAVAILABLE`, `BACKEND_ERROR` | 503 | Storage temporarily unavailable — retry with backoff |
@@ -621,7 +644,7 @@ Several canvases append to one persistent stream (`audit-log`, `order-events`). 
 
 ### Live view
 
-A web app or an external dashboard opens the public tail from `start` (replay, then follow) or `tail` (follow only) and reconnects from `nextCursor` on every `end`. Records the UI has captured stay on screen through a reconnect.
+A web app or an external dashboard opens the public tail from `start` (replay, then follow) or `tail` (follow only) and reconnects from `nextCursor` on every `end`. Records the UI has captured stay on screen through a reconnect. A React app on a canvas does the same through `useStreamTail` — see [Tailing from a React app](#tailing-from-a-react-app).
 
 ### What a stream is not
 
