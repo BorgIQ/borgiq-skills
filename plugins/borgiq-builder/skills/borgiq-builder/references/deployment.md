@@ -28,11 +28,13 @@ triggered execution that is pinned.
 
 ## What gets built
 
-Only **code actors**: Deno actors, Universal Trigger actors, and Python actors. Everything else on the
-canvas — HTTP requests, AI actors, routers, data stores — has nothing to compile and is unaffected.
+Only **code actors**: Deno actors, Universal Trigger actors, Python actors, and Deno Test actors.
+Everything else on the canvas — HTTP requests, AI actors, routers, data stores — has nothing to
+compile and is unaffected.
 
-Deno Test actors are deliberately excluded. They exist to run tests against code you are editing, so
-pinning them to a build would defeat them.
+Deno and Universal Trigger actors are built together into one shared artifact per canvas; Python and
+Deno Test actors each get their own. The difference is invisible in the build report — every code
+actor shows up with its own per-actor result either way.
 
 ## Using it
 
