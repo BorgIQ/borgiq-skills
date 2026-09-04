@@ -52,6 +52,10 @@ Read the error message literally. The most common patterns and their fixes:
 | Error pattern | Likely cause | Fix |
 |---|---|---|
 | `401` / `403` from HttpRequestActor | Connection has expired creds or wrong scope | Refresh the connection in the workspace; re-deploy or re-run |
+| The flow runs code you already changed | The workspace is deployed, so every run (the play button included) executes the canvas's last full runtime build; the edit has not been built | `borgiq workspaces deployment --json` to confirm, then `borgiq canvases runtime-build <canvas>` |
+| `No built runtime available for canvas …` | The workspace is deployed and the canvas has no fully successful build — nothing can run until one finishes | `borgiq canvases runtime-build <canvas>` and fix any actors that fail to build |
+| `imports a module outside its own code directory` at actor start | A code actor imports a file outside its own `code/` tree | Move the file into the actor's own files, or use an `npm:`/`jsr:` package. On a deployed workspace the build names the offending specifier |
+| `could not be started from its workspace's runtime build` | Transient — the prebuilt environment could not be fetched; the run was automatically retried without it | Nothing to do. If it is persistent, rebuild the canvas |
 | `Timeout waiting for response` | Slow upstream API or no response | Check the API's status page; consider `retryIf` on the actor's `error` block |
 | `${{ inputs.X }}` evaluates to `undefined` | Upstream actor didn't emit `X`, or msgVar was renamed | Verify with `borgiq flowrun-jobs runtime-data <jobId> --root-path inputs` |
 | `Schema validation failed` on an AI output | `outputSchema` too strict, model produced extra/missing fields | See `borgiq-json-schema-builder`: tighten enums, mark non-essential as optional |

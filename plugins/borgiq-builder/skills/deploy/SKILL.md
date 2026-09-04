@@ -3,7 +3,7 @@ name: deploy
 description: Deploy a BorgIQ canvas bundle directory or workflow YAML to the platform via the borgiq CLI. Confirms auth status first, validates the selected artifact, surfaces server-side errors verbatim, and returns the canvas URL.
 disable-model-invocation: true
 argument-hint: "[path/to/bundle-or-workflow.yaml] [--workspace <slug>]"
-allowed-tools: Bash(borgiq auth*) Bash(borgiq bundle*) Bash(borgiq canvases*) Bash(borgiq connections*) Bash(borgiq credentials*) Bash(borgiq secrets*) Bash(borgiq assets*) Bash(ls*) Bash(test*)
+allowed-tools: Bash(borgiq auth*) Bash(borgiq bundle*) Bash(borgiq canvases*) Bash(borgiq workspaces*) Bash(borgiq connections*) Bash(borgiq credentials*) Bash(borgiq secrets*) Bash(borgiq assets*) Bash(ls*) Bash(test*)
 ---
 
 # /deploy — deploy a BorgIQ workflow
@@ -91,7 +91,24 @@ This format requires JSON with each config field as a YAML string (see the same 
    ```bash
    borgiq canvases validate <canvasSlugOrId> --json
    ```
-3. If the user wants to verify the flow actually runs, suggest `/borgiq-builder:test` next.
+3. **Check whether the workspace is deployed** — if it is, the push you just made does NOT change
+   what any run executes until the canvas is built:
+   ```bash
+   borgiq workspaces deployment --json
+   ```
+   If `isDeployed` is `true`, build the canvas and report the per-actor result:
+   ```bash
+   borgiq canvases runtime-build <canvasSlugOrId> --json
+   ```
+   A `ready` build means every code actor built and the canvas now serves it. A `partially_ready`
+   or `failed` build does NOT serve: the canvas keeps running its previous full build — and if it
+   never had one, every run fails with "No built runtime available" until one succeeds. Name the
+   actors that did not build and why, and report the deploy as incomplete rather than claiming it
+   succeeded.
+
+   (`borgiq bundle push <dir> --runtime-build` does the push and the build in one step; use it when
+   you already know the workspace is deployed.)
+4. If the user wants to verify the flow actually runs, suggest `/borgiq-builder:test` next.
 
 ## Failure modes
 
@@ -104,3 +121,8 @@ This format requires JSON with each config field as a YAML string (see the same 
 | Bundle validation reports `path` + `message` | Fix the named `canvas.yaml`, `actor.yaml`, or `code/*` file, then rerun `bundle validate` |
 | `Push aborted: ... actor conflict(s)` | Run bare `bundle pull` (safe: applies server-only changes, keeps local edits), then re-push; if the pull also aborts, ask the user to choose `pull --replace` (server wins) or `push --force-local` (local wins) |
 | `Unknown actor type 'X'` | Upgrade `@borgiq/cli`; do not guess an actor folder path |
+| Deployed workspace, but a trigger still runs the old code | The push was not followed by a build | `borgiq canvases runtime-build <canvas>` |
+| Build reports `runtime-too-small` | The canvas's runtime is configured below what a build needs | Raise the runtime's timeout, memory and ephemeral storage in the workspace's Runtimes settings, then build again |
+| Build reports `build-in-progress` (409) | A build of this canvas is already running | Wait for it — builds of one canvas are serialised |
+| An actor's build result has `guard: rejected` | The actor imports a file outside its own files | Move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
+| An actor's build result has `warm: failed` | Dependencies installed, but the actor's code threw at start-up | Test-run the actor and fix the error; it will throw at run time too |
