@@ -91,8 +91,8 @@ This format requires JSON with each config field as a YAML string (see the same 
    ```bash
    borgiq canvases validate <canvasSlugOrId> --json
    ```
-3. **Check whether the workspace is deployed** — if it is, the push you just made does NOT change what
-   triggers run until the canvas is built:
+3. **Check whether the workspace is deployed** — if it is, the push you just made does NOT change
+   what any run executes until the canvas is built:
    ```bash
    borgiq workspaces deployment --json
    ```
@@ -100,10 +100,11 @@ This format requires JSON with each config field as a YAML string (see the same 
    ```bash
    borgiq canvases runtime-build <canvasSlugOrId> --json
    ```
-   A `ready` build means every code actor built. A `partially_ready` build is still a success — the
-   actors that built run from it — but name the ones that did not and why, so the user can fix them.
-   A `failed` build means the canvas keeps running its previous code; report the error rather than
-   claiming the deploy succeeded.
+   A `ready` build means every code actor built and the canvas now serves it. A `partially_ready`
+   or `failed` build does NOT serve: the canvas keeps running its previous full build — and if it
+   never had one, every run fails with "No built runtime available" until one succeeds. Name the
+   actors that did not build and why, and report the deploy as incomplete rather than claiming it
+   succeeded.
 
    (`borgiq bundle push <dir> --runtime-build` does the push and the build in one step; use it when
    you already know the workspace is deployed.)

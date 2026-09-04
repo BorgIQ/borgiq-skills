@@ -535,9 +535,10 @@ configuration:
 
 (ReactAppTriggerActor also uses `configuration.codeDir`, for a whole Vite project — see the `borgiq-react-app-builder` spoke. AppTriggerActor keeps `configuration.options.html` / `.css` / `.script`.)
 
-On a **deployed** workspace, a canvas's code actors are compiled ahead of time and triggers run that
-build rather than the canvas's current code — so an edit reaches triggers only after the next build.
-See [references/deployment.md](references/deployment.md).
+On a **deployed** workspace, a canvas's code actors are compiled ahead of time and every run —
+triggers and editor test runs alike — executes that build rather than the canvas's current code, so
+an edit takes effect only after the next build; a canvas with no fully successful build cannot run
+at all. See [references/deployment.md](references/deployment.md).
 
 ## Actor Memory
 
