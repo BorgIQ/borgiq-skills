@@ -97,7 +97,7 @@ ACTR01reactapp:
         content: |
           import { useEndpoint, useGetSession } from '@borgiq/actors'
           export default function App() {
-            // Who is viewing the app: { id, email, name }. Passive — resolves on mount, no trigger().
+            // Who is viewing the app: { id, userId, email, name, appSessionId }. Passive — resolves on mount, no trigger().
             // Null outside the BorgIQ iframe (local dev), so gate identity UI on it.
             const { data: session } = useGetSession()
             // browser-fetch semantics: search (query) + init (method/headers/body/signal). body passes through.
@@ -205,13 +205,15 @@ const { data: session, loading, error } = useGetSession()
 if (session) return <p>Hello, {session.name || session.email}</p>
 
 // Non-hook form — parity with callEndpoint; rejects instead of returning an error state.
-const viewer = await getSession()   // { id, email, name }
+const viewer = await getSession()   // { id, userId, email, name, appSessionId }
 ```
 
-- Resolves the **signed-in viewer** as `{ id, email, name }` — the same identity flows behind the endpoints see at `trigger.user`. `name` may be `''`; `data` is `null` until it resolves and on error.
-- Decoded from the app token the SDK already holds, so it costs **no extra request** and needs no configuration. It is fixed for the page load: a profile rename shows the old `name` until reload.
+- Resolves the **signed-in viewer** as `{ id, userId, email, name, appSessionId }` — the same identity flows behind the endpoints see at `trigger.user`. `userId` is an alias of `id`; prefer it in new code, since it cannot be confused with `appSessionId`. `name` may be `''`; `data` is `null` until it resolves and on error.
+- **`appSessionId` identifies the visit, not the person: one id per (BorgIQ login × this app).** It is stable across page reloads and token refreshes, a different app under the same login gets a different id, and a new BorgIQ login gets a new one. Use it to key per-visit state — a draft, a wizard position, a chat thread, a scoped cache — typically as a collection key, with `userId` alongside when the data belongs to the person rather than the visit. Two consequences worth knowing before they surprise you: **multiple tabs of the same app share one id** (derive your own per-tab suffix if you need tab identity), and **a new login is a new id** — including a session handoff, so per-visit state does not follow the viewer across logins.
+- `appSessionId` may be **absent** (older tokens predate it) — treat absence as "no session information" and degrade gracefully, never crash.
+- Decoded from the app token the SDK already holds, so it costs **no extra request** and needs no configuration. The result is cached for the login: a profile rename shows the old `name` until reload, but a re-login in the parent (even without a reload) refreshes the session on the next read.
 - Outside the BorgIQ iframe there is no viewer — under a local `npm run dev` it settles **immediately** with `SessionUnavailableError` rather than waiting on the token bridge. Gate identity UI on `session` so the page still renders locally.
-- **Do not use it as an authorization check.** It is display-level identity; enforce access on the canvas side (`authorizationLevel: 'apps'` endpoints + per-app grants), where `trigger.user` is server-attested.
+- **Do not use it as an authorization check — and `appSessionId` is not an authorization token.** Both are display-level identity; enforce access on the canvas side (`authorizationLevel: 'apps'` endpoints + per-app grants), where `trigger.user` is server-attested. Flows must trust `trigger.user.appSessionId` and never a session id arriving in a request body or query string — the first was lifted from a signature-verified token, the second is whatever the caller typed.
 
 ## Following a stream — `useStreamTail`
 
