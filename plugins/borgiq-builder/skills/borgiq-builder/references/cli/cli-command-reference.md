@@ -91,6 +91,26 @@ borgiq workspaces list --org acme-corp --json
 }
 ```
 
+### `borgiq workspaces deployment`
+
+Show or change whether the workspace is deployed. On a deployed workspace, every run of a canvas —
+triggers and editor test runs alike — executes the canvas's active runtime build instead of its
+current code. See [deployment.md](../deployment.md) for the full model.
+
+```bash
+borgiq workspaces deployment            # status table: per canvas, code actors / running / latest / state
+borgiq workspaces deployment --enable   # deploy the workspace (then build each canvas)
+borgiq workspaces deployment --disable  # undeploy: runs execute each canvas's current code again
+borgiq workspaces deployment --json     # full detail, including per-actor build results
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--enable` | Deploy the workspace |
+| `--disable` | Undeploy the workspace |
+
 ---
 
 ## Canvas Commands
@@ -410,6 +430,44 @@ borgiq canvases layout CANV01kd6gr3vjxm2rs0k8s3fjq4nl \
 | Flag | Description |
 |------|-------------|
 | `--source-actor-id <id>` | Layout only downstream of this actor (repeatable) |
+
+### `borgiq canvases runtime-build`
+
+Build one canvas of a **deployed** workspace: snapshot it, compile every code actor (React apps
+included), install their dependencies. Synchronous — the command holds until the build finishes
+(typically a minute or two) and prints the per-actor outcome; there is nothing to poll. Refuses on a
+non-deployed workspace (exit 2 — nothing there would run the build). Exit 0 only when every actor
+built; a `partially_ready` build exits non-zero because it serves nothing — the previous full build
+keeps running. See [deployment.md](../deployment.md).
+
+```bash
+borgiq canvases runtime-build my-canvas --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--timeout <seconds>` | How long to wait for the build (default 900); the build itself finishes on the server either way |
+
+### `borgiq canvases runtime-build-status`
+
+Which build the canvas runs, whether the canvas has been edited since (`outdated`), and — with
+`--history` — every build of the canvas.
+
+```bash
+borgiq canvases runtime-build-status my-canvas --json
+borgiq canvases runtime-build-status my-canvas --history
+```
+
+### `borgiq canvases runtime-build-activate`
+
+Make an earlier fully-successful (`ready`) build the one the canvas's runs execute — the rollback
+path.
+
+```bash
+borgiq canvases runtime-build-activate my-canvas CRBD01…
+```
 
 ---
 
