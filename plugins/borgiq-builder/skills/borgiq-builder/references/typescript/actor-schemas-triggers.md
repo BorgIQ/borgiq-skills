@@ -548,7 +548,7 @@ export const ReactAppTriggerActorOptionsJsonSchema: BIQJsonSchema = {
     endpoints: {
       type: BIQJsonSchemaType.Array,
       title: 'Endpoints',
-      description: 'Named webhook-trigger endpoints the app calls via useEndpoint("<name>"). Target a webhook-capable trigger — a WebhookTrigger, or a UniversalTrigger with its webhook source enabled (use authorizationLevel: "apps") — on this canvas, or another canvas/workspace in the same org — leave workspace/canvas blank for this canvas. Coordinates are slugs. Endpoint changes take effect after the next Build.',
+      description: 'Named webhook-trigger endpoints the app calls via useEndpoint("<name>"). Target a webhook-capable trigger — a WebhookTrigger, or a UniversalTrigger with its webhook source enabled (use authorizationLevel: "apps", or "appsAndApiKey" when external API callers share the endpoint) — on this canvas, or another canvas/workspace in the same org — leave workspace/canvas blank for this canvas. Coordinates are slugs. Endpoint changes take effect after the next Build.',
       items: {
         type: BIQJsonSchemaType.Object,
         properties: {
@@ -740,7 +740,7 @@ export const WebhookConfigSchema = z.object({
   triggerKey: z.string().optional()
     .describe('The unique key in the webhook URL used to route requests to this actor.'),
   authorizationLevel: z.enum(BIQWebhookAuthorizationLevel).optional()
-    .describe('Who can call this webhook. \'public\' allows anyone, \'apps\' requires a valid app webhook token.'),
+    .describe('Who can call this webhook. \'public\' allows anyone, \'apps\' requires a valid app webhook token, \'apiKey\' requires a valid API key (a personal access token in Authorization: Bearer or X-Api-Key), \'appsAndApiKey\' accepts either.'),
   allowedMethods: z.array(z.enum(['get', 'post', 'put', 'delete'])).optional()
     .describe('HTTP methods accepted by the webhook URL.'),
   responseTimeout: z.number().gte(1).lte(60).optional()
@@ -856,7 +856,7 @@ export const WebhookConfigJsonSchema: BIQJsonSchema = {
       type: BIQJsonSchemaType.String,
       title: 'Authorization level',
       description: 'Control who can call this webhook.',
-      enum: [BIQWebhookAuthorizationLevel.Public, BIQWebhookAuthorizationLevel.Apps],
+      enum: [BIQWebhookAuthorizationLevel.Public, BIQWebhookAuthorizationLevel.Apps, BIQWebhookAuthorizationLevel.ApiKey, BIQWebhookAuthorizationLevel.AppsAndApiKey],
     },
     allowedMethods: {
       type: BIQJsonSchemaType.Array,
@@ -1032,6 +1032,7 @@ export type UniversalTriggerActorResult = z.infer<typeof UniversalTriggerActorRe
 import { z } from 'zod';
 
 import { BIQJsonSchema } from '../../schemas/jsonSchema.js';
+import { WebhookTriggerAuthSchema, WebhookTriggerRequestUserSchema } from '../../schemas/runtime.js';
 
 import { WebhookBehaviorOptionsSchema, WebhookBehaviorOptionsJsonSchema } from './triggerConfig.js';
 
@@ -1061,7 +1062,11 @@ export const WebhookTriggerActorResultSchema = z.object({
       .describe('The request id of the webhook request'),
     ipAddress: z.string().optional()
       .describe('The IP address of the webhook request'),
+    user: WebhookTriggerRequestUserSchema.optional()
+      .describe('The authenticated caller when the request carried an app actor webhook token or an API key; absent on public calls'),
   }),
+  auth: WebhookTriggerAuthSchema.optional()
+    .describe('Which API key authenticated the request (id and name, never the secret); present only on API-key-authenticated calls'),
   method: z.string().nullish()
     .describe('The method of the request. Valid methods are GET, POST, PUT, DELETE'),
   headers: z.record(z.string(), z.any()).nullish()

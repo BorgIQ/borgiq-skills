@@ -24,7 +24,7 @@ A single UniversalTriggerActor can fire four ways:
 
 | Firing mode | Enabled by | `req.trigger` |
 |---|---|---|
-| **Webhook** | `configuration.webhook.enabled: true` | `{ type: 'webhook', user?, request }` — `request` is the parsed inbound HTTP request (`meta`, `method`, `headers`, `body`, `queryParams`, `rawBody?`); `user` is the authenticated caller (`{ id, name?, email }`) when the call carried an app token, e.g. a React app calling one of its declared endpoints |
+| **Webhook** | `configuration.webhook.enabled: true` | `{ type: 'webhook', user?, request }` — `request` is the parsed inbound HTTP request (`meta`, `method`, `headers`, `body`, `queryParams`, `rawBody?`); `user` is the authenticated caller (`{ id, name?, email }`) when the call carried an app token (e.g. a React app calling one of its declared endpoints) or an API key (the key's owner; `request.auth = { type: 'apiToken', keyId, keyName }` names the key). The same user is on `request.meta.user` |
 | **Schedule** | `configuration.schedule.enabled: true` | `{ type: 'schedule', triggeredAt, lastTriggeredAt? }` |
 | **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }` — `event` is the lifecycle transition: `'canvas-enabled'` or `'canvas-disabled'` |
 | **Manual** | Always available (canvas Invoke) | `{ type: 'manual' }` |
@@ -127,7 +127,7 @@ borgiq generate id webhooktriggerkey
 |-------|------|---------|-------------|
 | `enabled` | boolean | - | When false the webhook URL returns 404 and no flowruns are created |
 | `triggerKey` | string | - | Unique key forming the webhook URL — required when `enabled: true` |
-| `authorizationLevel` | `public` \| `apps` | `public` | Who may call the webhook |
+| `authorizationLevel` | `public` \| `apps` \| `apiKey` \| `appsAndApiKey` | `public` | Who may call the webhook — `apiKey` accepts a personal access token in `Authorization: Bearer` / `X-Api-Key`; `appsAndApiKey` accepts either an app token or an API key |
 | `allowedMethods` | string[] | `["post"]` | HTTP methods accepted (get, post, put, delete) |
 | `responseTimeout` | number | `30` | Timeout in seconds when `respondImmediately` is false (1-60) |
 
@@ -224,7 +224,8 @@ import { Signal } from "@borgiq/actors";
 export default async function receive(req: TriggerRequest): Promise<Response> {
   // req.trigger is the delivered event, discriminated by `type`:
   // - webhook:  req.trigger.request carries the HTTP request (meta, method, headers, body, queryParams);
-  //             req.trigger.user is the authenticated caller when the call carried an app token
+  //             req.trigger.user is the authenticated caller when the call carried an app token or an API key
+  //             (req.trigger.request.auth names the key on API-key calls)
   // - schedule: req.trigger.triggeredAt is this fire; req.trigger.lastTriggeredAt is the previous fire (if tracked)
   // - lifecycle: req.trigger.event is the lifecycle transition ('canvas-enabled' | 'canvas-disabled')
   // - manual:   no extra fields

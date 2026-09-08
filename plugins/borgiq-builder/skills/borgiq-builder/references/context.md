@@ -168,11 +168,12 @@ The reason: at response-build time the trigger actor hasn't emitted yet, so `msg
   "headers": { "content-type": "application/json", "x-github-event": "push", "...": "..." },
   "body": { "...": "parsed JSON / form / text" },
   "queryParams": { "...": "..." },
-  "rawBody": "raw body string, only when options.webhook.emitRawBody = true"
+  "rawBody": "raw body string, only when options.webhook.emitRawBody = true",
+  "auth": { "type": "apiToken", "keyId": "TOKN...", "keyName": "acme-prod" }
 }
 ```
 
-`meta.user` is only populated for app-authorized webhooks (`configuration.webhook.authorizationLevel: 'apps'`).
+`meta.user` is populated when the call carried a credential that identifies a BorgIQ user — an app actor webhook token (`configuration.webhook.authorizationLevel: 'apps'` or `'appsAndApiKey'`) or an API key (`'apiKey'` or `'appsAndApiKey'`, where it is the key's owner). `auth` is present only on API-key-authenticated calls and names the key (id + name, never the secret; the `authorization` / `x-api-key` headers are stripped before the request is stored).
 
 **Example — Slack `url_verification` challenge (CORRECT):**
 

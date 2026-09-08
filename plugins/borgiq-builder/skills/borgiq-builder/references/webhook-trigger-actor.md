@@ -79,7 +79,7 @@ actors:
 | Option | Location | Type | Default | Description |
 |--------|----------|------|---------|-------------|
 | `triggerKey` | `configuration.webhook` | string | - | Unique key forming the webhook URL (static, literal only) |
-| `authorizationLevel` | `configuration.webhook` | `public` \| `apps` | `public` | Who may call the webhook (static, literal only) |
+| `authorizationLevel` | `configuration.webhook` | `public` \| `apps` \| `apiKey` \| `appsAndApiKey` | `public` | Who may call the webhook (static, literal only). `public` — anyone; `apps` — a valid app actor webhook token (`x-app-actor-token`); `apiKey` — a valid API key (a personal access token in `Authorization: Bearer` or `X-Api-Key`, whose owner is a member of the workspace and whose scopes include `workspace:access`); `appsAndApiKey` — either credential, the app token taking precedence when both are present |
 | `allowedMethods` | `configuration.webhook` | string[] | `["post"]` | HTTP methods accepted (get, post, put, delete) — static, literal only |
 | `responseTimeout` | `configuration.webhook` | number | `30` | Request timeout in seconds when `respondImmediately` is false (1-60) — static, literal only |
 | `respondImmediately` | `configuration.options.webhook` | boolean | `true` | Respond immediately before workflow completes (interpolatable) |
@@ -99,7 +99,7 @@ import { z } from 'zod';
 // STATIC, admission-consumed config — lives at `configuration.webhook` (never interpolated).
 export const WebhookConfigSchema = z.object({
   triggerKey: z.string().optional(),
-  authorizationLevel: z.enum(['public', 'apps']).optional(),
+  authorizationLevel: z.enum(['public', 'apps', 'apiKey', 'appsAndApiKey']).optional(),
   allowedMethods: z.array(z.enum(['get', 'post', 'put', 'delete'])).optional(),
   responseTimeout: z.number().gte(1).lte(60).optional(),
   enabled: z.boolean().optional(), // UniversalTriggerActor only
@@ -231,7 +231,8 @@ The webhook trigger emits a message containing the HTTP request details:
 |-------|-------------|
 | `meta.requestId` | Unique identifier for this webhook request |
 | `meta.ipAddress` | Caller IP address (optional — present when resolvable from the incoming request) |
-| `meta.user` | Authenticated user info `{ id, name?, email }` — only populated when the webhook is **app-authorized** (`configuration.webhook.authorizationLevel: 'apps'`). Mirrors the `$.user` shape emitted by InterfaceTriggerActor so downstream actors can use the same templates. |
+| `meta.user` | Authenticated user info `{ id, name?, email }` — populated when the call carried a credential that identifies a BorgIQ user: an app actor webhook token (`authorizationLevel: 'apps'` / `'appsAndApiKey'`) or an API key (`'apiKey'` / `'appsAndApiKey'`, where it is the key's owner). Absent on public calls. Mirrors the `$.user` shape emitted by InterfaceTriggerActor so downstream actors can use the same templates. |
+| `auth` | `{ type: 'apiToken', keyId, keyName }` — which API key authenticated the call; present only on API-key-authenticated calls. The key's public id and the name its owner gave it, never the secret (the `authorization` / `x-api-key` headers are stripped from `headers` before the request is stored). Branch on `keyName` / `keyId` for per-caller behavior. |
 | `method` | HTTP method (GET, POST, PUT, DELETE) |
 | `headers` | Request headers (lowercase keys) |
 | `queryParams` | URL query parameters |
