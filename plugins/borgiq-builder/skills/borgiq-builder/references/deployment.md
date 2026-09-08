@@ -57,7 +57,7 @@ and security options are frozen into that build.
 
 ```bash
 borgiq workspaces deployment                       # is this workspace deployed? which canvases have builds?
-borgiq workspaces deployment --enable --build-all  # deploy, and build every buildable canvas
+borgiq workspaces deployment --enable              # deploy the workspace (then build each canvas)
 borgiq workspaces deployment --json                # full detail, including per-actor build results
 
 borgiq canvases runtime-build my-canvas            # build one canvas — waits for the outcome
@@ -68,6 +68,11 @@ borgiq bundle push ./my-flow.borgiq-canvas --runtime-build   # push, then build,
 Building is synchronous: `runtime-build` holds until the build finishes (typically a minute or two)
 and prints the per-actor outcome — there is nothing to poll. `--timeout <seconds>` bounds only how
 long the command waits; the build itself finishes on the server either way.
+
+Canvases build **one at a time** — there is no bulk "build all". In the web app, the Build button
+lives in each canvas's editor, and a canvas's build history (per-actor results, the frozen canvas
+each build compiled, and rollback) lives under **View runtime builds** in the canvas list menu; the
+workspace's deployment settings hold only the deploy toggle.
 
 **After any push to a deployed workspace, build.** `bundle push --runtime-build` does both; otherwise
 follow the push with `borgiq canvases runtime-build <canvas>`. A push that is never followed by
