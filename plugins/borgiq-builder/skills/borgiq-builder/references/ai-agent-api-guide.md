@@ -189,6 +189,8 @@ GET /v1/orgs/{org}/workspaces/{workspace}/canvases/{canvasId}?includeData=true
 
 Returns canvas metadata plus `data: BIQCanvasData` — the full actor graph including actors, edges, positions, and configuration.
 
+Single-canvas reads also carry `readme` — the canvas's own markdown documentation (purpose, how it works, conventions, gotchas), written for teammates and for agents working on the canvas. Read it before changing a canvas you did not build. It is omitted from list responses; set or replace it with `PUT .../canvases/{canvasId}` and a `readme` body field (at most 65,536 characters). It is included in `.../exportData` as `metadata.readme` and lands at `README.md` in a canvas bundle.
+
 ### Get Available Actor Types
 
 ```bash
@@ -281,6 +283,7 @@ Content-Type: application/json
   "name": "My API Flow",
   "slug": "my-api-flow",
   "description": "A flow created via API",
+  "readme": "# My API Flow\n\n## Purpose\nAccepts orders and routes them for approval.\n",
   "tags": "api,automated",
   "data": {
     "schemaVersion": "1",

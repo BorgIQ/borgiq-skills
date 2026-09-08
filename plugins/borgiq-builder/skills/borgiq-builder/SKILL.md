@@ -850,7 +850,7 @@ borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cl
    # Existing canvas:
    borgiq bundle pull <canvasSlugOrId> ./my-flow.borgiq-canvas
    ```
-   Initialize git and commit the baseline. Read [canvas-bundles.md](references/cli/canvas-bundles.md) before editing the bundle.
+   Initialize git and commit the baseline. Read the bundle's `README.md` (the canvas's own documentation, synced with the canvas — see [The canvas README](references/cli/canvas-bundles.md#the-canvas-readme)) and [canvas-bundles.md](references/cli/canvas-bundles.md) before editing the bundle, and update the README when you change what it describes.
 
 4. **Build in the bundle** — Design actors and wiring in `actor.yaml`, `code/*`, and `canvas.yaml` using the actor references. Mint IDs with `borgiq generate`. Adding an actor follows the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule): actor folder, `actors[]` index entry, `graph.nodes` entry — then wire it in `graph.edges`.
 

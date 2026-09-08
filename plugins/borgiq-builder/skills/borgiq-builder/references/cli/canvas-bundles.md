@@ -54,7 +54,9 @@ Do not maintain both a bundle and out-of-band batch patches for the same canvas.
 │   │               ├── main.ts        # required entrypoint
 │   │               └── lib/format.ts  # helper files are yours to arrange
 │   └── other/
-├── AGENTS.md
+├── README.md      # the canvas's own documentation — read it first; synced with the canvas
+├── AGENTS.md      # CLI-owned bundle format contract
+├── CLAUDE.md      # @AGENTS.md
 └── .gitignore
 ```
 
@@ -74,10 +76,15 @@ Actor paths are `actors/<category>/<type-folder>/<ACTOR_ID>/`. The CLI has an ex
 | `code/*` | Agent/user | Edit actor source here: the required entrypoint plus any helper files. |
 | `canvas.yaml` `canvas`, `actors[]`, `graph.nodes`, `graph.edges` | Agent/user | Edit metadata, index entries, positions, and wiring. |
 | `canvas.yaml` `dependencies`, `exportErrors`, `warnings`, `sync` | CLI-owned/informational | Read them, but do not hand-edit them; pack/pull/push regenerate or refresh them. |
-| In-bundle `AGENTS.md` | CLI-owned companion | Read it first. It defines format/layout mechanics for the installed CLI version and is never overwritten by pull/unpack. |
+| `README.md` (bundle root) | Agent/user — **canvas content** | The canvas's own documentation: purpose, how it works, conventions, gotchas. Read it before changing a canvas you did not build, and keep it current when you change what it describes. It is the canvas's `readme` metadata, so it is **managed**: pull overwrites it with the server's copy, deletes it when the canvas has none, and push uploads it. Not a scratch file — keep unrelated notes elsewhere (`NOTES.md`). |
+| In-bundle `AGENTS.md` | CLI-owned companion | Read it after `README.md`. It defines format/layout mechanics for the installed CLI version and is never overwritten by pull/unpack. `CLAUDE.md` is a one-line `@AGENTS.md` include. |
 | Skill references | Skill-owned guidance | Use them for actor semantics and platform knowledge: what values belong in the files. |
 
-The two `AGENTS.md` surfaces are complementary: the generated file inside the bundle is authoritative for that installed CLI's filesystem contract; this skill is authoritative for actor behavior, schemas, expressions, and BorgIQ platform usage.
+The three documentation surfaces are complementary: `README.md` is authoritative for *this canvas* (what it is for and the rules its author set); the generated `AGENTS.md` is authoritative for that installed CLI's filesystem contract; this skill is authoritative for actor behavior, schemas, expressions, and BorgIQ platform usage. Older CLIs (before the README landed) neither write nor read `README.md` and leave it untouched.
+
+### The canvas README
+
+`README.md` at the bundle root is the canvas's `readme` metadata field materialized as a file, exported with the canvas and edited in the web editor's README tab as well. `bundle init` seeds one with a heading and a table of contents; a canvas with no README pulls with no file. When you add or change a README in a bundle, `bundle push` sends it with the rest of the metadata (last-writer-wins, like `description`), and a plain `bundle pull` brings the editor's edits back. Keep the table of contents in step with the sections — agents and people skim it first.
 
 ## Worked webhook to Deno example
 
@@ -344,7 +351,7 @@ Multi-file code needs a `@borgiq/cli` new enough to represent it. There is no se
 - An **older CLI** pulling a canvas whose code actors are multi-file leaves the file list inline in `actor.yaml` and then refuses to pack or push it (`configuration.codeDir must be 'code'`). Upgrade; do not hand-edit around it. A CLI that supports multi-file never does that silently: when it meets a code shape it cannot represent it fails the operation with an explicit "upgrade `@borgiq/cli`" message rather than writing a bundle that would drop files on the next push.
 - A **bundle pulled before multi-file support** has `code/mod.ts` (or `code/mod.py`). Rename it to `main.ts` (or `main.py`) — `bundle validate` says so in the error — and push. The old name is just another project file now.
 - A canvas whose code actors the platform has **not converted yet** pulls into the same project layout, with the actor's source written to its entrypoint file; the first push afterwards converts the actor. Expect one pending update per such actor even before you edit anything.
-- The bundle's generated `AGENTS.md` and `.gitignore` are only created when missing, so a bundle created before this release keeps its old copies. Update them by hand or delete them and re-pull.
+- The bundle's generated `AGENTS.md`, `CLAUDE.md`, and `.gitignore` are only created when missing, so a bundle created before this release keeps its old copies. Update them by hand or delete them and re-pull. `README.md` is not a companion — it is managed content and is refreshed by every pull.
 
 ## Lifecycle commands
 
@@ -531,6 +538,6 @@ No actor operation is applied by the preflight-conflicted push. Read each actor'
 ### Target directory is not empty
 
 - `bundle init` always requires a fresh, empty directory; it has no `--force` flag.
-- `bundle pull` can sync into an existing bundle containing `canvas.yaml` without `--force`, touching only managed paths (`canvas.yaml`, `actors/`).
+- `bundle pull` can sync into an existing bundle containing `canvas.yaml` without `--force`, touching only managed paths (`canvas.yaml`, `README.md`, `actors/`).
 - `bundle unpack` into an existing bundle always requires `--force` to replace its managed files.
-- A non-empty target without `canvas.yaml` requires `--force` for pull and unpack. Even then, unmanaged files, `.git/`, `AGENTS.md`, and `.gitignore` are preserved; companion files are created only when missing.
+- A non-empty target without `canvas.yaml` requires `--force` for pull and unpack. Even then, unmanaged files, `.git/`, `AGENTS.md`, `CLAUDE.md`, and `.gitignore` are preserved; companion files are created only when missing. A `README.md` in that directory is **not** preserved — it is the canvas README and is replaced by the server's copy (or deleted when the canvas has none).

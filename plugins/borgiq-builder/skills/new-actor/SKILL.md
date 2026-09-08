@@ -41,7 +41,7 @@ If multiple bundles are present and no target was specified, ask which one. For 
 
 ## Inside a canvas bundle
 
-1. Read the bundle's generated `AGENTS.md` for the installed CLI's layout contract, then read `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/canvas-bundles.md` and the actor-specific reference.
+1. Read the bundle's `README.md` first if it exists — it is the canvas's own documentation and may set conventions the new actor must follow — then the generated `AGENTS.md` for the installed CLI's layout contract, then `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/canvas-bundles.md` and the actor-specific reference. If the README documents the actors, add the new one to it.
 2. Resolve the actor's exact category and kebab-case type folder from the bundle path registry in the bundle reference. Do not guess an unknown type.
 3. Create `actors/<category>/<type-folder>/<ACTOR_ID>/actor.yaml` in **ExportedCanvasActor object shape**. Do not wrap it in `metadata`/`actors`, and do not include `edges`, `position`, or inline code when using `codeDir`.
 4. For `DenoActor`, `DenoTestActor`, or `UniversalTriggerActor`, set `configuration.codeDir: code` and create `code/main.ts`. For `PythonActor`, create `code/main.py`. The entrypoint is required and must sit at the root of `code/`; add helper files and folders beside it as the actor grows, importing them relatively (`./lib/format.ts` in Deno, `from lib.format import format` in Python, where a package folder needs `__init__.py`). Do not create a file whose name the runtime reserves — see the reserved table in the bundle reference. For `AppTriggerActor`, create only its canonical `code/index.html`, `styles.css`, and `script.js` files that are needed.

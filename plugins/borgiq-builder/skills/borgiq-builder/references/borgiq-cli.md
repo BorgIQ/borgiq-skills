@@ -323,6 +323,7 @@ All modes use per-actor `editVersion` conflict detection and return the same res
 
 ```bash
 borgiq canvases update <canvasSlugOrId> --name "New Name" --description "Updated"
+borgiq canvases update <canvasSlugOrId> --readme-file ./README.md   # the canvas's own documentation
 ```
 
 ---
