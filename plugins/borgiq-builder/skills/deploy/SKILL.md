@@ -107,7 +107,8 @@ This format requires JSON with each config field as a YAML string (see the same 
    succeeded.
 
    (`borgiq bundle push <dir> --runtime-build` does the push and the build in one step; use it when
-   you already know the workspace is deployed.)
+   you already know the workspace is deployed. `borgiq bundle build <dir>` also pushes and builds,
+   and checks the deployment status itself — canvas build when deployed, react-app build when not.)
 4. If the user wants to verify the flow actually runs, suggest `/borgiq-builder:test` next.
 
 ## Failure modes

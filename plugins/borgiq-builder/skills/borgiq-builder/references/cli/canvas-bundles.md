@@ -387,10 +387,13 @@ runtime build rather than its current code, so a push alone does not change what
 ```bash
 borgiq workspaces deployment --json                       # is this workspace deployed?
 borgiq bundle push ./my-flow.borgiq-canvas --runtime-build  # push, then build, and wait
+borgiq bundle build ./my-flow.borgiq-canvas                 # same, and it checks deployment itself
 ```
 
-`--runtime-build` is ignored with `--dry-run` and `--mode`, and a build failure does not fail the
-push — the canvas simply keeps running its previous build. See
+`--runtime-build` is ignored with `--dry-run` and `--mode`, skipped with a notice on a non-deployed
+workspace (nothing there would run the build), and a build failure does not fail the push — the
+canvas simply keeps running its previous build. `bundle build` is deployment-aware on its own:
+canvas build on a deployed workspace, react-app editor build elsewhere. See
 [deployment.md](../deployment.md).
 
 ### Iterate and debug

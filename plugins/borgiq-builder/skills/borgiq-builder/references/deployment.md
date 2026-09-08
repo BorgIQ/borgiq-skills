@@ -48,6 +48,8 @@ and security options are frozen into that build.
 
 - **The editor's "Build app" action is refused on a deployed workspace** (409): the canvas build owns
   the app there. Author and test the app on a non-deployed workspace, then push and build the canvas.
+  From the CLI, `borgiq bundle build` handles both cases itself — it runs the canvas build on a
+  deployed workspace and the editor's react-app build elsewhere.
 - An app edit — source, endpoints, or security options — marks the canvas **outdated** exactly like a
   code edit, and reaches viewers on the next canvas build.
 - A failed app build makes the build `partially_ready`, which never serves — the previous full build
@@ -62,8 +64,16 @@ borgiq workspaces deployment --json                # full detail, including per-
 
 borgiq canvases runtime-build my-canvas            # build one canvas — waits for the outcome
 borgiq canvases runtime-build-status my-canvas     # which build runs, and whether it is outdated
-borgiq bundle push ./my-flow.borgiq-canvas --runtime-build   # push, then build, in one command
+borgiq bundle build ./my-flow.borgiq-canvas        # push, then build — picks the right build itself
+borgiq bundle push ./my-flow.borgiq-canvas --runtime-build   # push, then canvas build, in one command
 ```
+
+`borgiq bundle build` is deployment-aware: on a deployed workspace it pushes and then runs one
+canvas runtime build (react apps compiled as part of it); on a non-deployed workspace it compiles
+the bundle's react app(s) through the editor's build instead. When in doubt about which build a
+workspace needs, just run `bundle build`. The explicit forms are gated the same way: `canvases
+runtime-build` refuses on a non-deployed workspace (nothing there would run the build), and
+`bundle push --runtime-build` notifies and skips the build there — the push still succeeds.
 
 Building is synchronous: `runtime-build` holds until the build finishes (typically a minute or two)
 and prints the per-actor outcome — there is nothing to poll. `--timeout <seconds>` bounds only how
@@ -110,10 +120,10 @@ start-up. It is not fatal to the build — but it will throw at run time too, so
 | `expired` | the build's stored artifacts have been cleaned up |
 
 Only a fully `ready` build serves runs. A `partially_ready` build is diagnostic: `runtime-build`
-still exits 0 for it and prints which actors did not build, but until a build where **every** actor
-succeeds, the canvas keeps running its previous full build — and if it never had one, every run
-fails with "No built runtime available". Treat the failed actors as work to do before the deploy is
-real.
+exits non-zero for it and prints which actors did not build, because until a build where **every**
+actor succeeds, the canvas keeps running its previous full build — and if it never had one, every
+run fails with "No built runtime available". Treat the failed actors as work to do before the
+deploy is real.
 
 ## Rolling back
 
