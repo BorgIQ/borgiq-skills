@@ -31,13 +31,27 @@ workspace, then push and build here.
 
 ## What gets built
 
-Only **code actors**: Deno actors, Universal Trigger actors, Python actors, and Deno Test actors.
-Everything else on the canvas — HTTP requests, AI actors, routers, data stores — has nothing to
-compile and is unaffected.
+Only **code actors**: Deno actors, Universal Trigger actors, Python actors, Deno Test actors, and
+React App actors. Everything else on the canvas — HTTP requests, AI actors, routers, data stores —
+has nothing to compile and is unaffected.
 
-Deno and Universal Trigger actors are built together into one shared artifact per canvas; Python and
-Deno Test actors each get their own. The difference is invisible in the build report — every code
-actor shows up with its own per-actor result either way.
+Deno and Universal Trigger actors are built together into one shared artifact per canvas; Python,
+Deno Test, and React App actors each get their own. The difference is invisible in the build report —
+every code actor shows up with its own per-actor result either way.
+
+## React apps on a deployed workspace
+
+A ReactAppTriggerActor's compiled app follows the same rule as everything else: **on a deployed
+workspace, the app people open is the one the active runtime build compiled.** The canvas build
+compiles it (the same install + Vite build the editor's "Build app" runs), and the app's endpoints
+and security options are frozen into that build.
+
+- **The editor's "Build app" action is refused on a deployed workspace** (409): the canvas build owns
+  the app there. Author and test the app on a non-deployed workspace, then push and build the canvas.
+- An app edit — source, endpoints, or security options — marks the canvas **outdated** exactly like a
+  code edit, and reaches viewers on the next canvas build.
+- A failed app build makes the build `partially_ready`, which never serves — the previous full build
+  (app included) keeps running. Rolling back a build rolls the app back with it.
 
 ## Using it
 
@@ -120,6 +134,8 @@ touching the canvas's code. Only fully successful (`ready`) builds can be activa
 | An actor with `guard: rejected` | the actor imports a file outside its own files | move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
 | An actor with `warm: failed` | it installed, but its code threw at start-up | fix the start-up error and build again |
 | A run executed old code after a push | the push was not followed by a build | `borgiq canvases runtime-build <canvas>` |
+| "Build the canvas instead" (409) from the editor's Build app | the workspace is deployed; the canvas build owns the app there | `borgiq canvases runtime-build <canvas>` |
+| A served app is missing or stale after deploying | the canvas was not built since the app changed | build the canvas; the app serves from the active build |
 | Occasional "runtime build could not be used" in logs | transient; the run was retried without the build | nothing to do — it self-corrects |
 
 ## Writing code actors for a deployed workspace
