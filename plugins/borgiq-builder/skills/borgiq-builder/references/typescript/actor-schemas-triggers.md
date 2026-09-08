@@ -1064,9 +1064,9 @@ export const WebhookTriggerActorResultSchema = z.object({
       .describe('The IP address of the webhook request'),
     user: WebhookTriggerRequestUserSchema.optional()
       .describe('The authenticated caller when the request carried an app actor webhook token or an API key; absent on public calls'),
+    auth: WebhookTriggerAuthSchema.optional()
+      .describe('Which API key authenticated the request (id and name, never the secret); present only on API-key-authenticated calls'),
   }),
-  auth: WebhookTriggerAuthSchema.optional()
-    .describe('Which API key authenticated the request (id and name, never the secret); present only on API-key-authenticated calls'),
   method: z.string().nullish()
     .describe('The method of the request. Valid methods are GET, POST, PUT, DELETE'),
   headers: z.record(z.string(), z.any()).nullish()

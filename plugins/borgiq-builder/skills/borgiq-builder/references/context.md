@@ -163,17 +163,21 @@ The reason: at response-build time the trigger actor hasn't emitted yet, so `msg
 
 ```json
 {
-  "meta": { "requestId": "...", "ipAddress": "...", "user": { "id": "...", "name": "...", "email": "..." } },
+  "meta": {
+    "requestId": "...",
+    "ipAddress": "...",
+    "user": { "id": "...", "name": "...", "email": "..." },
+    "auth": { "type": "apiToken", "keyId": "TOKN...", "keyName": "acme-prod" }
+  },
   "method": "POST",
   "headers": { "content-type": "application/json", "x-github-event": "push", "...": "..." },
   "body": { "...": "parsed JSON / form / text" },
   "queryParams": { "...": "..." },
-  "rawBody": "raw body string, only when options.webhook.emitRawBody = true",
-  "auth": { "type": "apiToken", "keyId": "TOKN...", "keyName": "acme-prod" }
+  "rawBody": "raw body string, only when options.webhook.emitRawBody = true"
 }
 ```
 
-`meta.user` is populated when the call carried a credential that identifies a BorgIQ user — an app actor webhook token (`configuration.webhook.authorizationLevel: 'apps'` or `'appsAndApiKey'`) or an API key (`'apiKey'` or `'appsAndApiKey'`, where it is the key's owner). `auth` is present only on API-key-authenticated calls and names the key (id + name, never the secret; the `authorization` / `x-api-key` headers are stripped before the request is stored).
+`meta.user` is populated when the call carried a credential that identifies a BorgIQ user — an app actor webhook token (`configuration.webhook.authorizationLevel: 'apps'` or `'appsAndApiKey'`) or an API key (`'apiKey'` or `'appsAndApiKey'`, where it is the key's owner). `meta.auth` is present only on API-key-authenticated calls and names the key (id + name, never the secret; the `authorization` / `x-api-key` headers are stripped before the request is stored).
 
 **Example — Slack `url_verification` challenge (CORRECT):**
 

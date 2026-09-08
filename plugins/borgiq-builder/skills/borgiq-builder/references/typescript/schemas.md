@@ -2474,10 +2474,12 @@ export type WebhookTriggerRequestUser = z.infer<typeof WebhookTriggerRequestUser
 
 /**
  * Which API key authenticated a webhook request, for triggers at the `apiKey` / `appsAndApiKey`
- * authorization levels. Identifies the key — never carries the secret, which the API edge strips
- * from the headers before the payload is assembled. `type` discriminates the key kind so
- * workspace-scoped keys can join later without reshaping the field; today the only kind is a
- * user's personal access token (`apiToken`), whose owner is `meta.user`.
+ * authorization levels. Lives on `meta` beside `user` — both are what the platform attests about
+ * the call, as opposed to the root fields, which are the HTTP request as the caller sent it.
+ * Identifies the key — never carries the secret, which the API edge strips from the headers
+ * before the payload is assembled. `type` discriminates the key kind so workspace-scoped keys can
+ * join later without reshaping the field; today the only kind is a user's personal access token
+ * (`apiToken`), whose owner is `meta.user`.
  */
 export const WebhookTriggerAuthSchema = z.object({
   type: z.literal('apiToken'),
@@ -2494,14 +2496,14 @@ export const FlowrunWebhookTriggerRequestSchema = z.object({
     requestId: z.string(),
     ipAddress: z.string().optional(),
     user: WebhookTriggerRequestUserSchema.optional(),
+    /** present only when an API key authenticated the call; the credential headers are already redacted */
+    auth: WebhookTriggerAuthSchema.optional(),
   }),
   method: z.optional(z.string()),
   headers: z.optional(z.any()),
   body: z.optional(z.any()),
   queryParams: z.optional(z.any()),
   rawBody: z.optional(z.string()),
-  /** present only when an API key authenticated the call; the credential headers are already redacted */
-  auth: WebhookTriggerAuthSchema.optional(),
 });
 
 export type FlowrunWebhookTriggerRequest = z.infer<typeof FlowrunWebhookTriggerRequestSchema>;

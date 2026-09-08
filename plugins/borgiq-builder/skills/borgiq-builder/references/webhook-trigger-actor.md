@@ -232,7 +232,7 @@ The webhook trigger emits a message containing the HTTP request details:
 | `meta.requestId` | Unique identifier for this webhook request |
 | `meta.ipAddress` | Caller IP address (optional — present when resolvable from the incoming request) |
 | `meta.user` | Authenticated user info `{ id, name?, email }` — populated when the call carried a credential that identifies a BorgIQ user: an app actor webhook token (`authorizationLevel: 'apps'` / `'appsAndApiKey'`) or an API key (`'apiKey'` / `'appsAndApiKey'`, where it is the key's owner). Absent on public calls. Mirrors the `$.user` shape emitted by InterfaceTriggerActor so downstream actors can use the same templates. |
-| `auth` | `{ type: 'apiToken', keyId, keyName }` — which API key authenticated the call; present only on API-key-authenticated calls. The key's public id and the name its owner gave it, never the secret (the `authorization` / `x-api-key` headers are stripped from `headers` before the request is stored). Branch on `keyName` / `keyId` for per-caller behavior. |
+| `meta.auth` | `{ type: 'apiToken', keyId, keyName }` — which API key authenticated the call; present only on API-key-authenticated calls. The key's public id and the name its owner gave it, never the secret (the `authorization` / `x-api-key` headers are stripped from `headers` before the request is stored). Branch on `keyName` / `keyId` for per-caller behavior. |
 | `method` | HTTP method (GET, POST, PUT, DELETE) |
 | `headers` | Request headers (lowercase keys) |
 | `queryParams` | URL query parameters |
