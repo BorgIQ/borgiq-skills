@@ -643,14 +643,27 @@ This mirrors a real incremental-poll trigger: read a `historyId`/cursor from `lt
 
 > **Security rule — always pin an exact version.** Every third-party `npm:` and
 > `jsr:` import MUST specify an exact version (`npm:name@x.y.z`), never a bare
-> name and never a floating range (`^`, `~`, `>=`). User-code dependencies are
-> resolved and cached at deploy / cold-start time (`deno install`), and there is
-> **no per-actor lockfile** covering your arbitrary imports. A bare specifier
-> like `npm:lodash` resolves to whatever is **latest** at that moment — so a
-> newly-published malicious or breaking release is pulled automatically. That is
-> a supply-chain risk and makes deploys non-deterministic. An exact pin
+> name and never a floating range (`^`, `~`, `>=`). A bare specifier like
+> `npm:lodash` resolves to whatever is **latest** at the moment it is resolved —
+> so a newly-published malicious or breaking release is pulled automatically.
+> That is a supply-chain risk and makes deploys non-deterministic. An exact pin
 > (`npm:lodash@4.17.21`) is immune to both. BorgIQ-internal specifiers
 > (`@borgiq/actors`, `node:*`) are exempt — they are provided by the runtime.
+>
+> **When resolution happens depends on whether the workspace is deployed.** On an
+> ordinary workspace, dependencies are resolved the first time the actor runs on a
+> given machine. On a **deployed** workspace they are resolved once, when the
+> canvas is built, and written into a lockfile that ships with the actor — every
+> run from that build uses exactly those versions and resolves nothing. Either
+> way an unpinned specifier means what you get depends on *when* resolution
+> happened, which is the whole reason to pin. See
+> [deployment.md](deployment.md).
+
+**Imports may not leave the actor's own files.** An import that reaches outside
+the actor's tree is refused when the actor loads; on a deployed workspace the
+build catches it first and names the offending specifier. Relative imports
+between your own files, `@borgiq/actors`, `npm:`/`jsr:`/`node:` packages and
+approved `https:` hosts are all fine.
 
 ### Your Own Files
 

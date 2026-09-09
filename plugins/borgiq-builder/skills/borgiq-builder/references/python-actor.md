@@ -507,12 +507,19 @@ enableLTM: true
 Python dependencies are installed using the **UV package manager** for fast cold starts. Specify dependencies in the `options.dependencies` array.
 
 > **Security rule — pin exact versions.** Always pin each dependency to an
-> exact version with `==`. Dependencies are resolved and installed at deploy /
-> cold-start time and there is **no committed lockfile** for an actor's
-> `dependencies`, so a bare name or a floating range (`>=`, `~=`, `*`) installs
-> whatever is **latest** at that moment — a supply-chain risk (a malicious or
-> breaking release is pulled automatically) and a source of non-deterministic
-> deploys. Exact pins are immune to both.
+> exact version with `==`. A bare name or a floating range (`>=`, `~=`, `*`)
+> installs whatever is **latest** at the moment it is resolved — a supply-chain
+> risk (a malicious or breaking release is pulled automatically) and a source of
+> non-deterministic deploys. Exact pins are immune to both.
+>
+> **When resolution happens depends on whether the workspace is deployed.** On an
+> ordinary workspace, dependencies are installed the first time the actor runs on
+> a given machine. On a **deployed** workspace they are locked and installed once,
+> when the canvas is built, and the resulting environment ships with the actor —
+> every run from that build uses exactly those versions and contacts no index at
+> all. An actor that reaches for a package its build did not install fails
+> immediately rather than quietly installing it, which is the point. See
+> [deployment.md](deployment.md).
 
 ```yaml
 options:
