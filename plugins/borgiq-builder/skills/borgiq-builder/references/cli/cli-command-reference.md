@@ -291,6 +291,7 @@ borgiq canvases update CANV01kd6gr3vjxm2rs0k8s3fjq4nl \
 |------|-------------|
 | `--name <name>` | New canvas name |
 | `--description <desc>` | New description |
+| `--readme-file <path>` | Replace the canvas README with a markdown file's contents (an empty file clears it). The README is the canvas's own documentation — `README.md` in a bundle, the README tab in the editor |
 
 ### `borgiq canvases update-data`
 
