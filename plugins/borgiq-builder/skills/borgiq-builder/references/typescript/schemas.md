@@ -2457,15 +2457,47 @@ export const RuntimePrevEmittedErrorsSchema = z.record(z.string(), z.unknown());
 
 export type RuntimePrevEmittedErrors = z.infer<typeof RuntimePrevEmittedErrorsSchema>;
 
+/**
+ * The authenticated caller of a webhook request, stamped on `meta.user` by the API edge when the call
+ * carried a credential that identifies a BorgIQ user — an app-actor token or an API key. Absent on
+ * public fires. Identity only, never authorization: the edge has already verified the credential.
+ */
+export const WebhookTriggerRequestUserSchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  email: z.string(),
+  /** the caller's app session id, lifted from the verified app-actor token (see TriggerUserSchema) */
+  appSessionId: z.string().optional(),
+});
+
+export type WebhookTriggerRequestUser = z.infer<typeof WebhookTriggerRequestUserSchema>;
+
+/**
+ * Which API key authenticated a webhook request, for triggers at the `apiKey` / `appsAndApiKey`
+ * authorization levels. Lives on `meta` beside `user` — both are what the platform attests about
+ * the call, as opposed to the root fields, which are the HTTP request as the caller sent it.
+ * Identifies the key — never carries the secret, which the API edge strips from the headers
+ * before the payload is assembled. `type` discriminates the key kind so workspace-scoped keys can
+ * join later without reshaping the field; today the only kind is a user's personal access token
+ * (`apiToken`), whose owner is `meta.user`.
+ */
+export const WebhookTriggerAuthSchema = z.object({
+  type: z.literal('apiToken'),
+  /** the token's public id (never its hash or prefix) */
+  keyId: z.string(),
+  /** the name the owner gave the token, for per-caller branching in flow code */
+  keyName: z.string(),
+});
+
+export type WebhookTriggerAuth = z.infer<typeof WebhookTriggerAuthSchema>;
+
 export const FlowrunWebhookTriggerRequestSchema = z.object({
   meta: z.object({
     requestId: z.string(),
     ipAddress: z.string().optional(),
-    user: z.object({
-      id: z.string(),
-      name: z.string().optional(),
-      email: z.string(),
-    }).optional(),
+    user: WebhookTriggerRequestUserSchema.optional(),
+    /** present only when an API key authenticated the call; the credential headers are already redacted */
+    auth: WebhookTriggerAuthSchema.optional(),
   }),
   method: z.optional(z.string()),
   headers: z.optional(z.any()),

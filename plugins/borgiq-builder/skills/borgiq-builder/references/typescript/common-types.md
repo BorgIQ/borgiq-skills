@@ -2170,7 +2170,23 @@ export enum BIQWebhookAuthorizationLevel {
   Public = 'public',
   /** Only calls with a valid app actor webhook token are allowed */
   Apps = 'apps',
+  /**
+   * Only calls presenting a valid API key (`Authorization: Bearer` or `X-Api-Key`) are allowed. Today the
+   * accepted API key is a personal access token whose owner is a member of the trigger's workspace;
+   * workspace-scoped keys slot into the same level later.
+   */
+  ApiKey = 'apiKey',
+  /** Calls presenting either a valid app actor webhook token or a valid API key are allowed */
+  AppsAndApiKey = 'appsAndApiKey',
 }
+
+/** Whether a webhook authorization level admits an app actor webhook token (`x-app-actor-token`). */
+export const webhookLevelAcceptsAppToken = (level: string | null | undefined): boolean =>
+  level === BIQWebhookAuthorizationLevel.Apps || level === BIQWebhookAuthorizationLevel.AppsAndApiKey;
+
+/** Whether a webhook authorization level admits an API key (`Authorization: Bearer` / `X-Api-Key`). */
+export const webhookLevelAcceptsApiKey = (level: string | null | undefined): boolean =>
+  level === BIQWebhookAuthorizationLevel.ApiKey || level === BIQWebhookAuthorizationLevel.AppsAndApiKey;
 
 export const DEFAULT_SOURCE_PORT_ID = 'SPRTdefault';
 export const DEFAULT_TARGET_PORT_ID = 'TPRTdefault';
