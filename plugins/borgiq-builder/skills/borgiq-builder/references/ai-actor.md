@@ -159,21 +159,25 @@ export const AiActorResultSchema = z.object({
 
 ## Available Models
 
-**Default:** Always start with `claude-haiku-4-5` unless the task requires more advanced reasoning capabilities.
+**Default:** Always start with `claude-haiku-4-5` unless the task requires more advanced reasoning capabilities. Set `model` explicitly — when it is omitted the platform falls back to `gpt-4o-mini`.
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | claude-opus-4-6, claude-sonnet-4-6, claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 |
-| Google | gemini-2.5-pro, gemini-2.5-flash, gemini-3-pro-preview, gemini-3-flash-preview |
-| OpenAI | gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5.4-pro, gpt-5.2, gpt-5.2-pro, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o3-mini, o3-pro, o4-mini |
-| xAI | grok-4, grok-4-fast-reasoning, grok-4-fast-non-reasoning, grok-code-fast-1 |
+| Anthropic | claude-sonnet-5, claude-opus-5, claude-fable-5-1, claude-fable-5, claude-opus-4-8, claude-opus-4-7, claude-opus-4-6, claude-sonnet-4-6, claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 |
+| Google | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, gemini-3.1-flash-lite, gemini-3-pro-preview, gemini-3-flash-preview, gemini-2.5-pro, gemini-2.5-flash |
+| OpenAI | gpt-6-astra, gpt-5.6, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5.4-pro, gpt-5.2, gpt-5.2-pro, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o3-mini, o3-pro, o4-mini |
+| xAI | grok-4.6, grok-4.5, grok-4.3, grok-4.20-0309-reasoning, grok-4.20-0309-non-reasoning, grok-4.20-multi-agent-0309, grok-build-0.1, grok-4, grok-4-fast-reasoning, grok-4-fast-non-reasoning, grok-code-fast-1 |
 
-**OpenAI model tiers:**
-- **gpt-5.4** — Latest flagship (128K output, $2.50/$15 per M tokens). Best for complex reasoning.
-- **gpt-5.4-mini** — Cost-effective mid-tier ($0.75/$4.50 per M tokens). Good default for most tasks.
-- **gpt-5.4-nano** — Ultra-cheap ($0.20/$1.25 per M tokens). Best for simple classification/extraction.
-- **gpt-5.4-pro** — Extended thinking ($30/$180 per M tokens). For research-grade tasks.
-- **o3/o3-pro/o4-mini** — Reasoning models with chain-of-thought. Use for math, code, logic.
+Every value of the provider enums (including dated snapshots such as `claude-sonnet-4-6-20260217`) is accepted; the full lists with prices live in [typescript/common-types.md](typescript/common-types.md#aiindex).
+
+**Model tiers** (per million input/output tokens, as the platform meters them):
+- **claude-haiku-4-5** — $1/$5. The recommended starting point for classification, extraction and short generation.
+- **claude-sonnet-5** — $2/$10, 128K output. The step up when Haiku is not enough.
+- **claude-opus-5** — $5/$25 for hard reasoning; **claude-fable-5-1** ($10/$50) is the top Anthropic tier.
+- **gpt-5.6** — $5/$30 flagship (an alias of `gpt-5.6-sol`); **gpt-5.6-terra** $2/$12 mid-tier; **gpt-5.6-luna** $0.20/$1.20 budget; **gpt-6-astra** $10/$50 top tier.
+- **gemini-3.8-flash** — $0.75/$3.75 (promotional rate through 2026-12-31); **gemini-3.5-flash-lite** $0.30/$2.50 for simple classification/extraction.
+- **grok-4.6** — $2/$6 for prompts up to 200K input tokens; larger prompts bill the whole request at double (all Grok 4.3+ models price this way).
+- **o3/o3-pro/o4-mini, gpt-5.4-pro** — Older reasoning tiers; prefer the current generation above.
 
 ## Results Object
 

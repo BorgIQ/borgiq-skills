@@ -49,7 +49,7 @@ ACTR01xxxxx:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | `gpt-4.1-nano` | The AI model to use (any `AiAgentModels` value) |
+| `model` | string | `gpt-4o-mini` | The AI model to use (any `AiAgentModels` value) |
 | `prompt` | string | — | The task/prompt for the agent |
 | `systemPrompt` | string | — | Background context/instructions for the agent |
 | `messages` | array | — | Previous conversation messages (for multi-turn) |

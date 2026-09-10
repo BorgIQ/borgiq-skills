@@ -12,7 +12,7 @@ The AiAgentActor runs an autonomous AI coding agent with a private workspace fil
 - [Source Ports](#source-ports)
 - [Options Reference](#options-reference)
 - [Built-in Tools](#built-in-tools)
-- [Running Code with the deno Tool](#running-code-with-the-deno-tool)
+- [Running Code with the Code Execution Tool](#running-code-with-the-code-execution-tool)
 - [Connecting BorgIQ Tools with aiAgentToolActorIds](#connecting-borgiq-tools-with-aiagenttoolactorids)
 - [Tool Actor Configuration](#tool-actor-configuration)
 - [Results Object](#results-object)
@@ -40,12 +40,13 @@ AiAgentActor gives an AI model a working environment plus your BorgIQ actors as 
 **Key capabilities:**
 
 - **Filesystem + bash**: built-in `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` tools run against a private session workspace
-- **Code execution (opt-in)**: with `enableDenoTool`, a `deno` tool runs TypeScript/JavaScript the agent writes in its workspace
+- **Code execution (opt-in)**: with `enableCodeExecution`, a `code_execution` tool runs TypeScript/JavaScript the agent writes in its workspace with Deno
 - **BorgIQ actor tools**: any actor wired via `aiAgentToolActorIds` is exposed to the agent as a callable tool (same mechanism as before)
 - **Sessions**: re-invoking with the same `sessionId` continues the session — workspace and conversation state restore from the last checkpoint
 - **Workspace in/out**: seed the workspace with `volumeZipFile`; receive the final workspace as `outputZipFile` on the done port
 - **No wall-clock cap**: execution is segmented and checkpointed, so a session is not limited by any single serverless invocation's timeout
-- **Status streaming**: assistant turns and tool results stream on the Status port during execution
+- **Status streaming**: assistant turns, the model's thinking, and tool results stream on the Status port during execution
+- **Thinking control**: `thinkingLevel` sets how much the model reasons before each turn (default `medium`, `off` to save tokens); the reasoning is shown in the editor timeline
 
 **How it executes (what you'll observe):** the run is split into serverless segments, each bounded by the runtime's configured timeout. At each segment boundary the workspace and session state are checkpointed and the next segment resumes seamlessly — no synthetic messages appear in the conversation. `meta.segments` on the done port reports how many segments the run spanned. See [Limitations](#limitations) for the two user-visible consequences (at-least-once bash side effects; no background processes across segments).
 
@@ -92,7 +93,7 @@ actors:
         reportZip: ${{ msg.upload_trigger.file }}
         instructions: ${{ msg.upload_trigger.instructions }}
       options:
-        model: claude-sonnet-4-6
+        model: claude-sonnet-5
         systemPrompt: |
           You are a data analyst. Work inside your workspace; the report
           archive is already extracted there.
@@ -144,7 +145,7 @@ AiAgentActor has two required source ports:
   "sessionDataFile": { "id": "FILE01...", "name": "session.zip", "...": "..." },
   "meta": {
     "endReason": "completed",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "segments": 2
   }
 }
@@ -165,12 +166,13 @@ Token usage is not reported on the done port; it is metered per segment into the
 
 ### Status Port Output
 
-**Assistant turn** (`ai-agent-loop`) — emitted for each assistant turn; `toolCalls` is present when the turn invokes tools:
+**Assistant turn** (`ai-agent-loop`) — emitted for each assistant turn; `toolCalls` is present when the turn invokes tools, and `reasoning` carries the model's thinking for the turn when the model produced any:
 
 ```json
 {
   "type": "ai-agent-loop",
   "response": "The archive is extracted. I'll run the aggregation script next.",
+  "reasoning": "The CSVs are in place, so aggregate.ts can produce summary.csv now.",
   "toolCalls": [
     {
       "toolCallId": "toolu_01Kss5SfgsQUA7UGsuXCjhT1",
@@ -181,6 +183,8 @@ Token usage is not reported on the done port; it is metered per segment into the
   "meta": { "cwd": "/workspace", "timestamp": 1751791234567 }
 }
 ```
+
+`reasoning` is optional. The platform clips it at 16 000 characters (a clipped one ends with a visible `… [thinking truncated]` marker). A turn in which the model only thought arrives as a **reasoning-only loop** — `response: ''`, `toolCalls: []`, `reasoning` set — so a consumer that renders `response` should skip or collapse turns whose `response` is empty. With `thinkingLevel: off`, or on a model that does not think, no loop carries `reasoning`.
 
 **Tool result** (`tool-result`) — emitted after each tool call resolves:
 
@@ -205,7 +209,7 @@ Token usage is not reported on the done port; it is metered per segment into the
 }
 ```
 
-The `ai-agent-loop`/`tool-result` envelope (`type` / `response` / `toolCalls` / tool-result fields) is the same shape the legacy agent used, so status-port consumers built for the old actor keep working. Note that `meta` now carries `cwd` and `timestamp` (the legacy actor's status `meta` carried `model` and `usage`).
+The `ai-agent-loop`/`tool-result` envelope (`type` / `response` / `toolCalls` / tool-result fields) is the same shape the legacy agent used, so status-port consumers built for the old actor keep working; `reasoning` is a new optional field on the loop that consumers ignoring unknown fields never see. Note that `meta` now carries `cwd` and `timestamp` (the legacy actor's status `meta` carried `model` and `usage`).
 
 ## Options Reference
 
@@ -213,17 +217,18 @@ All options live under `configuration.options`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | `claude-sonnet-4-6` | The model to use. Any `AiAgentModels` value (see [Available Models](#available-models)); LLM calls route through the BorgIQ AI gateway using the workspace's AI credential for that provider |
+| `model` | string | `claude-sonnet-5` | The model to use. Any `AiAgentModels` value (see [Available Models](#available-models)); LLM calls route through the BorgIQ AI gateway using the workspace's AI credential for that provider |
 | `prompt` | string | — | **Required.** The task prompt for the agent |
 | `systemPrompt` | string | — | Background instructions appended to the agent's system prompt |
+| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` | `medium` | How much the model thinks before each turn. Clamped to what the selected model supports (a level on a non-thinking model is a no-op). Thinking is billed as output tokens, shows in the editor timeline, and streams as `reasoning` on the Status port; `off` stops paying for it |
 | `sessionId` | string | auto-generated | Session ID to continue or create (max 64 characters). Same ID = continue the session |
 | `volumeZipFile` | BIQFile | — | Zip file extracted into the session workspace at session creation |
 | `workingDirectory` | string | workspace root | Working directory for the agent, relative to the session workspace |
 | `timeoutInMinutes` | integer | 30 | Session timeout in minutes, measured across segments |
 | `maxLoopCount` | integer | unlimited | Maximum number of assistant turns |
-| `allowedTools` | string[] | all | Allow-list of built-in tools (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`/`deno`). Empty = all allowed |
-| `disallowedTools` | string[] | — | Deny-list of built-in tools |
-| `enableDenoTool` | boolean | **false** | Give the agent the `deno` tool, so it can run TypeScript/JavaScript it writes in its workspace. See [Running code with the deno tool](#running-code-with-the-deno-tool) |
+| `allowedTools` | string[] | all | Allow-list of the always-on built-in tools (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`). Empty = all allowed. Does not affect the Code Execution tool |
+| `disallowedTools` | string[] | — | Deny-list of the same seven built-in tools. Does not affect the Code Execution tool |
+| `enableCodeExecution` | boolean | **false** | Give the agent the `code_execution` tool ("Code Execution" in the editor), so it can run TypeScript/JavaScript it writes in its workspace with Deno. The tool's only switch. See [Running code with the Code Execution tool](#running-code-with-the-code-execution-tool) |
 | `allowNet` | boolean | **false** | Allow outbound network access from the tool runtime. Applies to `bash` too — with it off, `bash` has no `curl` at all |
 | `allowNetList` | string[] | — | Only these hosts/CIDRs allowed for tool-runtime egress (system endpoints always included). Mutually exclusive with `denyNetList` |
 | `denyNetList` | string[] | — | Block these hosts/CIDRs for tool-runtime egress (system endpoints cannot be denied). Mutually exclusive with `allowNetList` |
@@ -237,23 +242,23 @@ Validation rules enforced before the session starts:
 - `prompt` must be non-empty.
 - `allowNetList` and `denyNetList` are mutually exclusive.
 - `env` keys matching a reserved name (case-insensitive) are rejected.
-- A wired tool actor whose `msgVar` collides (case-insensitively) with a built-in tool name (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `deno`) is rejected — rename the tool actor.
+- A wired tool actor whose `msgVar` collides (case-insensitively) with a built-in tool name (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, plus `code_execution` while `enableCodeExecution` is on) is rejected — rename the tool actor.
 
 ## Built-in Tools
 
-The agent always has (subject to `allowedTools`/`disallowedTools`) seven built-in tools that operate on its private session workspace, plus `deno` when `enableDenoTool` is set:
+The agent always has (subject to `allowedTools`/`disallowedTools`) seven built-in tools that operate on its private session workspace, plus `code_execution` when `enableCodeExecution` is set:
 
 | Tool | Purpose |
 |------|---------|
 | `read` / `write` / `edit` | Read, create, and surgically edit files in the workspace |
 | `bash` | Run shell commands — an **in-process bash interpreter**, not a real shell. See the note below |
 | `grep` / `find` / `ls` | Search and explore the workspace |
-| `deno` | Run a TypeScript/JavaScript file from the workspace. **Only present when `enableDenoTool: true`** |
+| `code_execution` | Run a TypeScript/JavaScript file from the workspace with Deno. **Only present when `enableCodeExecution: true`**; the allow/deny lists do not apply to it |
 
 Notes:
 
-- These names are **reserved** — a wired BorgIQ tool actor may not use them as its `msgVar`. `deno` is reserved only when `enableDenoTool: true`, so an existing canvas that wires a DenoActor named `deno` as a tool keeps working until you turn the option on (at which point rename that actor).
-- To build a read-only agent, set `disallowedTools: [write, edit, bash]` and leave `enableDenoTool` off (a script could otherwise write to the workspace).
+- These names are **reserved** — a wired BorgIQ tool actor may not use them as its `msgVar`. `code_execution` is reserved only while `enableCodeExecution: true`. `deno` is **not** reserved, so a DenoActor wired as a tool under its default `deno` msgVar is fine.
+- To build a read-only agent, set `disallowedTools: [write, edit, bash]` and leave `enableCodeExecution` off (a script could otherwise write to the workspace).
 - Bash runs with a minimal environment: your `options.env` entries are exposed; platform and cloud-provider credentials are not.
 
 ### What `bash` can and cannot do
@@ -264,20 +269,20 @@ Notes:
 
 Two things follow:
 
-- **To run code, use the [`deno` tool](#running-code-with-the-deno-tool)** — that is what it is for. Do not write a prompt that tells the agent to "run a Python script".
+- **To run code, use the [Code Execution tool](#running-code-with-the-code-execution-tool)** — that is what it is for. Do not write a prompt that tells the agent to "run a Python script".
 - **`curl` is a built-in of the interpreter, not the binary**, and its egress obeys `allowNet`/`allowNetList`/`denyNetList`. With `allowNet` off (the default) there is no network at all and `curl` reports "command not found".
 
-## Running Code with the deno Tool
+## Running Code with the Code Execution Tool
 
-Set `enableDenoTool: true` and the agent gains a `deno` tool that executes a TypeScript or JavaScript file from its workspace. This is how an agent runs code it has written — `bash` cannot.
+Set `enableCodeExecution: true` and the agent gains a `code_execution` tool (labelled "Code Execution" in the editor) that executes a TypeScript or JavaScript file from its workspace with Deno. This is how an agent runs code it has written — `bash` cannot.
 
 ```yaml
 options:
   prompt: Compute the churn rate from data.csv and write result.json
-  enableDenoTool: true
+  enableCodeExecution: true
 ```
 
-The agent writes the script with `write`/`edit`, then calls `deno` with a path:
+The agent writes the script with `write`/`edit`, then calls `code_execution` with a path:
 
 ```json
 { "path": "analyze.ts", "args": ["--verbose"] }
@@ -304,7 +309,7 @@ The agent writes the script with `write`/`edit`, then calls `deno` with a path:
 - A run that would outlast the current segment is terminated and reported as such. Unlike an interrupted actor/MCP tool call it does **not** resume — the agent re-runs it after the boundary, so keep scripts restartable and check for partially written files.
 - A single run is also capped by a per-call timeout, and output over 50KB is truncated from the middle (the start and the end are kept, so a failing script's stack trace survives).
 - Scripts are subject to the same at-least-once retry semantics as bash (see [Limitations](#limitations)), so keep external side effects idempotent.
-- `deno` respects `allowedTools`/`disallowedTools`. If you set an `allowedTools` list, it must include `deno` or the tool stays absent even with `enableDenoTool: true`.
+- `enableCodeExecution` is the tool's **only** switch. `allowedTools`/`disallowedTools` govern the seven always-on built-ins and neither list affects `code_execution`; listing it either way does nothing.
 
 ## Connecting BorgIQ Tools with aiAgentToolActorIds
 
@@ -319,7 +324,7 @@ configuration:
   inputs:
     topic: ''
   options:
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     # ... other options
   aiAgentToolActorIds:
     - ACTR01tool1  # First tool
@@ -492,7 +497,8 @@ interface AiAgentActorResult {
 type AiAgentStatusPortResult =
   | {
       type: 'ai-agent-loop';
-      response: string;
+      response: string;            // '' on a reasoning-only turn
+      reasoning?: string | null;   // the model's thinking for the turn, clipped at 16 000 chars
       toolCalls?: AiToolCall[] | null;
       meta: { cwd: string; timestamp: number };
     }
@@ -510,16 +516,18 @@ type AiAgentStatusPortResult =
 
 `model` accepts any `AiAgentModels` value — a curated cross-provider list of models proficient at agentic tool use. The workspace must have an AI credential configured for the chosen model's provider (the run fails fast otherwise).
 
-**Default:** `claude-sonnet-4-6`.
+**Default:** `claude-sonnet-5` (the first entry of the Anthropic list; the platform picks it when `model` is unset).
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | `claude-sonnet-4-6` (default), `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
-| OpenAI | `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini` |
-| Google | `gemini-3.1-pro-preview`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-2.5-pro` |
-| xAI | `grok-4.3`, `grok-4-fast-reasoning`, `grok-code-fast-1` |
+| Anthropic | `claude-sonnet-5` (default), `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
+| OpenAI | `gpt-5.6`, `gpt-6-astra`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini` |
+| Google | `gemini-3.1-pro-preview`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-2.5-pro` |
+| xAI | `grok-4.6`, `grok-4.5`, `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-build-0.1`, `grok-4.3`, `grok-4-fast-reasoning`, `grok-code-fast-1` |
 
-For complex multi-step tasks, prefer `claude-opus-4-8` or `claude-sonnet-4-6`. For simple high-volume agents, `claude-haiku-4-5` or `gpt-5-mini` keep costs down.
+Rough price tiers, per million input/output tokens as the platform meters them: `claude-sonnet-5` $2/$10; `claude-opus-5` and `claude-opus-4-8` $5/$25; `claude-fable-5-1` and `gpt-6-astra` $10/$50; `gpt-5.6` $5/$30; `gpt-5.6-luna` $0.20/$1.20; `claude-haiku-4-5` $1/$5; `gemini-3.8-flash` $0.75/$3.75; `grok-4.6` $2/$6 (double above 200K input tokens).
+
+For complex multi-step tasks, prefer `claude-sonnet-5`, `claude-opus-5` or `claude-fable-5-1`. For simple high-volume agents, `claude-haiku-4-5`, `gpt-5.6-luna` or `gemini-3.5-flash-lite` keep costs down — and set `thinkingLevel: off`, since the default `medium` thinking is billed as output tokens on every turn.
 
 ## Sessions and Continuation
 
@@ -597,7 +605,7 @@ Notes:
 - **Bash side effects are at-least-once.** If a segment dies before its checkpoint, the session retries from the previous checkpoint and re-runs any bash executed since then. The workspace state stays consistent (it always restores from the checkpoint), but **external** side effects from bash (API calls, emails) may repeat — design them to be idempotent, as with webhook deliveries elsewhere in the platform.
 - **No background processes.** Daemons/dev-servers started by bash do not survive a segment boundary. Long-running listeners belong on the harness tier.
 - **No stdio MCP servers** — `type: http` (an external server, proxied through BorgIQ) and `type: borgiq` (an MCP Server Actor inside BorgIQ, dispatched in-process with no transport) are supported; stdio subprocess servers are not. Use AgentHarnessActor when you need a stdio server.
-- **`bash` cannot run programs** — it is an in-process interpreter, so `python`/`node`/`git` and installing anything are out. Use the [`deno` tool](#running-code-with-the-deno-tool) to run code. No PTY, no interactive programs.
+- **`bash` cannot run programs** — it is an in-process interpreter, so `python`/`node`/`git` and installing anything are out. Use the [Code Execution tool](#running-code-with-the-code-execution-tool) to run code. No PTY, no interactive programs.
 - **Workspace size cap** — 20% of runtime ephemeral storage (see [Runtime Requirements](#runtime-requirements)).
 
 ## Common Patterns
@@ -606,7 +614,7 @@ Notes:
 
 ```yaml
 options:
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   systemPrompt: |
     You are a data processor. The input archive is extracted in your workspace.
     Produce results as files; your workspace is returned to the caller as a zip.
@@ -620,7 +628,7 @@ options:
 # First invoke: auto-generated sessionId comes back on the done port.
 # Later invokes: pass it back to continue with full workspace + conversation state.
 options:
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   prompt: ${{ inputs.followUpInstruction }}
   sessionId: ${{ inputs.sessionId }}   # empty on first call, set on follow-ups
 ```
@@ -643,7 +651,7 @@ options:
 
 ```yaml
 options:
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   systemPrompt: |
     You are a research assistant. Use the available tools:
     - web_search: Search for information on the web
@@ -715,18 +723,18 @@ actors:
         reportZip: ${{ msg.upload_trigger.file }}
         period: ${{ msg.upload_trigger.period }}
       options:
-        model: claude-sonnet-4-6
+        model: claude-sonnet-5
         systemPrompt: |
           You are a data analyst. The report archive is extracted in your
           workspace. Analyze the CSVs — use bash built-ins for simple passes,
           and for real computation write a TypeScript file and run it with the
-          deno tool. Write summary.md with your findings, and publish the
+          code_execution tool. Write summary.md with your findings, and publish the
           summary using the publish_summary tool.
         prompt: |
           Analyze the ${{ inputs.period }} reports in the workspace,
           write summary.md, and publish it.
         volumeZipFile: ${{ inputs.reportZip }}
-        enableDenoTool: true    # the agent runs TypeScript to crunch the CSVs
+        enableCodeExecution: true    # the agent runs TypeScript to crunch the CSVs
         timeoutInMinutes: 30
       # IMPORTANT: List ALL tool actor IDs here
       aiAgentToolActorIds:
@@ -852,7 +860,7 @@ configuration:
 
 ### From Status Port (intermediate results)
 
-Connect to the Status port to process assistant turns and tool results in real time:
+Connect to the Status port to process assistant turns and tool results in real time. A loop's `reasoning` is optional, and a loop may be reasoning-only (empty `response`), so read the two fields separately:
 
 ```yaml
 configuration:
@@ -860,6 +868,7 @@ configuration:
     action: inject
     payload:
       eventType: ${{ msg.report_agent.type }}
+      thinking: ${{ msg.report_agent.reasoning || '' }}
       content: ${{ msg.report_agent.type === 'ai-agent-loop' ? msg.report_agent.response : msg.report_agent.output }}
 ```
 
@@ -872,7 +881,8 @@ Existing flows built on the legacy loop agent keep running as `DeprecatedAiAgent
 | `temperature`, `maxTokens`, `enableTodoTool` | Removed — no equivalent (the agent manages its own generation and planning) |
 | `messages` (multi-turn history) | Use `sessionId` continuation — re-invoke the same session instead of replaying message arrays |
 | `prompt` / `systemPrompt` / `maxLoopCount` | Same names, same intent |
-| `model: gpt-4.1-nano` (legacy default) | Pick an agent-grade model; default is `claude-sonnet-4-6` |
+| `model: gpt-4o-mini` (legacy default) | Pick an agent-grade model; default is `claude-sonnet-5` |
+| — | New: `thinkingLevel` (`off` … `high`, default `medium`) controls how much the model thinks; the legacy agent never requested thinking |
 
 Output contract changes for downstream actors:
 
@@ -883,6 +893,8 @@ Output contract changes for downstream actors:
 | `meta.usage` (token totals) | Not on the done port — usage is metered to the workspace AI log |
 | — | New: `sessionId`, `success`, `outputZipFile`, `sessionDataFile`, `meta.segments` |
 
+On the Status port, `ai-agent-loop` keeps its legacy shape and gains an optional `reasoning` field; a loop may now be reasoning-only with an empty `response` (see [Status Port Output](#status-port-output)).
+
 Tool wiring (`aiAgentToolActorIds`, `${{aiInput}}`, tool schemas) is unchanged — tool actors migrate as-is, unless their `msgVar` collides with a built-in tool name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`/`deno`), which now requires a rename.
 
 See [deprecated-ai-agent.md](deprecated-ai-agent.md) for the full legacy reference.
@@ -891,11 +903,11 @@ See [deprecated-ai-agent.md](deprecated-ai-agent.md) for the full legacy referen
 
 ### File & Data Processing
 
-Unpack archives, transform data, edit files, and return the workspace — the built-in tools cover the whole loop without any custom tool actors. Enable `enableDenoTool` when the transformation needs real code rather than bash built-ins.
+Unpack archives, transform data, edit files, and return the workspace — the built-in tools cover the whole loop without any custom tool actors. Set `enableCodeExecution: true` when the transformation needs real code rather than bash built-ins.
 
 ### Code Generation & Execution
 
-Write code, run it, read the output, and iterate — set `enableDenoTool: true` and the agent can execute what it writes.
+Write code, run it, read the output, and iterate — set `enableCodeExecution: true` and the agent can execute what it writes.
 
 ### Research & Information Gathering
 
@@ -912,7 +924,7 @@ Compose agents hierarchically using CallFlowActor tools to create specialized su
 ## Best Practices
 
 1. **Size the runtime for the workspace** — ≥ 4 GB ephemeral storage for real file work; the workspace cap is 20% of ephemeral storage
-2. **Use agent-grade models** — default `claude-sonnet-4-6`; step up to `claude-opus-4-8` for complex multi-step tasks
+2. **Use agent-grade models** — default `claude-sonnet-5`; step up to `claude-opus-5` or `claude-fable-5-1` for complex multi-step tasks
 3. **Make bash side effects idempotent** — bash is at-least-once across segment retries; external calls (APIs, emails) may repeat
 4. **Prefer built-in tools for file work** — don't wire file-system tool actors; the agent already has `read`/`write`/`edit`/`bash`
 5. **Define clear tool schemas** — the agent uses tool descriptions and schemas to decide when and how to call wired tools
@@ -920,6 +932,7 @@ Compose agents hierarchically using CallFlowActor tools to create specialized su
 7. **Restrict tools when you can** — `disallowedTools` for read-only agents; `denyNetList`/`allowNetList` for tool-runtime egress (remember bash is not constrained)
 8. **Store `sessionId` when you need continuation** — persist it (e.g. in a Collection) to resume the session in a later flowrun
 9. **Guard `result` downstream** — it is optional; branch on `success`/`meta.endReason` for control flow
+10. **Set `thinkingLevel` on purpose** — the default `medium` is billed as output tokens every turn; `off` for cheap high-volume agents, `high` for hard multi-step work
 
 ## TypeScript Schema Hint
 

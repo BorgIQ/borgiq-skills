@@ -92,7 +92,7 @@ export type CodeFile = z.infer<typeof CodeFileSchema>;
  * **This is the single source of truth for those filenames.** The per-type `codeDir` schemas below,
  * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
  * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
- * in this module rather than a sweep across the platform and the lambda runtime. Kept as
+ * in this module rather than a sweep across `borgiq-platform` and `borgiq-lambda-runtime`. Kept as
  * four separate constants rather than one shared value because the name is a property of each
  * type's runtime: they coincide today, and nothing should assume they always will.
  *
@@ -164,6 +164,9 @@ export const DENO_RESERVED_PATHS: ReservedPathSet = {
     'shared/',
     // resolution surface
     'node_modules/',
+    // a Deno Test actor's own dependency cache, embedded in its work dir by the runtime build (the
+    // parallel of Python's `.venv/`); reserved for the whole family so the name cannot be claimed
+    '.borgiq-deno-dir/',
   ],
 };
 
@@ -294,7 +297,7 @@ import { z } from 'zod';
 import { BIQActorType } from '../canvas.js';
 
 import { RuntimeActorMemorySchema } from './flowrunJobResult.js';
-import { ActorConfigurationSchema, RuntimeActorSourcePortSchema, RuntimeActorOrchestratorMessageSchema } from './runtime.js';
+import { ActorConfigurationSchema, RuntimeActorSourcePortSchema, RuntimeActorOrchestratorMessageSchema, RuntimeCacheSchema } from './runtime.js';
 import { RuntimeContextSchema } from './ctx.js';
 
 export const ActorArgumentsSchema = z.object({
@@ -316,6 +319,8 @@ export const ActorArgumentsSchema = z.object({
   actorOrchestratorMessage: z.optional(RuntimeActorOrchestratorMessageSchema),
   /** need a store to set stats on the actor, like execution time, disk usage, etc. */
   stats: z.record(z.string(), z.any()),
+  /** the prebuilt runtime cache this invocation may start from; absent ⇒ the legacy per-actor path */
+  runtimeCache: z.optional(RuntimeCacheSchema),
 });
 
 export type ActorArguments = z.infer<typeof ActorArgumentsSchema>;
@@ -323,6 +328,12 @@ export type ActorArguments = z.infer<typeof ActorArgumentsSchema>;
 export const RuntimeEnvironmentSchema = z.object({
   codeDir: z.string(),
   dataDir: z.string(),
+  /**
+   * The Deno dependency cache (`DENO_DIR`) this actor's worker runs against. Scoped per canvas rather
+   * than per container so every Deno-family actor of one canvas shares one cache — which is what a
+   * prebuilt runtime build ships. Optional: actor types with no Deno worker never set it.
+   */
+  denoDir: z.string().optional(),
 });
 
 export type RuntimeEnvironment = z.infer<typeof RuntimeEnvironmentSchema>;
@@ -335,8 +346,8 @@ export type RuntimeEnvironment = z.infer<typeof RuntimeEnvironmentSchema>;
 ```typescript
 /**
  * NOTE:
- * Shared between the platform (orchestrator builds the invoke event) and
- * the lambda runtime (the segment host consumes it). This file is mirrored into the
+ * Shared between borgiq-platform (orchestrator builds the invoke event) and
+ * borgiq-lambda-runtime (the segment host consumes it). This file is mirrored into the
  * lambda runtime via `npm run copy-runtime-types`.
  *
  * An agent lambda segment runs one time-boxed slice of a pi coding-agent session inside the
@@ -844,6 +855,32 @@ import { z } from 'zod';
 
 import { BIQJsonSchema, BIQJsonSchemaType } from './jsonSchema.js';
 
+/**
+ * Shared runtime error names. The orchestrator keys off `error.name` on a runtime error response, so
+ * these strings are a wire contract between `borgiq-lambda-runtime` and `packages/orchestrator` and
+ * live here rather than in either side's own module.
+ */
+
+/**
+ * The runtime could not start an actor from the prebuilt runtime cache it was handed — the artifact
+ * failed to download, failed verification, or belongs to a different image.
+ *
+ * **Retryable, and the retry must differ**: the runtime deliberately does NOT fall back to resolving
+ * dependencies itself, because a cached environment is shared by every actor of one canvas and the
+ * legacy chain would resolve one actor's dependencies inside it. The orchestrator re-dispatches the
+ * job exactly once with the cache block removed, which lands it in a fresh per-actor environment on
+ * the legacy path.
+ */
+export const RUNTIME_CACHE_UNAVAILABLE_ERROR_NAME = 'RuntimeCacheUnavailable';
+
+/**
+ * An actor's code imports a module outside its own code directory. Never retryable — the same code
+ * resolves the same way on a fresh container. Raised by the build-time module-graph lint (which can
+ * name the offending specifier) and by the runtime when Deno's own permission check denies the read
+ * at actor start (which deliberately cannot: an out-of-tree path is never echoed to the user).
+ */
+export const DISALLOWED_IMPORT_ERROR_NAME = 'DisallowedImport';
+
 
 export const ActorErrorConfigurationSchema = z.object({
   if: z.boolean(),
@@ -1074,7 +1111,7 @@ export type RuntimeError = z.infer<typeof RuntimeErrorSchema>;
  * RuntimeError.name emitted by the lambda runtime when a warm container cannot host the next actor
  * (memory or ephemeral-disk exhaustion after evicting idle workers) — always retryable. The
  * orchestrator keys its logging off this name and the runtime's resource-monitor produces it, so
- * both sides must use this constant rather than the string literal.
+ * both sides must use this constant rather than the string literal. See BORG-572.
  */
 export const RESOURCE_EXHAUSTED_ERROR_NAME = 'ResourceExhausted';
 
@@ -1237,6 +1274,8 @@ export const idSchema = {
   userId: z.string().regex(buildIdRegex(Prefix.User), regMsg).length(30, lenMsg),
   // schema for user auth session
   userAuthSessionId: z.string().regex(buildIdRegex(Prefix.UserAuthSession), regMsg).length(30, lenMsg),
+  // schema for app session id (derived, not stored — see packages/core/src/lib/token/appSessionId.ts)
+  appSessionId: z.string().regex(buildIdRegex(Prefix.AppSession), regMsg).length(30, lenMsg),
   // schema for template id
   actorTemplateId: z.string().regex(buildIdRegex(Prefix.ActorTemplate), regMsg).length(30, lenMsg),
   // schema for template app id
@@ -1247,6 +1286,8 @@ export const idSchema = {
   actorId: z.string().regex(buildIdRegex(Prefix.Actor), regMsg).length(30, lenMsg),
   // schema for canvas id
   canvasId: z.string().regex(buildIdRegex(Prefix.Canvas), regMsg).length(30, lenMsg),
+  // schema for canvas runtime build id
+  canvasRuntimeBuildId: z.string().regex(buildIdRegex(Prefix.CanvasRuntimeBuild), regMsg).length(30, lenMsg),
   // schema for connection edge id
   edgeId: z.string().regex(buildIdRegex(Prefix.Edge), regMsg).length(30, lenMsg),
   // schema for flowrun id
@@ -1288,6 +1329,17 @@ export const idSchema = {
   // schema for target port for an actor
   targetPortId: z.string().regex(new RegExp(`${Prefix.TargetPort}[0123456789abcdefghijklmnopqrstuvwxyz]{4}`), regMsg).length(11, 'must exactly be 11 characters long'),
 };
+
+/**
+ * A build identity hash as `buildIdentityHash` (../buildIdentity.ts) produces it: `sha256:` plus 64
+ * lowercase hex chars. The one shape every producer writes, so anything else is a malformed value to
+ * reject at the boundary rather than a confusing equality mismatch later.
+ *
+ * Lives here (not in runtimeBuild.ts, its natural home) because both runtime.ts and runtimeBuild.ts
+ * need it and this file is the shared leaf — importing runtimeBuild.ts from runtime.ts closes an
+ * import cycle through awsLambdaFunction.ts that breaks bundlers at module init.
+ */
+export const BuildIdentityHashSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 ```
 
 ## schemas/interface
@@ -2282,7 +2334,7 @@ export const PlaceholderConnectionEntrySchema = z.object({
   fieldPath: z.union([z.string(), z.array(z.string())]),
   /** per-credential URL allowlist (Feature A) — normalized entries, present only when non-empty.
    * The proxy 403s a request that uses this placeholder against a non-matching target. Optional so
-   * maps already in Redis and the schema copy in the lambda runtime keep parsing unchanged. */
+   * maps already in Redis and the schema copy in borgiq-lambda-runtime keep parsing unchanged. */
   allowedUrls: z.array(z.string()).optional(),
 });
 
@@ -2437,7 +2489,7 @@ import { WebhookConfigSchema, ScheduleConfigSchema, LifecycleConfigSchema, LIFEC
 import { CodeDirSchema } from '../actorSchemas/codeDir.js';
 
 import { BIQFileSchema } from './file.js';
-import { idSchema } from './idSchema.js';
+import { idSchema, BuildIdentityHashSchema } from './idSchema.js';
 import { RuntimeActorMemorySchema, RuntimeActorReceiveResponseSchema } from './flowrunJobResult.js';
 import { RuntimeContextSchema } from './ctx.js';
 
@@ -2729,6 +2781,51 @@ export const RuntimeActorSourcePortSchema = z.object({
 
 export type RuntimeActorSourcePort = z.infer<typeof RuntimeActorSourcePortSchema>;
 
+/**
+ * A prebuilt runtime cache the runtime may start this actor from, attached by the orchestrator only
+ * when the actor's canvas has a usable runtime build. Its **presence and `kind`** are what select the
+ * execution environment's tenant key, so an absent block always means the legacy per-actor
+ * environment and the legacy dependency-resolution chain.
+ *
+ * The runtime downloads the object, verifies it against `sha256`/`bytes` **before** extracting, and
+ * refuses it if `imageBuildId` is known on both sides and differs. Any failure is reported as the
+ * retryable `RUNTIME_CACHE_UNAVAILABLE_ERROR_NAME` error rather than silently resolving dependencies
+ * inside an environment shared by a whole canvas.
+ */
+export const RuntimeCacheSchema = z.object({
+  /** the build the artifact came from; also the last component of the environment's tenant key */
+  buildId: idSchema.canvasRuntimeBuildId,
+  /**
+   * `canvas` — one archive holding every Deno-family actor's work dir of the canvas plus the single
+   * shared Deno dependency cache. `python-actor` — one archive per Python actor (its work dir and
+   * its virtual environment), because Python actors keep per-actor tenancy. `deno-test-actor` — one
+   * archive per Deno Test actor (its work dir and its OWN dependency cache): a test actor's argList
+   * can grant `--allow-all`, the very permission the dynamic-import jail is built on, so it keeps
+   * per-actor tenancy and must never receive the canvas archive — the shared cache's emit files
+   * mirror sibling actors' source.
+   */
+  kind: z.enum(['canvas', 'python-actor', 'deno-test-actor']),
+  /** presigned GET, minted per invoke and valid for at least 15 minutes */
+  url: z.string().url(),
+  /** sha256 of the artifact, hex; verified before anything is extracted */
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  /** exact byte count of the artifact; a size mismatch fails the download before hashing */
+  bytes: z.number().int().positive(),
+  /**
+   * The build identity hash of this actor as the build recorded it. An assertion, not routing: inside
+   * a pinned flowrun the actor and the build match by construction, so a mismatch means the request
+   * and the artifact disagree and the cache must not be used. Only the real `sha256:<hex>` shape is
+   * accepted — a block is only ever built from an `ok` actor, which always carries one.
+   */
+  actorHash: BuildIdentityHashSchema,
+  /** the runtime image the artifact was built on; compared with the runtime's own when both are known */
+  imageBuildId: z.string().optional(),
+  /** the runtime function's image URI at build time, carried for diagnostics */
+  runtimeVersion: z.string().optional(),
+});
+
+export type RuntimeCache = z.infer<typeof RuntimeCacheSchema>;
+
 /** The request data in the lambda invoke event */
 export const RuntimeRequestSchema = z.object({
   /** the flowrun job id */
@@ -2756,6 +2853,8 @@ export const RuntimeRequestSchema = z.object({
   msg: RuntimePrevEmittedMessagesSchema,
   /** the global $.err object. This object contains all the accumulated error messages emitted by the previous actors in the canvas. */
   err: RuntimePrevEmittedErrorsSchema,
+  /** the prebuilt runtime cache to start this actor from; absent ⇒ the legacy per-actor environment */
+  runtimeCache: z.optional(RuntimeCacheSchema),
 });
 
 export type RuntimeRequest = z.infer<typeof RuntimeRequestSchema>;
@@ -2769,7 +2868,7 @@ export type RuntimeRequest = z.infer<typeof RuntimeRequestSchema>;
 import { z } from 'zod';
 
 import { BIQRuntimeSignalType } from '../signal.js';
-import { AiModel, BIQAiMessageSchema } from '../ai/index.js';
+import { AiModel, BIQAiMessageSchema, AiAgentThinkingLevelSchema } from '../ai/index.js';
 import { BIQInterfacePageDataSchema, InterfaceOnSubmitSchema } from './interface.js';
 import { BIQFileSchema } from './file.js';
 import { McpAuthDataSchema } from './connection.js';
@@ -3053,6 +3152,9 @@ export const RuntimeAgentLambdaSignalSchema = z.object({
   model: z.enum(AiModel).optional(),
   /** System prompt appended to the agent's system prompt */
   systemPrompt: z.string().optional(),
+  /** Thinking / reasoning depth pi requests from the model (clamped to the model's support).
+   * Unset keeps pi's default (`medium`); `off` disables thinking. */
+  thinkingLevel: AiAgentThinkingLevelSchema.optional(),
   /** Session timeout in minutes, measured across lambda segments */
   timeoutInMinutes: z.number().int().positive().optional().default(30),
   /** Working directory relative to the session workspace */
@@ -3167,6 +3269,60 @@ export const RuntimeMcpServerSignalSchema = z.object({
 export type RuntimeMcpServerSignal = z.infer<typeof RuntimeMcpServerSignalSchema>;
 
 /**
+ * A react-app's five security options, evaluated (interpolated) at build time and frozen into the
+ * build's manifest until the next build — AppTrigger interpolation parity (§12.1). Shared between the
+ * flowrun build's LTM manifest below and the runtime-build serve manifest (`runtimeBuild.ts`), so a
+ * deployed build freezes exactly the fields the editor build freezes. All optional so pre-§12.1
+ * manifests remain valid; the serve path applies safe defaults for absent fields (§15.3.4).
+ */
+export const ReactAppSecurityOptionsSchema = z.object({
+  allowedScriptDomains: z.array(z.string()).optional(),
+  allowedStyleDomains: z.array(z.string()).optional(),
+  allowInlineScripts: z.boolean().optional(),
+  allowInlineStyling: z.boolean().optional(),
+  allowedPermissions: z.array(z.string()).optional(),
+});
+
+export type ReactAppSecurityOptions = z.infer<typeof ReactAppSecurityOptionsSchema>;
+
+/**
+ * A react-app's endpoints, interpolated at build time AND resolved slug→id to concrete /msg/ URLs
+ * (via the runtime resolveEndpoints API, §15.3.2a). The SINGLE source of truth for the serve path,
+ * the verifyWebhook allowlist, and the baked SDK — frozen into whichever manifest the build produced
+ * (the flowrun build's LTM manifest, or a runtime build's serve manifest).
+ */
+export const ReactAppResolvedEndpointsSchema = z.record(z.string(), z.union([
+  z.object({
+    /** full /msg/ URL (Config.getWebhookTriggerActorUrl construction) */
+    url: z.string(),
+    /** 'apps' | 'public' — surfaced to the SDK/editor */
+    authorizationLevel: z.string(),
+    /** id-keyed allowlist coordinates for verifyWebhook (§15.3.4) */
+    targetCanvasId: z.string(),
+    targetActorId: z.string(),
+  }),
+  /** unresolvable at build time — the hook fails loudly by name */
+  z.object({ error: z.string() }),
+]));
+
+export type ReactAppResolvedEndpoints = z.infer<typeof ReactAppResolvedEndpointsSchema>;
+
+/**
+ * Stream grants interpolated at build time and frozen beside the endpoints: the authorization
+ * source for the app-stream routes (`verifyAppStreamAccess`) and the fail-fast map baked into the
+ * SDK. Shared by the editor-build manifest and the runtime-build manifest, so a deployed
+ * workspace's app keeps its stream access when the canvas build takes over serving.
+ */
+export const ReactAppResolvedStreamsSchema = z.record(z.string(), z.union([
+  z.object({ slug: z.string() }),
+  z.object({ slugPrefix: z.string() }),
+  /** unresolvable at build time — the SDK fails loudly by name */
+  z.object({ error: z.string() }),
+]));
+
+export type ReactAppResolvedStreams = z.infer<typeof ReactAppResolvedStreamsSchema>;
+
+/**
  * Build manifest emitted by the ReactAppTriggerActor after a successful `deno task build`.
  * The orchestrator commits this as the actor's long-term memory — the canvas hash field
  * `${actorId}:ltm` — inside `store.persist()`'s single MULTI (§15.3.3); it is no longer written to the
@@ -3188,32 +3344,15 @@ export const RuntimeReactAppBuildSignalSchema = z.object({
   })),
   totalSizeInBytes: z.number(),
   buildDurationMs: z.number().optional(),
-  // Security options, evaluated by the build-time runtime invocation for AppTrigger interpolation
-  // parity (§12.1). Mirror the five fields on RuntimeAppGetSignalSchema — the same options AppTrigger
-  // evaluates per serve, frozen into the manifest here until the next Build. Optional so pre-§12.1
-  // manifests remain valid; the serve path reads them from the manifest only (§15.3.4).
-  allowedScriptDomains: z.array(z.string()).optional(),
-  allowedStyleDomains: z.array(z.string()).optional(),
-  allowInlineScripts: z.boolean().optional(),
-  allowInlineStyling: z.boolean().optional(),
-  allowedPermissions: z.array(z.string()).optional(),
-  // Endpoints interpolated at build time AND resolved slug→id to concrete /msg/ URLs (via the runtime
-  // resolveEndpoints API, §15.3.2a). This is now the SINGLE source of truth for the serve path,
-  // verifyWebhook allowlist, and the baked SDK — it replaces every raw-yaml `endpoints` read in the
-  // API server (§15.3.4). Optional so pre-§15 manifests stay parseable (a rebuild backfills them).
-  endpoints: z.record(z.string(), z.union([
-    z.object({
-      /** full /msg/ URL (Config.getWebhookTriggerActorUrl construction) */
-      url: z.string(),
-      /** 'apps' | 'public' — surfaced to the SDK/editor */
-      authorizationLevel: z.string(),
-      /** id-keyed allowlist coordinates for verifyWebhook (§15.3.4) */
-      targetCanvasId: z.string(),
-      targetActorId: z.string(),
-    }),
-    /** unresolvable at build time — the hook fails loudly by name */
-    z.object({ error: z.string() }),
-  ])).optional(),
+  // The five security options (see ReactAppSecurityOptionsSchema) — the same options AppTrigger
+  // evaluates per serve, frozen into the manifest here until the next Build.
+  ...ReactAppSecurityOptionsSchema.shape,
+  // Resolved endpoints (see ReactAppResolvedEndpointsSchema). Optional so pre-§15 manifests stay
+  // parseable (a rebuild backfills them).
+  endpoints: ReactAppResolvedEndpointsSchema.optional(),
+  // Stream grants (see ReactAppResolvedStreamsSchema). Optional so pre-existing manifests stay
+  // parseable; absent means the app may read no stream.
+  streams: ReactAppResolvedStreamsSchema.optional(),
 });
 
 export type ReactAppBuildManifest = z.infer<typeof RuntimeReactAppBuildSignalSchema>;
@@ -3256,6 +3395,16 @@ const TriggerUserSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
   email: z.string(),
+  /**
+   * The caller's app session: one id per (BorgIQ login session x app actor). Stable across
+   * page reloads and token refreshes, distinct per app, gone when the login ends. NOT a
+   * property of the user — the same viewer in two apps produces two values; the `app` in the
+   * name is what keeps that unambiguous. Present only when the fire carried an app-actor
+   * token whose mint ran under a browser login; absence means "no session information".
+   * Identity, not authorization: trust this server-attested field, never a session id
+   * arriving in a request body or query string.
+   */
+  appSessionId: z.string().optional(),
 });
 
 /**
@@ -3263,7 +3412,8 @@ const TriggerUserSchema = z.object({
  * Discriminated by `type`. Each trigger actor maps its orchestrator payload onto one of these variants.
  * - 'webhook'   — an HTTP request hit the webhook URL; `request` carries the parsed request; `user` is the
  *                 authenticated caller when the call carried an app-actor token (React-app endpoint calls, and
- *                 any 'apps'-level webhook fire)
+ *                 any 'apps'-level webhook fire) or an API key ('apiKey' / 'appsAndApiKey' fires, where it is
+ *                 the key's owner and `request.meta.auth` names the key). The same user is also on `request.meta.user`.
  * - 'schedule'  — the cron schedule fired; `triggeredAt` is this fire's timestamp; `lastTriggeredAt` is the previous fire if tracked
  * - 'interface' — the interface trigger fired; `submission` is present when the user submitted a form (post), absent for the initial render (get)
  * - 'app'       — the app trigger fired (only the get render path exists today)

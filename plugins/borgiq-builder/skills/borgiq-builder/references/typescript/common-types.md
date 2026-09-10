@@ -72,12 +72,22 @@ export enum AnthropicModels {
   CLAUDE_4_8_OPUS = 'claude-opus-4-8',
 
   CLAUDE_5_SONNET = 'claude-sonnet-5',
+  CLAUDE_5_OPUS = 'claude-opus-5',
+
+  /** Mythos-class tier. Claude Mythos 5 / 5.1 are the same underlying models with
+   * safeguards lifted, but are restricted to Anthropic's trusted-access program and
+   * are deliberately not listed here. */
+  CLAUDE_5_FABLE = 'claude-fable-5',
+  CLAUDE_5_1_FABLE = 'claude-fable-5-1',
 }
 
 /** Anthropic models proficient enough to drive agentic workflows (flagship + fast variants).
  * The first entry seeds the cross-provider agent default, so keep a balanced Sonnet first. */
 export const AnthropicAgentModels = [
   AnthropicModels.CLAUDE_5_SONNET,
+  AnthropicModels.CLAUDE_5_1_FABLE,
+  AnthropicModels.CLAUDE_5_OPUS,
+  AnthropicModels.CLAUDE_5_FABLE,
   AnthropicModels.CLAUDE_4_8_OPUS,
   AnthropicModels.CLAUDE_4_7_OPUS,
   AnthropicModels.CLAUDE_4_6_SONNET,
@@ -443,8 +453,42 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
     providerLabel: PROVIDER_LABEL,
     date: '2026-06-30',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(3),
-      output: convertCostPerMTokensToCostPer1kTokens(15),
+      input: convertCostPerMTokensToCostPer1kTokens(2),
+      output: convertCostPerMTokensToCostPer1kTokens(10),
+    },
+    maxTokens: 128000,
+  },
+  [AnthropicModels.CLAUDE_5_OPUS]: {
+    provider: AiProvider.Anthropic,
+    label: 'Claude Opus 5',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-07-24',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(5),
+      output: convertCostPerMTokensToCostPer1kTokens(25),
+    },
+    maxTokens: 128000,
+  },
+
+  [AnthropicModels.CLAUDE_5_FABLE]: {
+    provider: AiProvider.Anthropic,
+    label: 'Claude Fable 5',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-06-09',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(10),
+      output: convertCostPerMTokensToCostPer1kTokens(50),
+    },
+    maxTokens: 128000,
+  },
+  [AnthropicModels.CLAUDE_5_1_FABLE]: {
+    provider: AiProvider.Anthropic,
+    label: 'Claude Fable 5.1',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-01',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(10),
+      output: convertCostPerMTokensToCostPer1kTokens(50),
     },
     maxTokens: 128000,
   },
@@ -495,12 +539,21 @@ export enum GoogleAiModels {
   GEMINI_3_5_FLASH = 'gemini-3.5-flash',
 
   GEMINI_3_1_FLASH_LITE = 'gemini-3.1-flash-lite',
+  GEMINI_3_5_FLASH_LITE = 'gemini-3.5-flash-lite',
+
+  GEMINI_3_6_FLASH = 'gemini-3.6-flash',
+  GEMINI_3_7_FLASH = 'gemini-3.7-flash',
+  GEMINI_3_8_FLASH = 'gemini-3.8-flash',
 }
 
 /** Google models proficient enough to drive agentic workflows (Gemini flagship + flash/lite). */
 export const GoogleAgentModels = [
   GoogleAiModels.GEMINI_3_1_PRO_PREVIEW,
+  GoogleAiModels.GEMINI_3_8_FLASH,
+  GoogleAiModels.GEMINI_3_7_FLASH,
+  GoogleAiModels.GEMINI_3_6_FLASH,
   GoogleAiModels.GEMINI_3_5_FLASH,
+  GoogleAiModels.GEMINI_3_5_FLASH_LITE,
   GoogleAiModels.GEMINI_3_1_FLASH_LITE,
   GoogleAiModels.GEMINI_2_5_PRO,
 ] as const;
@@ -800,6 +853,53 @@ export const GoogleModelInformationMap: Record<GoogleAiModels, AiModelInformatio
     },
     maxTokens: 65536,
   },
+  [GoogleAiModels.GEMINI_3_5_FLASH_LITE]: {
+    provider: AiProvider.Google,
+    label: 'Gemini 3.5 Flash Lite',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-07-21',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(0.3),
+      output: convertCostPerMTokensToCostPer1kTokens(2.5),
+    },
+    maxTokens: 65536,
+  },
+
+  /** The 3.6/3.7/3.8 Flash rate below is promotional: Google lists $0.75/$3.75 through
+   * 2026-12-31 and $1.50/$7.50 from 2027-01-01. Revisit these three entries in January. */
+  [GoogleAiModels.GEMINI_3_6_FLASH]: {
+    provider: AiProvider.Google,
+    label: 'Gemini 3.6 Flash',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-07-21',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(0.75),
+      output: convertCostPerMTokensToCostPer1kTokens(3.75),
+    },
+    maxTokens: 65536,
+  },
+  [GoogleAiModels.GEMINI_3_7_FLASH]: {
+    provider: AiProvider.Google,
+    label: 'Gemini 3.7 Flash',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-08-13',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(0.75),
+      output: convertCostPerMTokensToCostPer1kTokens(3.75),
+    },
+    maxTokens: 65536,
+  },
+  [GoogleAiModels.GEMINI_3_8_FLASH]: {
+    provider: AiProvider.Google,
+    label: 'Gemini 3.8 Flash',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-02',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(0.75),
+      output: convertCostPerMTokensToCostPer1kTokens(3.75),
+    },
+    maxTokens: 65536,
+  },
 };
 ```
 
@@ -827,6 +927,14 @@ export enum AiModelType {
   Chat = 'chat',
   Reasoning = 'reasoning',
 }
+
+/** Thinking / reasoning depth requested from the model by the AI Agent (Lambda) actor. pi maps
+ * each level to the provider's native parameter (Anthropic thinking budget, OpenAI reasoning
+ * effort, Gemini thinking budget, ...) and clamps it to what the selected model supports. `off`
+ * disables thinking; leaving the option unset keeps pi's own default (`medium`). */
+export const AI_AGENT_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high'] as const;
+export const AiAgentThinkingLevelSchema = z.enum(AI_AGENT_THINKING_LEVELS);
+export type AiAgentThinkingLevel = z.infer<typeof AiAgentThinkingLevelSchema>;
 
 export enum AiFinishReason {
   Finish = 'finished',
@@ -1312,12 +1420,18 @@ export enum OpenAiModels {
   GPT_5_6_SOL = 'gpt-5.6-sol',
   GPT_5_6_TERRA = 'gpt-5.6-terra',
   GPT_5_6_LUNA = 'gpt-5.6-luna',
+
+  GPT_6_ASTRA = 'gpt-6-astra',
 }
 
-/** OpenAI models proficient enough to drive agentic workflows (GPT-5 family flagship + mini). */
+/** OpenAI models proficient enough to drive agentic workflows (flagship + mid + budget tiers).
+ * The first entry is the Codex harness default, so it stays on the balanced `gpt-5.6` alias
+ * (which routes to Sol) rather than the pricier GPT-6 Astra. */
 export const OpenAiAgentModels = [
   OpenAiModels.GPT_5_6,
+  OpenAiModels.GPT_6_ASTRA,
   OpenAiModels.GPT_5_6_TERRA,
+  OpenAiModels.GPT_5_6_LUNA,
   OpenAiModels.GPT_5_5,
   OpenAiModels.GPT_5_4,
   OpenAiModels.GPT_5_4_MINI,
@@ -1949,14 +2063,15 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     },
     maxTokens: 128000,
   },
+  /** Repriced 2026-07-30: Terra -20%, Luna -80%. Sol stayed at its launch rate. */
   [OpenAiModels.GPT_5_6_TERRA]: {
     provider: AiProvider.OpenAI,
     label: 'GPT 5.6 Terra',
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(2.5),
-      output: convertCostPerMTokensToCostPer1kTokens(15),
+      input: convertCostPerMTokensToCostPer1kTokens(2),
+      output: convertCostPerMTokensToCostPer1kTokens(12),
     },
     maxTokens: 128000,
   },
@@ -1966,8 +2081,20 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(1),
-      output: convertCostPerMTokensToCostPer1kTokens(6),
+      input: convertCostPerMTokensToCostPer1kTokens(0.2),
+      output: convertCostPerMTokensToCostPer1kTokens(1.2),
+    },
+    maxTokens: 128000,
+  },
+
+  [OpenAiModels.GPT_6_ASTRA]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 6 Astra',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-03',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(10),
+      output: convertCostPerMTokensToCostPer1kTokens(50),
     },
     maxTokens: 128000,
   },
@@ -1995,11 +2122,23 @@ export enum xAiModels {
   GROK_4_3 = 'grok-4.3',
 
   GROK_4_5 = 'grok-4.5',
+
+  GROK_4_6 = 'grok-4.6',
+
+  GROK_4_20_REASONING = 'grok-4.20-0309-reasoning',
+  GROK_4_20_NON_REASONING = 'grok-4.20-0309-non-reasoning',
+  GROK_4_20_MULTI_AGENT = 'grok-4.20-multi-agent-0309',
+
+  GROK_BUILD_0_1 = 'grok-build-0.1',
 }
 
 /** xAI models proficient enough to drive agentic workflows (flagship + fast/code). */
 export const xAiAgentModels = [
+  xAiModels.GROK_4_6,
   xAiModels.GROK_4_5,
+  xAiModels.GROK_4_20_REASONING,
+  xAiModels.GROK_4_20_MULTI_AGENT,
+  xAiModels.GROK_BUILD_0_1,
   xAiModels.GROK_4_3,
   xAiModels.GROK_4_FAST_REASONING,
   xAiModels.GROK_CODE_FAST_1,
@@ -2061,16 +2200,24 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     },
     maxTokens: 256000,
   },
+  /** From Grok 4.3 onwards xAI prices in two tiers: prompts at or below 200k input
+   * tokens bill at the base rate, anything larger bills the whole request at double. */
   [xAiModels.GROK_4_3]: {
     provider: AiProvider.xAi,
     label: 'Grok 4.3',
     providerLabel: PROVIDER_LABEL,
     date: '2026-04-30',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(1.25),
-      output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
     },
-    maxTokens: 256000,
+    maxTokens: 1000000,
   },
   [xAiModels.GROK_4_5]: {
     provider: AiProvider.xAi,
@@ -2078,8 +2225,101 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-08',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(2),
-      output: convertCostPerMTokensToCostPer1kTokens(6),
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(6),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(12),
+      },
+    },
+    maxTokens: 500000,
+  },
+  [xAiModels.GROK_4_6]: {
+    provider: AiProvider.xAi,
+    label: 'Grok 4.6',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-08-12',
+    costPer1kTokens: {
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(6),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(12),
+      },
+    },
+    maxTokens: 500000,
+  },
+
+  [xAiModels.GROK_4_20_REASONING]: {
+    provider: AiProvider.xAi,
+    label: 'Grok 4.20 (Reasoning)',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-03-09',
+    costPer1kTokens: {
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
+    },
+    maxTokens: 1000000,
+  },
+  [xAiModels.GROK_4_20_NON_REASONING]: {
+    provider: AiProvider.xAi,
+    label: 'Grok 4.20 (Non-Reasoning)',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-03-09',
+    costPer1kTokens: {
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
+    },
+    maxTokens: 1000000,
+  },
+  [xAiModels.GROK_4_20_MULTI_AGENT]: {
+    provider: AiProvider.xAi,
+    label: 'Grok 4.20 (Multi-Agent)',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-03-09',
+    costPer1kTokens: {
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
+    },
+    maxTokens: 1000000,
+  },
+
+  [xAiModels.GROK_BUILD_0_1]: {
+    provider: AiProvider.xAi,
+    label: 'Grok Build 0.1',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-05-29',
+    costPer1kTokens: {
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1),
+        output: convertCostPerMTokensToCostPer1kTokens(2),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(4),
+      },
     },
     maxTokens: 256000,
   },
@@ -2180,7 +2420,11 @@ export enum BIQWebhookAuthorizationLevel {
   AppsAndApiKey = 'appsAndApiKey',
 }
 
-/** Whether a webhook authorization level admits an app actor webhook token (`x-app-actor-token`). */
+/**
+ * Whether a webhook authorization level admits an app actor webhook token (`x-app-actor-token`).
+ * Accepts the raw stored string so callers reading un-narrowed configuration (editor stores,
+ * select-option rows) can ask without casting; an unknown or missing level answers false.
+ */
 export const webhookLevelAcceptsAppToken = (level: string | null | undefined): boolean =>
   level === BIQWebhookAuthorizationLevel.Apps || level === BIQWebhookAuthorizationLevel.AppsAndApiKey;
 
@@ -2363,6 +2607,7 @@ enum Prefix {
   Actor = 'ACTR',
   ActorTemplate = 'ATMP',
   AiAssistantSession = 'AISN',
+  AppSession = 'APSN',
   AuditLog = 'ALOG',
   Asset = 'ASST',
   AwsLambdaRuntime = 'ALRT',
@@ -2370,6 +2615,7 @@ enum Prefix {
   BIQ = 'BIQ0',
   Canvas = 'CANV',
   CanvasData = 'CNDT',
+  CanvasRuntimeBuild = 'CRBD',
   Connection = 'CONN',
   DataStore = 'DAST',
   Edge = 'EDGE',
@@ -2512,7 +2758,7 @@ export interface BIQActorReceiveResponse<M> {
 
 ```typescript
 /**
- * Sandbox types shared between the platform and the lambda runtime.
+ * Sandbox types shared between borgiq-platform and borgiq-lambda-runtime.
  * NOTE: This file is to ONLY be used for types needed in both the platform and the lambda runtime.
  */
 import { z } from 'zod';
@@ -2595,7 +2841,9 @@ export const SandboxSessionInfoSchema = z.object({
 
 export type SandboxSessionInfo = z.infer<typeof SandboxSessionInfoSchema>;
 
-/** Content type for content status updates */
+/** Content type for content status updates.
+ * @deprecated Never produced by any hook or sidecar and never read by the orchestrator. Kept so
+ * old payloads still parse; reasoning travels on `SandboxStatusUpdateDataSchema.reasoning`. */
 export const SandboxContentTypeSchema = z.enum(['thinking', 'response', 'partial']);
 export type SandboxContentType = z.infer<typeof SandboxContentTypeSchema>;
 
@@ -2616,15 +2864,20 @@ export const SandboxStatusUpdateDataSchema = z.object({
   output: BIQAiToolMessageOutputSchema.optional(),
   /** Whether the tool call resulted in an error (for tool-result) */
   isError: z.boolean().optional(),
+  /** The model's thinking / reasoning for this turn (for agent-harness-loop). Posted by the
+   * lambda segment host (pi thinking blocks) and the harness hook/sidecars (Claude transcript
+   * thinking blocks, Codex reasoning items, pi/OpenCode reasoning parts). Clipped by the
+   * orchestrator before it is persisted. */
+  reasoning: z.string().optional(),
 
   // Generic message field
   message: z.string().optional(),
   exitCode: z.number().optional(),
 
   // Content/thinking fields (legacy)
-  /** Generated content before this status (e.g., thinking before tool call) */
+  /** @deprecated Never produced; use `response` (text) and `reasoning` (thinking) instead. */
   generatedContent: z.string().optional(),
-  /** Content type for content status updates */
+  /** @deprecated Never produced; see SandboxContentTypeSchema. */
   contentType: SandboxContentTypeSchema.optional(),
 
   // Notification fields (from Notification hook)

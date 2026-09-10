@@ -62,7 +62,7 @@ AgentHarnessActor creates an isolated sandbox (via an external vendor — E2B or
 |--------|-------------|-------------------|
 | **Runtime** | Serverless segments on the workspace runtime (checkpointed) | Isolated sandbox VM (E2B or Daytona) |
 | **Harness** | pi coding agent | Claude Code (skills, slash commands, plugins) |
-| **Code execution** | Built-in `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls` against a private workspace, plus an opt-in `deno` tool (`enableDenoTool`) that runs workspace TypeScript/JavaScript; no package installs | Full machine: Bash, file I/O, package installs, PTY |
+| **Code execution** | Built-in `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls` against a private workspace, plus an opt-in `code_execution` tool (`enableCodeExecution`) that runs workspace TypeScript/JavaScript with Deno; no package installs | Full machine: Bash, file I/O, package installs, PTY |
 | **Startup latency** | Low (serverless invoke; cold restore adds seconds) | Sandbox provision + harness install (tens of seconds to minutes) |
 | **Session reuse** | `sessionId` + checkpoint restore (7-day sliding TTL) | `sessionId` + sandbox/session zips, queued messages |
 | **Background processes** | Not supported (nothing survives a segment boundary) | Supported within sandbox lifetime |
@@ -259,7 +259,7 @@ The Done port emits when the agent completes:
   },
   "meta": {
     "endReason": "completed",
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-5",
     "duration": 45000,
     "usage": {
       "promptTokens": 1500,
@@ -286,12 +286,13 @@ The Done port emits when the agent completes:
 
 The Status port emits real-time updates with five message types:
 
-**Agent Loop (response + tool calls):**
+**Agent Loop (response + tool calls, plus the model's thinking when the harness surfaced it):**
 
 ```json
 {
   "type": "agent-harness-loop",
   "response": "I'll search for information on this topic using the available tools.",
+  "reasoning": "The question is about 2025 trends, so a fresh web search beats my training data.",
   "toolCalls": [
     {
       "toolCallId": "toolu_01abc",
@@ -305,6 +306,8 @@ The Status port emits real-time updates with five message types:
   }
 }
 ```
+
+`reasoning` is optional and clipped by the platform at 16 000 characters (a clipped one ends with `… [thinking truncated]`). The Codex, pi and OpenCode harnesses buffer assistant text until the next tool call, so they post the turn's thinking first as a **reasoning-only loop** (`response: ""`, `toolCalls: []`, `reasoning` set). Claude Code posts thinking on the loop that carries the tool call, and the final text-only turn's thinking on `agent-harness-complete`. Anthropic models whose thinking display is off return empty thinking, so those turns simply carry none.
 
 **Tool Result:**
 
@@ -342,12 +345,16 @@ The Status port emits real-time updates with five message types:
 }
 ```
 
+Codex reasoning summaries used to arrive here as a notification with `notificationType: "reasoning"`; they are now posted as reasoning-only loops, and only old flowruns still carry the notification form.
+
 **Complete:**
 
 ```json
 {
   "type": "agent-harness-complete",
   "message": "Execution completed successfully",
+  "response": "Here is the report: ...",
+  "reasoning": "All sections are written; summarize and stop.",
   "meta": { "timestamp": 1711234567894 }
 }
 ```
@@ -365,7 +372,7 @@ The Status port emits real-time updates with five message types:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `harness` | `claude` \| `codex` \| `opencode` \| `pi` | `claude` | The agent harness CLI to run in the sandbox. Use the exact lowercase string value (e.g. `claude`, not `Claude` or `BIQAgentHarnessType.Claude`). `model` must be one valid for the selected harness. |
-| `model` | string | `claude-sonnet-4-20250514` | The model to use in the agent harness. Must be valid for the selected `harness`; defaults to that harness's default model. For the default `claude` harness, a Claude model (Sonnet, Opus, or Haiku variants). |
+| `model` | string | first model of the harness's list | The model to use in the agent harness. Must be valid for the selected `harness`: `claude` accepts the Anthropic agent models (default `claude-sonnet-5`), `codex` the OpenAI agent models (default `gpt-5.6`), and `opencode` / `pi` any `AiAgentModels` value (default `claude-sonnet-5`), resolving the credential from the chosen model's provider. See the AI Agent's [Available Models](ai-agent-actor.md#available-models) for the current lists. |
 | `systemPrompt` | string | - | Additional context/instructions for Claude Code |
 | `sandboxProvider` | `e2b` \| `daytona` | `e2b` | The sandbox infrastructure provider |
 | `sessionId` | string | auto-generated | Session ID to continue or create (max 64 characters) |
@@ -727,7 +734,8 @@ interface AgentHarnessActorResult {
 type AgentHarnessStatusPortResult =
   | {
       type: 'agent-harness-loop';
-      response: string;
+      response: string;            // '' on a reasoning-only loop
+      reasoning?: string | null;   // the model's thinking, clipped at 16 000 chars
       toolCalls?: AiToolCall[];
       meta: { cwd?: string; timestamp: number };
     }
@@ -755,6 +763,8 @@ type AgentHarnessStatusPortResult =
   | {
       type: 'agent-harness-complete';
       message?: string;
+      response?: string;           // the final assistant text, when the harness reported one
+      reasoning?: string | null;   // the final turn's thinking (Claude Code reports a text-only final turn only here)
       meta: { cwd?: string; timestamp: number };
     };
 ```
