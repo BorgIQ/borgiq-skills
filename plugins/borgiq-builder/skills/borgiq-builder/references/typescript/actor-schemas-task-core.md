@@ -668,6 +668,8 @@ export const AgentHarnessLoopResultSchema = z.object({
     .describe('Accumulated text content generated before the tool calls'),
   toolCalls: z.array(AiToolCallSchema).nullish()
     .describe('The tool calls that are about to be made (null if just response text)'),
+  reasoning: z.string().nullish()
+    .describe('The model\'s thinking / reasoning for this turn, when the harness surfaced it. Clipped by the orchestrator; a loop may carry only reasoning (empty response, no tool calls).'),
   meta: AgentHarnessMetaSchema,
 });
 
@@ -720,6 +722,10 @@ export const AgentHarnessCompleteResultSchema = z.object({
   type: z.literal('agent-harness-complete'),
   message: z.string().optional()
     .describe('Completion message'),
+  response: z.string().optional()
+    .describe('The final assistant text, when the harness reported one on completion'),
+  reasoning: z.string().nullish()
+    .describe('The final turn\'s thinking / reasoning, when the harness surfaced it (Claude Code reports a text-only final turn only on stop)'),
   meta: AgentHarnessMetaSchema,
 });
 
@@ -1603,7 +1609,7 @@ import { z } from 'zod';
 
 import { BIQActorType } from '../../canvas.js';
 import { BIQFileSchema, BIQJsonSchema, BIQJsonSchemaType, McpAuthDataSchema } from '../../schemas/index.js';
-import { AiModel, AiModelInformationMap, AiAgentModels } from '../../ai/index.js';
+import { AiModel, AiModelInformationMap, AiAgentModels, AI_AGENT_THINKING_LEVELS, AiAgentThinkingLevelSchema } from '../../ai/index.js';
 import { DeprecatedAiAgentStatusPortResultSchema } from './deprecatedAiAgent.js';
 
 /** The ai agent done source port id */
@@ -1716,6 +1722,8 @@ export const AiAgentActorOptionsSchema = z.object({
     .describe('The task prompt for the agent'),
   systemPrompt: z.string().nullish()
     .describe('Background instructions appended to the agent\'s system prompt'),
+  thinkingLevel: AiAgentThinkingLevelSchema.nullish()
+    .describe('How much the model thinks before each turn (off, minimal, low, medium, high). Clamped to what the selected model supports; unset keeps the default (medium). Thinking is shown in the chat timeline and billed as output tokens.'),
   sessionId: z.string().max(64).optional()
     .describe('Session ID to continue or create a session with custom ID (maximum 64 characters). Auto-generated if empty.'),
   volumeZipFile: BIQFileSchema.nullish()
@@ -1916,6 +1924,26 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
       default: 25,
       ui: {
         order: 7,
+      }
+    },
+    thinkingLevel: {
+      type: BIQJsonSchemaType.String,
+      description: 'How much the model thinks before each turn. Clamped to what the selected model supports. Thinking is shown in the chat timeline and billed as output tokens.',
+      title: 'Thinking level',
+      enum: [...AI_AGENT_THINKING_LEVELS],
+      default: 'medium',
+      ui: {
+        component: 'select',
+        order: 8,
+        options: {
+          enumLabels: {
+            off: 'Off',
+            minimal: 'Minimal',
+            low: 'Low',
+            medium: 'Medium',
+            high: 'High',
+          },
+        },
       }
     },
     // Both tool lists are pickers over AI_AGENT_FILTERABLE_TOOLS rather than free text: the names
@@ -3404,6 +3432,8 @@ export const DeprecatedAiAgentLoopStatusPortResultSchema = z.object({
     .describe('The current response from the AI agent loop'),
   toolCalls: z.array(AiToolCallSchema).nullish()
     .describe('The tool calls made by the AI model'),
+  reasoning: z.string().nullish()
+    .describe('The model\'s thinking / reasoning for this turn, when the provider returned it. Clipped by the orchestrator; absent when the model did not think or the provider hides it.'),
   meta: z.object({
     model: z.string()
       .describe('The model used to generate the response'),

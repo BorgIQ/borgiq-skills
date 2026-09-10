@@ -75,7 +75,7 @@ actors:
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
-| `model` | string | No | AI model to use. Default: `claude-haiku-4-5` |
+| `model` | string | No | AI model to use (any [AI actor model](ai-actor.md#available-models)). Platform default when omitted: `gpt-4o-mini`; set `claude-haiku-4-5` explicitly |
 | `input` | string | Yes | The input text to classify |
 | `emitType` | string | No | Routing behavior: `singleRoute` (default) or `multiRoute` |
 | `routeDescriptions` | object | Yes | Map of route names to their selection criteria |

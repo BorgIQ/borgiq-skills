@@ -1170,7 +1170,7 @@ For `AiAgentActor` jobs, view the full tool-use timeline:
 GET /v1/orgs/{org}/workspaces/{workspace}/flowrunJobs/{jobId}/aiAgentTimeline
 ```
 
-Returns the sequence of LLM calls, tool invocations, and responses.
+Returns the ordered timeline items: `user-message`, `ai-agent-reasoning` (the model's thinking for a turn, when captured; shown collapsed in the editor), `ai-agent-response`, and `ai-agent-tool-call`. Agent Harness jobs return the `agent-harness-*` equivalents, including `agent-harness-reasoning`.
 
 ### Get Source Flowrun Message
 

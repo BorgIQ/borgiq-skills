@@ -445,6 +445,8 @@ import type { CodeDir, CodeFile } from '../codeDir.js';
 export const MAX_OPTIONS_FILES = 50;
 /** Maximum number of endpoints declared on a ReactAppTriggerActor (Phase II). */
 export const MAX_REACT_APP_ENDPOINTS = 50;
+/** Maximum number of stream grants declared on a ReactAppTriggerActor. */
+export const MAX_REACT_APP_STREAMS = 50;
 
 /**
  * React-app back-compat aliases over the generic `codeDir` module (`../codeDir.ts`), which owns
@@ -490,12 +492,59 @@ export const ReactAppEndpointSchema = z.object({
 
 export type ReactAppEndpoint = z.infer<typeof ReactAppEndpointSchema>;
 
+/**
+ * A stream grant: a workspace stream (or a family of them) the app may read live through the
+ * `@borgiq/actors` SDK's `useStreamTail`. Mirrors `ReactAppEndpointSchema` in shape, lifecycle and
+ * posture — frozen into the build manifest at Build time, and the token is authorized against the
+ * manifest, never against the viewer's workspace role.
+ *
+ * Exactly one of `slug` (one stream, by its workspace slug) or `slugPrefix` (every stream whose
+ * slug starts with it — the shape for streams a flow creates per session, conversation or device,
+ * whose slugs cannot be known when the app is authored). No globs, no regexes: a prefix is what a
+ * customer can reason about and what the API can match in one string comparison. Same workspace
+ * only in v1. The string fields may carry `${{ }}` expressions resolved at build time, like an
+ * endpoint's.
+ */
+export const ReactAppStreamGrantSchema = z.object({
+  /** unique within this actor's stream list; a valid identifier, like an endpoint name */
+  name: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, 'stream grant name must be a valid identifier'),
+  description: z.string().nullish(),
+  /** one stream, by its workspace slug (mutually exclusive with `slugPrefix`) */
+  slug: z.string().min(1).max(64).optional(),
+  /** every stream whose slug starts with this (mutually exclusive with `slug`) */
+  slugPrefix: z.string().min(1).max(64).optional(),
+}).refine(
+  (grant) => (grant.slug !== undefined) !== (grant.slugPrefix !== undefined),
+  { message: 'a stream grant must have exactly one of "slug" or "slugPrefix"' },
+);
+
+export type ReactAppStreamGrant = z.infer<typeof ReactAppStreamGrantSchema>;
+
+/**
+ * Whether a stream slug is covered by a grant.
+ *
+ * The one matching rule, shared by the API middleware that authorizes an app tail and the
+ * browser SDK's fail-fast check (which ports it), so the two cannot disagree about a near miss:
+ * a prefix of `chat-` covers `chat-42` and not `chats`.
+ */
+export function streamGrantMatches(grant: { slug?: string | null; slugPrefix?: string | null }, streamSlug: string): boolean {
+  if (typeof grant.slug === 'string') {
+    return grant.slug === streamSlug;
+  }
+  if (typeof grant.slugPrefix === 'string' && grant.slugPrefix.length > 0) {
+    return streamSlug.startsWith(grant.slugPrefix);
+  }
+  return false;
+}
+
 /** The options schema for the ReactAppTriggerActor (interpolated at build time). */
 export const ReactAppTriggerActorOptionsSchema = z.object({
   /** interpolatable file overlay: asset-backed or templated files (wins on path collision) */
   files: z.array(ReactAppOptionsFileSchema).max(MAX_OPTIONS_FILES).nullish(),
   /** Phase II — named webhook-trigger endpoints consumed via `useEndpoint` (§15.4) */
   endpoints: z.array(ReactAppEndpointSchema).max(MAX_REACT_APP_ENDPOINTS).nullish(),
+  /** workspace streams the app may tail live via `useStreamTail`; frozen into the build like endpoints */
+  streams: z.array(ReactAppStreamGrantSchema).max(MAX_REACT_APP_STREAMS).nullish(),
   /** allowed domains for external scripts */
   allowedScriptDomains: z.array(z.string()).nullish(),
   /** allowed domains for external stylesheets */
@@ -598,6 +647,40 @@ export const ReactAppTriggerActorOptionsJsonSchema: BIQJsonSchema = {
         required: ['name', 'actorId'],
       },
     },
+    streams: {
+      type: BIQJsonSchemaType.Array,
+      title: 'Streams',
+      description: 'Workspace streams the app may follow live with useStreamTail("<slug>"). Grant one stream by its slug, or every stream whose slug starts with a prefix (for streams a flow creates per session). Same workspace only. An app can only read the streams declared here; stream changes take effect after the next Build.',
+      items: {
+        type: BIQJsonSchemaType.Object,
+        properties: {
+          name: {
+            type: BIQJsonSchemaType.String,
+            title: 'Name',
+            description: 'A label for this grant. Must be a valid identifier (letters, digits, underscore; not starting with a digit).',
+            pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$',
+          },
+          slug: {
+            type: BIQJsonSchemaType.String,
+            title: 'Stream slug',
+            description: 'Exactly one stream, by its workspace slug. Leave blank when granting by prefix.',
+            ui: { options: { placeholder: 'e.g. agent-activity' } },
+          },
+          slugPrefix: {
+            type: BIQJsonSchemaType.String,
+            title: 'Slug prefix',
+            description: 'Every stream whose slug starts with this — for streams a flow creates per session. Leave blank when granting one slug.',
+            ui: { options: { placeholder: 'e.g. chat-' } },
+          },
+          description: {
+            type: BIQJsonSchemaType.String,
+            title: 'Description',
+            description: 'Optional note about what the app shows from this stream.',
+          },
+        },
+        required: ['name'],
+      },
+    },
     allowInlineScripts: {
       type: BIQJsonSchemaType.Boolean,
       title: 'Allow inline scripts',
@@ -697,7 +780,7 @@ import { BIQJsonSchema, BIQJsonSchemaType, BIQObjectJsonSchema } from '../../sch
 import { BIQWebhookAuthorizationLevel } from '../../canvas.js';
 
 /**
- * Shared building blocks for the unified trigger-actor config data model.
+ * Shared building blocks for the unified trigger-actor config data model (BORG-558).
  *
  * The webhook/schedule configuration is split along the interpolation boundary that
  * already exists in the platform: `configuration.options` is the interpolated blob

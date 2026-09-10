@@ -706,7 +706,7 @@ export type CollectionActorResult =
  * table — slot n is `GSI-L{n}`, keyed on `GSI{n}PK`/`GSI{n}SK` — so this is a
  * property of the table, not a per-tenant setting. Raising it means, in order:
  *
- *   1. adding the matching GSIs in internal infrastructure
+ *   1. adding the matching GSIs in `borgiq-aws-infrastructure`
  *      (`projects/dynamodb-setup/src/collectionsTable.ts`) and letting every
  *      index finish backfilling — they build one at a time, however many the
  *      apply adds;
