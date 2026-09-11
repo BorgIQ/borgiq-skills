@@ -780,7 +780,7 @@ import { BIQJsonSchema, BIQJsonSchemaType, BIQObjectJsonSchema } from '../../sch
 import { BIQWebhookAuthorizationLevel } from '../../canvas.js';
 
 /**
- * Shared building blocks for the unified trigger-actor config data model (BORG-558).
+ * Shared building blocks for the unified trigger-actor config data model.
  *
  * The webhook/schedule configuration is split along the interpolation boundary that
  * already exists in the platform: `configuration.options` is the interpolated blob
@@ -867,7 +867,7 @@ export type ScheduleConfig = z.infer<typeof ScheduleConfigSchema>;
  * and `schemas/runtime.ts` need it, and this module is downstream of neither — importing it from
  * `schemas/trigger.ts` would make those two modules circular and TDZ-crash at module init.
  */
-export const LIFECYCLE_TRIGGER_EVENTS = ['canvas-enabled', 'canvas-disabled'] as const;
+export const LIFECYCLE_TRIGGER_EVENTS = ['canvas-enabled', 'canvas-disabled', 'canvas-deleted', 'actor-removed'] as const;
 
 export type LifecycleTriggerEvent = typeof LIFECYCLE_TRIGGER_EVENTS[number];
 
@@ -880,6 +880,13 @@ export type LifecycleTriggerEvent = typeof LIFECYCLE_TRIGGER_EVENTS[number];
 export const LIFECYCLE_TRIGGER_EVENT_META: Record<LifecycleTriggerEvent, { label: string; description: string }> = {
   'canvas-enabled': { label: 'Canvas enabled', description: 'Fired when the canvas is deployed.' },
   'canvas-disabled': { label: 'Canvas disabled', description: 'Fired when the canvas is undeployed.' },
+  // The two on-remove events. Both are delivered BEFORE any of the actor's external side effects,
+  // its long-term memory or the canvas row are reclaimed, so the handler can still read its
+  // configuration, connections and memory to unregister whatever it registered externally.
+  // A canvas deletion fires only `canvas-deleted` (never `actor-removed` as well); an actor removed
+  // from a live canvas gets `actor-removed`. Subscribe to both to unhook in either case.
+  'canvas-deleted': { label: 'Canvas deleted', description: 'Fired when the canvas is being deleted, before its resources are removed.' },
+  'actor-removed': { label: 'Actor removed', description: 'Fired when this trigger is removed from a live canvas, before its resources are removed.' },
 };
 
 /**

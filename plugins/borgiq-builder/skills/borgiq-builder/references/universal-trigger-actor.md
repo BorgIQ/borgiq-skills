@@ -26,7 +26,7 @@ A single UniversalTriggerActor can fire four ways:
 |---|---|---|
 | **Webhook** | `configuration.webhook.enabled: true` | `{ type: 'webhook', user?, request }` — `request` is the parsed inbound HTTP request (`meta`, `method`, `headers`, `body`, `queryParams`, `rawBody?`); `user` is the authenticated caller (`{ id, name?, email }`) when the call carried an app token (e.g. a React app calling one of its declared endpoints) or an API key (the key's owner; `request.meta.auth = { type: 'apiToken', keyId, keyName }` names the key). The same user is on `request.meta.user` |
 | **Schedule** | `configuration.schedule.enabled: true` | `{ type: 'schedule', triggeredAt, lastTriggeredAt? }` |
-| **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }` — `event` is the lifecycle transition: `'canvas-enabled'` or `'canvas-disabled'` |
+| **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }` — `event` is the lifecycle transition: `'canvas-enabled'`, `'canvas-disabled'`, `'canvas-deleted'` or `'actor-removed'` |
 | **Manual** | Always available (canvas Invoke) | `{ type: 'manual' }` |
 
 When `webhook.enabled` is false the webhook URL returns 404 and no flowruns are created; when `schedule.enabled` is false no cron job is registered; an actor receives a lifecycle event only when that event is listed in `lifecycle.events` — an absent section, an absent `events`, and an empty `events` all mean unsubscribed.
@@ -78,6 +78,8 @@ actors:
         events:
           - canvas-enabled
           - canvas-disabled
+          - canvas-deleted   # on-remove: unregister the external webhook while config + memory still exist
+          - actor-removed
       options:
         # --- Deno runtime options (root) — identical to DenoActor ---
         allowNet: true
@@ -143,7 +145,9 @@ borgiq generate id webhooktriggerkey
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `events` | string[] | `[]` | The lifecycle events this actor is subscribed to — any of `'canvas-enabled'`, `'canvas-disabled'`. The actor receives `{ type: 'lifecycle', event }` only for events in this list; an empty or absent list means it receives none. |
+| `events` | string[] | `[]` | The lifecycle events this actor is subscribed to — any of `'canvas-enabled'`, `'canvas-disabled'`, `'canvas-deleted'`, `'actor-removed'`. The actor receives `{ type: 'lifecycle', event }` only for events in this list; an empty or absent list means it receives none. |
+
+**On-remove events.** `canvas-deleted` (the canvas is being deleted) and `actor-removed` (this trigger was removed from a live canvas) are delivered *before* the actor's external side effects, its long-term memory and its configuration are removed, and the platform waits for the handler to finish (bounded — a handler that ends in error is fired once more, one that never finishes is interrupted) before it continues. Use them to unregister webhooks or subscriptions you created in an external system. A canvas deletion fires only `canvas-deleted`, never `actor-removed` as well; subscribe to both to unhook in either case. On a deployed workspace an actor removed from the editor is *not* fired `actor-removed` (the deployed build still carries it); the canvas deletion is.
 
 Subscription is per event rather than a single on/off flag because the event vocabulary grows over time — a flag would silently opt an existing trigger into events its code was never written to handle.
 
@@ -227,7 +231,7 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
   //             req.trigger.user is the authenticated caller when the call carried an app token or an API key
   //             (req.trigger.request.meta.auth names the key on API-key calls)
   // - schedule: req.trigger.triggeredAt is this fire; req.trigger.lastTriggeredAt is the previous fire (if tracked)
-  // - lifecycle: req.trigger.event is the lifecycle transition ('canvas-enabled' | 'canvas-disabled')
+  // - lifecycle: req.trigger.event is the lifecycle transition ('canvas-enabled' | 'canvas-disabled' | 'canvas-deleted' | 'actor-removed')
   // - manual:   no extra fields
   switch (req.trigger.type) {
     case "webhook":
@@ -246,7 +250,12 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
       };
     }
     case "lifecycle":
-      // req.trigger.event is 'canvas-enabled' | 'canvas-disabled'
+      // req.trigger.event is 'canvas-enabled' | 'canvas-disabled' | 'canvas-deleted' | 'actor-removed'.
+      // 'canvas-deleted' and 'actor-removed' fire BEFORE this actor's memory and resources are
+      // removed — unregister any external webhooks or subscriptions you created here, e.g.
+      //   if (req.trigger.event === 'canvas-deleted' || req.trigger.event === 'actor-removed') {
+      //     await fetch(`https://api.example.com/hooks/${req.memory.hookId}`, { method: 'DELETE', headers });
+      //   }
       return { results: { source: "lifecycle", event: req.trigger.event }, memory: req.memory };
     case "manual":
       return { results: { source: "manual" }, memory: req.memory };
