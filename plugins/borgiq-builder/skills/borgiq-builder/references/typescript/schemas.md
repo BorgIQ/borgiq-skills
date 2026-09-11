@@ -1111,7 +1111,7 @@ export type RuntimeError = z.infer<typeof RuntimeErrorSchema>;
  * RuntimeError.name emitted by the lambda runtime when a warm container cannot host the next actor
  * (memory or ephemeral-disk exhaustion after evicting idle workers) — always retryable. The
  * orchestrator keys its logging off this name and the runtime's resource-monitor produces it, so
- * both sides must use this constant rather than the string literal. See BORG-572.
+ * both sides must use this constant rather than the string literal.
  */
 export const RESOURCE_EXHAUSTED_ERROR_NAME = 'ResourceExhausted';
 
@@ -2334,7 +2334,7 @@ export const PlaceholderConnectionEntrySchema = z.object({
   fieldPath: z.union([z.string(), z.array(z.string())]),
   /** per-credential URL allowlist (Feature A) — normalized entries, present only when non-empty.
    * The proxy 403s a request that uses this placeholder against a non-matching target. Optional so
-   * maps already in Redis and the schema copy in borgiq-lambda-runtime keep parsing unchanged. */
+   * maps already in Redis and the schema copy in the runtime keep parsing unchanged. */
   allowedUrls: z.array(z.string()).optional(),
 });
 

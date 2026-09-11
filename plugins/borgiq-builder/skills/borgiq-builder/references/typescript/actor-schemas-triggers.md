@@ -780,7 +780,7 @@ import { BIQJsonSchema, BIQJsonSchemaType, BIQObjectJsonSchema } from '../../sch
 import { BIQWebhookAuthorizationLevel } from '../../canvas.js';
 
 /**
- * Shared building blocks for the unified trigger-actor config data model (BORG-558).
+ * Shared building blocks for the unified trigger-actor config data model.
  *
  * The webhook/schedule configuration is split along the interpolation boundary that
  * already exists in the platform: `configuration.options` is the interpolated blob
