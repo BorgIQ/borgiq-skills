@@ -347,7 +347,7 @@ export type RuntimeEnvironment = z.infer<typeof RuntimeEnvironmentSchema>;
 /**
  * NOTE:
  * Shared between borgiq-platform (orchestrator builds the invoke event) and
- * borgiq-lambda-runtime (the segment host consumes it). This file is mirrored into the
+ * the runtime (the segment host consumes it). This file is mirrored into the
  * lambda runtime via `npm run copy-runtime-types`.
  *
  * An agent lambda segment runs one time-boxed slice of a pi coding-agent session inside the
@@ -857,7 +857,7 @@ import { BIQJsonSchema, BIQJsonSchemaType } from './jsonSchema.js';
 
 /**
  * Shared runtime error names. The orchestrator keys off `error.name` on a runtime error response, so
- * these strings are a wire contract between `borgiq-lambda-runtime` and `packages/orchestrator` and
+ * these strings are a wire contract between the runtime and `packages/orchestrator` and
  * live here rather than in either side's own module.
  */
 
