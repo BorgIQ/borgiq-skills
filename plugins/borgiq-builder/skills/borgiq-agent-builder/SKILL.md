@@ -48,6 +48,7 @@ BorgIQ has three execution modes for AI work plus one endpoint pattern:
 7. **Sub-agents via CallFlowActor.** Wrap complex sub-tasks in their own AiAgentActor inside a callable sub-flow; expose it as a tool. Use `${{aiInput}}` in the callable's `payload` (not `inputs`). Keeps the parent agent's tool surface flat.
 8. **Idempotent bash side effects.** Bash is at-least-once across segment retries — external calls made from bash may repeat. Put exactly-once API work in wired tool actors, not bash + curl.
 9. **Thinking level.** `thinkingLevel` defaults to `medium` and is billed as output tokens on every turn; use `off` for cheap high-volume agents and `high` for hard multi-step work. The thinking shows in the editor timeline and streams as `reasoning` on the Status port. Default model is now `claude-sonnet-5`.
+10. **Custom providers.** Open models and gateways (Fireworks, Groq, OpenRouter, a self-hosted vLLM, …) are workspace custom providers, referenced as `<slug>/<model-id>` (e.g. `openrouter/moonshotai/kimi-k2`). The workspace needs a custom provider with that slug, reachable from the cloud; `thinkingLevel` only applies when its catalog entry has `reasoning: true` — otherwise set `off`. See [custom-ai-providers.md](../borgiq-builder/references/custom-ai-providers.md).
 
 ## Key decisions — AgentHarnessActor
 

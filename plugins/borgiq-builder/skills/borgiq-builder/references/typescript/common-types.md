@@ -1,6 +1,6 @@
 # Common Types and Utilities
 
-Shared TypeScript types and utilities: common types, AI model definitions (Anthropic, OpenAI, Google, xAI), canvas types, connection auth types, runtime types, sandbox types, file types, flowrun types, lambda types, signal types, asset types, and prefix definitions.
+Shared TypeScript types and utilities: common types, AI model definitions (Anthropic, OpenAI, Google, xAI, custom providers and model references), canvas types, connection auth types, runtime types, sandbox types, file types, flowrun types, lambda types, signal types, asset types, and prefix definitions.
 
 ## Table of Contents
 
@@ -8,6 +8,7 @@ Shared TypeScript types and utilities: common types, AI model definitions (Anthr
 - [ai/google.ts](#aigoogle)
 - [ai/index.ts](#aiindex)
 - [ai/lib.ts](#ailib)
+- [ai/modelRef.ts](#aimodelref)
 - [ai/openAi.ts](#aiopenai)
 - [ai/xAi.ts](#aixai)
 - [asset.ts](#asset)
@@ -917,7 +918,9 @@ import { GoogleModelInformationMap, GoogleAiModels, GoogleAgentModels } from './
 import { xAiModelInformationMap, xAiModels, xAiAgentModels } from './xAi.js';
 import { BIQFileSchema } from '../schemas/file.js';
 
-export { AiProvider } from './lib.js';
+export { AiProvider, AI_MODEL_PROVIDERS, AiProviderLabels } from './lib.js';
+export type { AiModelProvider, AiModelInformation } from './lib.js';
+export * from './modelRef.js';
 export { AnthropicAgentModels } from './anthropic.js';
 export { OpenAiAgentModels } from './openAi.js';
 export { GoogleAgentModels } from './google.js';
@@ -1315,7 +1318,38 @@ export enum AiProvider {
   xAi = 'xai',
   ClaudeCode = 'claude-code',
   Codex = 'codex',
+  /** A custom provider: any AI provider, gateway/router or self-hosted server that is
+   * OpenAI-compatible or uses the OpenAI chat completions schema (Fireworks, Groq, Together,
+   * DeepInfra, OpenRouter, LiteLLM, Ollama, vLLM, LM Studio, llama.cpp, Azure OpenAI's /openai/v1,
+   * ...). A workspace may add several, each an AI setting whose `name` is the provider's slug, with
+   * its own `custom-provider-apikey` connection (base URL, optional key) and model catalog; models
+   * are referenced as `<slug>/<model-id>` (see ./modelRef.ts), not through a build-time enum. */
+  Custom = 'custom',
 }
+
+/** The providers that serve models (every AiProvider except the agent-harness credential
+ * providers `claude-code` and `codex`). A qualified model reference `<provider>/<model-id>` may
+ * name one of the built-in ones; `custom` is reached through a custom provider's slug instead. */
+export const AI_MODEL_PROVIDERS = [
+  AiProvider.OpenAI,
+  AiProvider.Anthropic,
+  AiProvider.Google,
+  AiProvider.xAi,
+  AiProvider.Custom,
+] as const satisfies readonly AiProvider[];
+
+export type AiModelProvider = (typeof AI_MODEL_PROVIDERS)[number];
+
+/** Human-readable provider names (the `providerLabel` of a model, also the model dropdown's group titles). */
+export const AiProviderLabels: Record<AiProvider, string> = {
+  [AiProvider.OpenAI]: 'OpenAI',
+  [AiProvider.Anthropic]: 'Anthropic',
+  [AiProvider.Google]: 'Google',
+  [AiProvider.xAi]: 'xAI Grok',
+  [AiProvider.ClaudeCode]: 'Claude Code',
+  [AiProvider.Codex]: 'Codex',
+  [AiProvider.Custom]: 'Custom Provider',
+};
 
 type TokenWindow = number | 'default';
 
@@ -1326,6 +1360,291 @@ export interface  AiModelInformation {
   date: string;
   costPer1kTokens: { input: number; output: number } | Record<TokenWindow, { input: number; output: number }>;
   maxTokens: number;
+}
+```
+
+## ai/modelRef
+
+**Source:** `ai/modelRef.ts`
+
+```typescript
+import { z } from 'zod';
+
+import {
+  AI_MODEL_PROVIDERS,
+  AiModelInformation,
+  AiProvider,
+  AiProviderLabels,
+  convertCostPerMTokensToCostPer1kTokens,
+} from './lib.js';
+import { OpenAiModelInformationMap } from './openAi.js';
+import { AnthropicModelInformationMap } from './anthropic.js';
+import { GoogleModelInformationMap } from './google.js';
+import { xAiModelInformationMap } from './xAi.js';
+
+/**
+ * Model references.
+ *
+ * A model is referenced by a string, the `AiModelRef`. Three forms are accepted:
+ *
+ * - a **known** model id — any member of the build-time `AiModel` enum (`gpt-4o-mini`,
+ *   `claude-sonnet-4-5`, ...). Resolves to its provider and pricing through the static
+ *   `AiModelInformationMap`.
+ * - a **built-in provider's** model the build does not list: `<provider>/<model-id>` where
+ *   `<provider>` is one of the built-in `AI_MODEL_PROVIDERS` (`openai/gpt-6`).
+ * - a **custom provider's** model: `<slug>/<model-id>` where `<slug>` names one of the workspace's
+ *   custom providers (an AI setting with `provider: custom` — any OpenAI-compatible endpoint,
+ *   gateway or self-hosted server): `fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct`,
+ *   `openrouter/moonshotai/kimi-k2`. Only the FIRST `/` separates the slug, so nested model ids
+ *   pass through. The slug is chosen when the custom provider is added (kebab-case, and never a
+ *   built-in provider id); which slugs exist is workspace data, so a reference to a slug that
+ *   does not exist fails at resolution time, not at parse time.
+ *
+ * A bare id that is neither a known model nor `<something>/<model-id>` is rejected — a typo in a
+ * built-in model id must not silently route anywhere.
+ *
+ * The metadata for a custom reference comes from the custom provider's model catalog (the AI
+ * setting's `data.models`, see `AiCustomModelCatalogEntrySchema`) when the id is listed there,
+ * from the static record when the model id is itself a known model served through a gateway
+ * (`openrouter/gpt-4o-mini`), and from defaults (label = id, zero cost) otherwise.
+ */
+
+/** Separator between the provider prefix / slug and the model id of a qualified reference. */
+export const AI_MODEL_REF_SEPARATOR = '/';
+
+/** `ai_logs.model` is VARCHAR(255); references are capped to fit. */
+export const AI_MODEL_REF_MAX_LENGTH = 255;
+
+/** Output-token cap assumed for a custom model whose catalog entry does not say. */
+export const DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 8192;
+
+/** Context window assumed for a custom model whose catalog entry does not say (pi needs one). */
+export const DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 128_000;
+
+/** A custom provider's slug: short kebab-case, so it reads as a path segment of a model reference. */
+export const AI_PROVIDER_SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/** Slugs a custom provider may not take: every provider id, so `<slug>/<id>` never shadows
+ * `<built-in provider>/<id>` (or the `custom` provider id itself). */
+export const RESERVED_AI_PROVIDER_SLUGS: ReadonlySet<string> = new Set<string>(Object.values(AiProvider));
+
+const KNOWN_MODEL_INFORMATION: Record<string, AiModelInformation> = {
+  ...OpenAiModelInformationMap,
+  ...AnthropicModelInformationMap,
+  ...GoogleModelInformationMap,
+  ...xAiModelInformationMap,
+};
+
+/** The built-in providers a `<provider>/<model-id>` reference may name (every model provider but `custom`). */
+const BUILTIN_MODEL_PROVIDER_SET: ReadonlySet<string> = new Set<string>(
+  AI_MODEL_PROVIDERS.filter((provider) => provider !== AiProvider.Custom),
+);
+
+/** Whether a string is an acceptable custom provider slug (shape + not a reserved provider id). */
+export function isValidCustomProviderSlug(slug: unknown): slug is string {
+  return typeof slug === 'string' && AI_PROVIDER_SLUG_REGEX.test(slug) && !RESERVED_AI_PROVIDER_SLUGS.has(slug);
+}
+
+/** One model of a custom provider's catalog (stored in the AI setting's `data.models`). Only `id`
+ * is required; everything else refines pricing, limits and the flags the two LLM stacks need
+ * (pi's `reasoning`/`input`/`compat`, the AI SDK's structured-output support). */
+export const AiCustomModelCatalogEntrySchema = z.object({
+  /** the model id sent to the endpoint (`llama3.1:8b`, `meta-llama/llama-3.3-70b-instruct`, ...) */
+  id: z.string().min(1).max(200),
+  /** human-readable label for dropdowns; defaults to the id */
+  label: z.string().max(200).optional(),
+  /** context window in tokens (pi uses it for compaction); defaults to 128k */
+  contextWindow: z.number().int().positive().optional(),
+  /** maximum output tokens; defaults to 8192 */
+  maxTokens: z.number().int().positive().optional(),
+  /** whether the model supports extended thinking / reasoning (pi clamps `thinkingLevel` to this) */
+  reasoning: z.boolean().optional(),
+  /** whether the model accepts image input */
+  supportsImages: z.boolean().optional(),
+  /** whether the endpoint accepts `response_format: json_schema` for this model; defaults to true.
+   * Set false for servers that only do prompt-based JSON — the AI actor then falls back to text +
+   * repair. */
+  structuredOutputs: z.boolean().optional(),
+  /** pricing in USD per million tokens, for the `aiLog` cost estimate; defaults to zero */
+  costPerMTokens: z.object({
+    input: z.number().nonnegative(),
+    output: z.number().nonnegative(),
+  }).optional(),
+  /** pi OpenAI-completions compatibility overrides (`supportsDeveloperRole`, `maxTokensField`,
+   * `thinkingFormat`, ...) passed through verbatim to the Lambda's pi provider registration */
+  compat: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type AiCustomModelCatalogEntry = z.infer<typeof AiCustomModelCatalogEntrySchema>;
+
+/** The non-secret `data` of a custom provider's AI setting. */
+export const CustomProviderAiSettingDataSchema = z.object({
+  /** legacy direct-credential base URL (connection-backed settings carry it on the connection) */
+  baseURL: z.string().optional(),
+  /** the custom provider's model catalog */
+  models: z.array(AiCustomModelCatalogEntrySchema).max(500).optional(),
+});
+
+export type CustomProviderAiSettingData = z.infer<typeof CustomProviderAiSettingDataSchema>;
+
+/** A custom provider's slug together with its catalog — what the model pickers merge in. */
+export interface AiCustomProviderCatalog {
+  /** the custom provider's slug (its AI setting `name`) */
+  slug: string;
+  /** its model catalog */
+  models: readonly AiCustomModelCatalogEntry[];
+}
+
+/** A model reference string — a known model id, `<provider>/<model-id>` or `<slug>/<model-id>`. */
+export type AiModelRef = string;
+
+/** The parsed parts of a model reference. */
+export interface AiModelRefParts {
+  /** the reference as written */
+  ref: AiModelRef;
+  /** the provider the model runs on (`custom` for a custom provider's model) */
+  provider: AiProvider;
+  /** the custom provider's slug; only set when `provider` is `custom` */
+  endpointSlug?: string;
+  /** the id sent to the provider (the reference itself for a known model) */
+  modelId: string;
+  /** whether the id is in the build-time catalog (`AiModelInformationMap`) */
+  known: boolean;
+}
+
+/** Build a qualified reference for a built-in provider's or a custom provider's (slug) model. */
+export function qualifyAiModelRef(providerOrSlug: string, modelId: string): AiModelRef {
+  return `${providerOrSlug}${AI_MODEL_REF_SEPARATOR}${modelId}`;
+}
+
+/** Parse a model reference; `undefined` when it is neither a known id nor a valid qualified reference. */
+export function parseAiModelRef(ref: unknown): AiModelRefParts | undefined {
+  if (typeof ref !== 'string' || ref.length === 0 || ref.length > AI_MODEL_REF_MAX_LENGTH) return undefined;
+
+  const known = KNOWN_MODEL_INFORMATION[ref];
+  if (known) return { ref, provider: known.provider, modelId: ref, known: true };
+
+  const separatorIndex = ref.indexOf(AI_MODEL_REF_SEPARATOR);
+  if (separatorIndex <= 0 || separatorIndex === ref.length - 1) return undefined;
+  const prefix = ref.slice(0, separatorIndex);
+  const modelId = ref.slice(separatorIndex + 1);
+
+  if (BUILTIN_MODEL_PROVIDER_SET.has(prefix)) {
+    const provider = prefix as AiProvider;
+    // `openai/gpt-4o-mini` names a known model through its provider; keep its metadata.
+    return { ref, provider, modelId, known: KNOWN_MODEL_INFORMATION[modelId]?.provider === provider };
+  }
+
+  if (isValidCustomProviderSlug(prefix)) {
+    return { ref, provider: AiProvider.Custom, endpointSlug: prefix, modelId, known: false };
+  }
+
+  return undefined;
+}
+
+/** Whether a string is a valid model reference. */
+export function isValidAiModelRef(ref: unknown): ref is AiModelRef {
+  return parseAiModelRef(ref) !== undefined;
+}
+
+/** Zod schema for a model reference (replaces `z.enum(AiModel)` on actor options and signals). */
+export const AiModelRefSchema = z.string()
+  .min(1)
+  .max(AI_MODEL_REF_MAX_LENGTH)
+  .refine(isValidAiModelRef, {
+    message: 'Unknown model. Use a known model id, "<provider>/<model-id>" for a built-in provider, or "<custom-provider-slug>/<model-id>" for a custom provider (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct").',
+  });
+
+/** The provider a model reference runs on, or `undefined` for an invalid reference. */
+export function getAiModelProvider(ref: unknown): AiProvider | undefined {
+  return parseAiModelRef(ref)?.provider;
+}
+
+/** The provider label used for a custom model's `providerLabel`. */
+export function getAiProviderLabel(provider: AiProvider): string {
+  return AiProviderLabels[provider] ?? provider;
+}
+
+/**
+ * The `AiModelInformation` for a model reference: the static catalog entry for a known model;
+ * for a qualified reference to a model the build does not list, a record synthesized from the
+ * catalog entry (when given) over defaults — or over the known model's record when the model id
+ * is itself a known model served through another provider (`openrouter/gpt-4o-mini` keeps
+ * GPT-4o mini's label, pricing and limits unless the catalog entry overrides them).
+ * `undefined` for an invalid reference.
+ */
+export function getAiModelInformation(ref: unknown, catalogEntry?: AiCustomModelCatalogEntry): AiModelInformation | undefined {
+  const parts = parseAiModelRef(ref);
+  if (!parts) return undefined;
+  if (parts.known) return KNOWN_MODEL_INFORMATION[parts.modelId];
+  const base = KNOWN_MODEL_INFORMATION[parts.modelId];
+  const cost = catalogEntry?.costPerMTokens;
+  const providerLabel = parts.endpointSlug
+    ? `${getAiProviderLabel(parts.provider)} — ${parts.endpointSlug}`
+    : getAiProviderLabel(parts.provider);
+  return {
+    provider: parts.provider,
+    label: catalogEntry?.label ?? base?.label ?? parts.modelId,
+    providerLabel,
+    date: base?.date ?? '',
+    costPer1kTokens: cost
+      ? {
+        input: convertCostPerMTokensToCostPer1kTokens(cost.input),
+        output: convertCostPerMTokensToCostPer1kTokens(cost.output),
+      }
+      : base?.costPer1kTokens ?? { input: 0, output: 0 },
+    maxTokens: catalogEntry?.maxTokens ?? base?.maxTokens ?? DEFAULT_CUSTOM_MODEL_MAX_TOKENS,
+  };
+}
+
+/** Find a reference's catalog entry in a single catalog (by unqualified model id). */
+export function findAiModelCatalogEntry(
+  ref: unknown,
+  catalog: readonly AiCustomModelCatalogEntry[] | undefined,
+): AiCustomModelCatalogEntry | undefined {
+  const parts = parseAiModelRef(ref);
+  if (!parts || !catalog) return undefined;
+  return catalog.find((entry) => entry.id === parts.modelId);
+}
+
+/** Find a custom reference's catalog entry among the workspace's custom providers (by slug, then id). */
+export function findAiModelCatalogEntryForProviders(
+  ref: unknown,
+  customProviders: readonly AiCustomProviderCatalog[] | undefined,
+): AiCustomModelCatalogEntry | undefined {
+  const parts = parseAiModelRef(ref);
+  if (!parts?.endpointSlug || !customProviders) return undefined;
+  const provider = customProviders.find((candidate) => candidate.slug === parts.endpointSlug);
+  return provider ? findAiModelCatalogEntry(ref, provider.models) : undefined;
+}
+
+/** The UI options of a `suggestion` model field: the given references as grouped, labelled suggestions. */
+export interface AiModelSuggestionUiOptions {
+  suggestions: string[];
+  suggestionLabels: Record<string, string>;
+  suggestionGroups: Record<string, string[]>;
+}
+
+/** Build the `suggestion` field options for a list of model references, grouped by provider label
+ * (custom providers group as "Custom Provider — <slug>"; a known model served through a custom
+ * provider is labelled "<label> (via <slug>)"). Used by the AI actors' options JSON schema
+ * (curated known models) and by the web, which merges the workspace's custom providers'
+ * `<slug>/<id>` references into the same structure. */
+export function buildAiModelSuggestionUiOptions(
+  refs: readonly AiModelRef[],
+  customProviders?: readonly AiCustomProviderCatalog[],
+): AiModelSuggestionUiOptions {
+  const options: AiModelSuggestionUiOptions = { suggestions: [], suggestionLabels: {}, suggestionGroups: {} };
+  for (const ref of refs) {
+    const parts = parseAiModelRef(ref);
+    const information = getAiModelInformation(ref, findAiModelCatalogEntryForProviders(ref, customProviders));
+    if (!parts || !information || options.suggestions.includes(ref)) continue;
+    const viaGateway = parts.endpointSlug && !parts.known && KNOWN_MODEL_INFORMATION[parts.modelId];
+    options.suggestions.push(ref);
+    options.suggestionLabels[ref] = viaGateway ? `${information.label} (via ${parts.endpointSlug})` : information.label;
+    (options.suggestionGroups[information.providerLabel] ??= []).push(ref);
+  }
+  return options;
 }
 ```
 

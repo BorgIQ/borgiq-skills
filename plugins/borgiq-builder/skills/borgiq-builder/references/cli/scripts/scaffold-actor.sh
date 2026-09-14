@@ -114,7 +114,7 @@ build_configuration() {
       "codeDir": [{ "path": "main.py", "content": "from borgiq import Request, Response\n\n\ndef receive(req: Request) -> Response:\n    return Response(results=req.inputs)\n" }]'
       ;;
     AiActor)
-      echo '"options": "model: claude-sonnet-4-5-20250514\nmaxTokens: 4096\nsystemPrompt: You are a helpful assistant.\nprompt: ${{ inputs.prompt }}"'
+      echo '"options": "model: claude-sonnet-4-5\nmaxTokens: 4096\nsystemPrompt: You are a helpful assistant.\nprompt: ${{ inputs.prompt }}"'
       ;;
     AiAgentActor)
       echo '"options": "model: claude-sonnet-4-6\nsystemPrompt: You are a helpful agent.\nprompt: ${{ inputs.prompt }}"'
@@ -133,7 +133,7 @@ build_configuration() {
       echo "\"options\": \"$conditions\""
       ;;
     AiRouterActor)
-      echo '"options": "model: claude-sonnet-4-5-20250514\nprompt: Route the message to the appropriate handler."'
+      echo '"options": "model: claude-sonnet-4-5\nprompt: Route the message to the appropriate handler."'
       ;;
     WebhookTriggerActor)
       local wh_key

@@ -70,7 +70,7 @@ actors:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | gpt-4o-mini | The AI model to use |
+| `model` | string | gpt-4o-mini | The model reference: a known model id, `<provider>/<model-id>`, or `<slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) |
 | `prompt` | string | - | The prompt to send to the AI model |
 | `systemPrompt` | string | - | Background context/instructions for the AI model |
 | `messages` | array | - | Previous conversation messages (for multi-turn) |
@@ -93,8 +93,8 @@ import { z } from 'zod';
 
 /** The options for the AiActor */
 export const AiActorOptionsSchema = z.object({
-  model: z.enum(AiModel).nullish()
-    .describe('The model to use for the AI provider. Defaults to gpt-4o-mini if not provided'),
+  model: AiModelRefSchema.nullish()
+    .describe('The model to use for the AI provider: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers. Defaults to gpt-4o-mini if not provided'),
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(1).nullish()
@@ -169,6 +169,8 @@ export const AiActorResultSchema = z.object({
 | xAI | grok-4.6, grok-4.5, grok-4.3, grok-4.20-0309-reasoning, grok-4.20-0309-non-reasoning, grok-4.20-multi-agent-0309, grok-build-0.1, grok-4, grok-4-fast-reasoning, grok-4-fast-non-reasoning, grok-code-fast-1 |
 
 Every value of the provider enums (including dated snapshots such as `claude-sonnet-4-6-20260217`) is accepted; the full lists with prices live in [typescript/common-types.md](typescript/common-types.md#aiindex).
+
+**Custom providers.** Any OpenAI-compatible provider, gateway or self-hosted server the workspace has added (Fireworks, Groq, Together, DeepInfra, OpenRouter, LiteLLM, Ollama, vLLM, …) is referenced as `<slug>/<model-id>`, e.g. `fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct` or `openrouter/moonshotai/kimi-k2`. A built-in provider's unlisted model is `<provider>/<model-id>` (`openai/gpt-6`). Bare unknown ids are rejected. See [custom-ai-providers.md](custom-ai-providers.md) for setup, the catalog fields and pricing; `borgiq ai-providers models` lists every reference usable in the workspace.
 
 **Model tiers** (per million input/output tokens, as the platform meters them):
 - **claude-haiku-4-5** — $1/$5. The recommended starting point for classification, extraction and short generation.

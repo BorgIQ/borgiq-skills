@@ -360,13 +360,39 @@ import { z } from 'zod';
 
 import { RuntimeAgentLambdaSignalSchema } from './signals.js';
 import { TraceContextSchema } from './awsLambdaFunction.js';
-import { AiProvider } from '../ai/index.js';
+import { AiProvider, AiCustomModelCatalogEntrySchema } from '../ai/index.js';
 
 /** Discriminator value distinguishing a segment invoke from a normal AwsLambdaInvokeEvent. */
 export const AGENT_LAMBDA_SEGMENT_EVENT_KIND = 'agent-lambda-segment';
 
+/** The `aiKeyPlaceholder` a segment gets when its provider is keyless (an Custom Provider
+ * endpoint with no API key): a literal the host hands pi — which requires *a* key — and that
+ * reaches the endpoint as-is. It is not a proxy placeholder; nothing substitutes it. */
+export const AGENT_LAMBDA_NO_API_KEY = 'no-api-key';
+
 /** The session-specific data for one segment. Everything credential/transport-related
  * (token, apiUrl, proxy URL, CA bundle) rides in the event envelope / envVars instead. */
+/** Provider + model metadata the segment host registers on pi (see `aiProviderConfig`). */
+export const AgentLambdaAiProviderConfigSchema = z.object({
+  /** the id the host registers on pi's ModelRuntime and resolves the model under: a custom
+   * provider's slug (`fireworks`), or the built-in provider id when only a model is being added
+   * to a built-in provider. Absent on payloads from before custom providers had slugs (the host
+   * then uses `aiProvider`). */
+  providerId: z.string().optional(),
+  /** the endpoint's base URL (e.g. `https://api.groq.com/openai/v1`) — required for a provider pi
+   * does not have built in; omitted when only a model is being added to a built-in provider */
+  baseUrl: z.string().optional(),
+  /** extra request headers from the connection (never credentials) */
+  headers: z.record(z.string(), z.string()).optional(),
+  /** whether the placeholder key is a real credential the proxy substitutes (`false` for keyless
+   * local servers: the host still hands pi a dummy key because pi requires one) */
+  hasApiKey: z.boolean(),
+  /** the model's catalog entry, when the workspace catalog lists it */
+  model: AiCustomModelCatalogEntrySchema.optional(),
+});
+
+export type AgentLambdaAiProviderConfig = z.infer<typeof AgentLambdaAiProviderConfigSchema>;
+
 export const AgentLambdaSegmentPayloadSchema = z.object({
   /** Status-hook URL the segment posts heartbeats / loop / tool-result / checkpointed / complete to */
   statusHookUrl: z.string(),
@@ -409,6 +435,15 @@ export const AgentLambdaSegmentPayloadSchema = z.object({
   /** The AI provider the placeholder resolves to (derived from the signal model). Optional for
    * the same reason as aiKeyPlaceholder. */
   aiProvider: z.nativeEnum(AiProvider).optional(),
+  /** The unqualified model id to run (`signal.model` with any `<provider>/` prefix removed) — what
+   * the host passes to pi's `getModel(aiProvider, aiModelId)`. Absent on finalize-only invokes and
+   * on payloads from before qualified model references; the host then falls back to `signal.model`. */
+  aiModelId: z.string().optional(),
+  /** Non-secret provider configuration for a provider pi does not have built in (today:
+   * a custom provider, registered under its slug), or metadata for a built-in provider's model pi does not list. The host
+   * registers it on pi's ModelRuntime before resolving the model. The key is never here — it is the
+   * placeholder above, substituted by the secret proxy. */
+  aiProviderConfig: AgentLambdaAiProviderConfigSchema.optional(),
   /** Finalize-only invoke: skip the pi LLM loop entirely — just restore the last checkpoint and
    * re-produce the two done-port zips, then post a terminal Error carrying them + endReasonOverride.
    * Used by the orchestrator's timeout / watchdog-give-up paths so a terminated session still emits
@@ -2357,6 +2392,10 @@ export type PlaceholderCredentialEntry = z.infer<typeof PlaceholderCredentialEnt
 export const PlaceholderAiProviderEntrySchema = z.object({
   /** the AI provider whose workspace credential the placeholder resolves to */
   provider: z.nativeEnum(AiProvider),
+  /** the AI setting the placeholder is pinned to — set for custom providers (a workspace may have
+   * several, one per slug) so the key the proxy substitutes and the base URL the segment was
+   * dispatched with always come from the same row. Optional: built-in providers have one setting. */
+  aiSettingId: z.string().optional(),
 });
 
 export type PlaceholderAiProviderEntry = z.infer<typeof PlaceholderAiProviderEntrySchema>;
@@ -2868,7 +2907,7 @@ export type RuntimeRequest = z.infer<typeof RuntimeRequestSchema>;
 import { z } from 'zod';
 
 import { BIQRuntimeSignalType } from '../signal.js';
-import { AiModel, BIQAiMessageSchema, AiAgentThinkingLevelSchema } from '../ai/index.js';
+import { AiModelRefSchema, BIQAiMessageSchema, AiAgentThinkingLevelSchema } from '../ai/index.js';
 import { BIQInterfacePageDataSchema, InterfaceOnSubmitSchema } from './interface.js';
 import { BIQFileSchema } from './file.js';
 import { McpAuthDataSchema } from './connection.js';
@@ -2977,7 +3016,7 @@ export type RuntimeInterfaceRenderSignal = z.infer<typeof RuntimeInterfaceRender
 
 /** signal value for returning ai agent data */
 const RuntimeAiAgentSignalSchema = z.object({
-  model: z.enum(AiModel).optional(),
+  model: AiModelRefSchema.optional(),
   prompt: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -2991,7 +3030,7 @@ export type RuntimeAiAgentSignal = z.infer<typeof RuntimeAiAgentSignalSchema>;
 
 /** signal value for returning ai agent data */
 const RuntimeAiSignalSchema =  z.object({
-  model: z.enum(AiModel).optional(),
+  model: AiModelRefSchema.optional(),
   prompt: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -3149,7 +3188,7 @@ export const RuntimeAgentLambdaSignalSchema = z.object({
   /** The task/prompt for the agent to execute */
   task: z.string(),
   /** The model to use; provider resolved at the BorgIQ AI gateway */
-  model: z.enum(AiModel).optional(),
+  model: AiModelRefSchema.optional(),
   /** System prompt appended to the agent's system prompt */
   systemPrompt: z.string().optional(),
   /** Thinking / reasoning depth pi requests from the model (clamped to the model's support).

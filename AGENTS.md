@@ -47,6 +47,8 @@ If `borgiq` commands fail with `401`, run `borgiq auth login` again. The five li
 
 **Offline helpers (no auth, no script install).** ID generation, workflow validation, and JSON scaffolding are provided by the CLI itself — `borgiq generate`, `borgiq validate`, and `borgiq scaffold`. These replaced the local `skills/borgiq-builder/scripts/` TypeScript validators/generators that the skill used to run via `npx tsx`; the skill now shells out to the verified CLI instead. This requires **`@borgiq/cli` >= 0.8.0**; older CLIs lack these commands. The `scaffold-*.sh` helpers under `references/cli/scripts/` are retained and now mint IDs via `borgiq generate`.
 
+**AI providers.** `borgiq ai-providers list/models/create/edit/delete` (workspace AI providers, including custom OpenAI-compatible providers referenced as `<slug>/<model-id>`) require **`@borgiq/cli` >= 0.12.0**; see `references/custom-ai-providers.md`.
+
 **Canvas bundles.** `borgiq bundle init/pull/push/pack/unpack/validate` require **`@borgiq/cli` >= 0.8.0**. If `borgiq bundle` is unavailable, upgrade (`npm install -g @borgiq/cli`); agents must fall back to the direct document/batch workflow when the command is unavailable.
 
 ## Scripts

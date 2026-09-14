@@ -217,7 +217,7 @@ All options live under `configuration.options`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | `claude-sonnet-5` | The model to use. Any `AiAgentModels` value (see [Available Models](#available-models)); LLM calls route through the BorgIQ AI gateway using the workspace's AI credential for that provider |
+| `model` | string | `claude-sonnet-5` | The model to use: any `AiAgentModels` value (see [Available Models](#available-models)), `<provider>/<model-id>` for a built-in provider's unlisted model, or `<slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md). LLM calls route through the BorgIQ AI gateway using the workspace's credential for that provider |
 | `prompt` | string | — | **Required.** The task prompt for the agent |
 | `systemPrompt` | string | — | Background instructions appended to the agent's system prompt |
 | `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` | `medium` | How much the model thinks before each turn. Clamped to what the selected model supports (a level on a non-thinking model is a no-op). Thinking is billed as output tokens, shows in the editor timeline, and streams as `reasoning` on the Status port; `off` stops paying for it |
@@ -514,7 +514,7 @@ type AiAgentStatusPortResult =
 
 ## Available Models
 
-`model` accepts any `AiAgentModels` value — a curated cross-provider list of models proficient at agentic tool use. The workspace must have an AI credential configured for the chosen model's provider (the run fails fast otherwise).
+`model` accepts any `AiAgentModels` value — a curated cross-provider list of models proficient at agentic tool use — or a model reference of the form `<provider>/<model-id>` (a built-in provider's unlisted model) or `<slug>/<model-id>` (a workspace [custom provider](custom-ai-providers.md): Fireworks, Groq, OpenRouter, a self-hosted vLLM, …). The workspace must have an AI credential configured for the chosen model's provider — for a custom provider, one with that slug — or the run fails fast. For custom models, `thinkingLevel` only applies when the catalog entry has `reasoning: true`.
 
 **Default:** `claude-sonnet-5` (the first entry of the Anthropic list; the platform picks it when `model` is unset).
 
@@ -544,7 +544,7 @@ The agent runs on the workspace's serverless runtime (or a per-actor runtime ove
 
 - **Ephemeral storage sizes the workspace.** The durable workspace is capped at **20% of the runtime's ephemeral storage**. The 512 MB default yields only ~100 MB of workspace — **provision a runtime with ≥ 4 GB ephemeral storage (~800 MB workspace) for real agent work**. Exceeding the cap ends the session with `endReason: 'error'` (state is snapshotted first); a follow-up invoke with a cleanup prompt starts in a grace mode that lets the agent delete files before the cap re-enforces.
 - **The runtime timeout is the segment length**, not the session limit. Each segment is bounded by the runtime's configured timeout (up to 14 minutes); the session checkpoints and continues across segments, so total runtime is governed by `timeoutInMinutes`, not the runtime timeout. Short runtime timeouts still work — they just checkpoint more often.
-- **AI credential**: the workspace needs an AI credential for the chosen model's provider.
+- **AI credential**: the workspace needs an AI credential for the chosen model's provider — for a `<slug>/<model-id>` reference, a custom provider with that slug (its connection must be reachable from the cloud).
 - **Isolation**: agent segments share the workspace runtime's concurrency pool. For isolation, create a dedicated runtime and point the actor at it via the per-actor runtime setting.
 
 ## MCP Servers

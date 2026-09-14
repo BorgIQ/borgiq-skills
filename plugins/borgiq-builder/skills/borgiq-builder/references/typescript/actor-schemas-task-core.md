@@ -789,13 +789,13 @@ export type AgentHarnessActorResult = z.infer<typeof AgentHarnessActorResultSche
 ```typescript
 import { z } from 'zod';
 
-import { AiModel, AiModelInformationMap, AiDefaultParameters, BIQAiMessageSchema, AiToolCallSchema } from '../../ai/index.js';
+import { AiModel, AiModelRefSchema, AiDefaultParameters, BIQAiMessageSchema, AiToolCallSchema, buildAiModelSuggestionUiOptions } from '../../ai/index.js';
 import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
 
 /** The options for the AIActor */
 export const AiActorOptionsSchema = z.object({
-  model: z.enum(AiModel).nullish()
-    .describe('The model to use for the AI provider. Defaults to gpt-4o-mini if not provided'),
+  model: AiModelRefSchema.nullish()
+    .describe('The model to use for the AI provider: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(2).nullish()
@@ -833,34 +833,23 @@ export const AiActorOptionsSchema = z.object({
 
 export type AiActorOptions = z.infer<typeof AiActorOptionsSchema>;
 
-const modelLabels = Object.values(AiModel).reduce((acc, model) => {
-  acc[model] = AiModelInformationMap[model].label;
-  return acc;
-}, {} as Record<AiModel, string>);
-
-const modelGroups = Object.values(AiModel).reduce((acc, model) => {
-  if (!acc[AiModelInformationMap[model].providerLabel]) {
-    acc[AiModelInformationMap[model].providerLabel] = [model];
-  } else {
-    acc[AiModelInformationMap[model].providerLabel].push(model);
-  }
-  return acc;
-}, {} as Record<string, AiModel[]>);
+/** Curated suggestions: every known model, grouped by provider. The field is free text, so a
+ * workspace's custom providers' models (`<slug>/<id>`) are typed or merged in by the web. */
+const modelSuggestionUi = buildAiModelSuggestionUiOptions(Object.values(AiModel));
 
 export const AiActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use for the AI provider',
+      description: 'The model to use for the AI provider. Pick a known model, or type "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct")',
       title: 'Model',
-      enum: Object.values(AiModel),
       default: AiDefaultParameters.model,
       ui: {
-        component: 'searchSelect',
+        component: 'suggestion',
         order: 0,
         options: {
-          enumLabels: modelLabels,
-          enumGroups: modelGroups,
+          placeholder: 'Select or type a model',
+          ...modelSuggestionUi,
         }
       }
     },
@@ -1609,7 +1598,7 @@ import { z } from 'zod';
 
 import { BIQActorType } from '../../canvas.js';
 import { BIQFileSchema, BIQJsonSchema, BIQJsonSchemaType, McpAuthDataSchema } from '../../schemas/index.js';
-import { AiModel, AiModelInformationMap, AiAgentModels, AI_AGENT_THINKING_LEVELS, AiAgentThinkingLevelSchema } from '../../ai/index.js';
+import { AiModelRefSchema, AiAgentModels, AI_AGENT_THINKING_LEVELS, AiAgentThinkingLevelSchema, buildAiModelSuggestionUiOptions } from '../../ai/index.js';
 import { DeprecatedAiAgentStatusPortResultSchema } from './deprecatedAiAgent.js';
 
 /** The ai agent done source port id */
@@ -1652,7 +1641,10 @@ export const AI_AGENT_BUILTIN_TOOLS = [
   ...AI_AGENT_FILTERABLE_TOOLS, AI_AGENT_CODE_EXECUTION_TOOL_NAME,
 ] as const;
 
-const AI_AGENT_MODELS = AiAgentModels as unknown as [AiModel, ...AiModel[]];
+/** The curated agent models offered as suggestions. The field accepts any valid model reference,
+ * so a workspace's custom providers' models (`<slug>/<id>`) run here too — pi is told about them
+ * at segment start from the workspace catalog. */
+const AI_AGENT_MODELS: readonly string[] = AiAgentModels;
 
 /** Transport for a remote MCP server. The AI agent only supports REMOTE MCP servers over Streamable
  * HTTP — the orchestrator makes the JSON-RPC calls so they survive segment checkpoints; there is no
@@ -1716,8 +1708,8 @@ export function isBorgiqAiAgentMcpServer(server: AiAgentMcpServer): server is Bo
  * (orchestrator-mediated) here rather than stdio subprocesses. The harness is always pi and the
  * runtime is always the agent-sessions Lambda. */
 export const AiAgentActorOptionsSchema = z.object({
-  model: z.enum(AI_AGENT_MODELS).nullish()
-    .describe('The model to use for the agent. Provider-agnostic; LLM calls are routed through the BorgIQ AI gateway.'),
+  model: AiModelRefSchema.nullish()
+    .describe('The model to use for the agent: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Provider-agnostic; LLM calls are routed through the BorgIQ AI gateway.'),
   prompt: z.string()
     .describe('The task prompt for the agent'),
   systemPrompt: z.string().nullish()
@@ -1806,35 +1798,22 @@ export const AiAgentActorOptionsSchema = z.object({
 
 export type AiAgentActorOptions = z.infer<typeof AiAgentActorOptionsSchema>;
 
-const modelLabels = AI_AGENT_MODELS.reduce((acc, model) => {
-  acc[model] = AiModelInformationMap[model].label;
-  return acc;
-}, {} as Record<AiModel, string>);
-
-const modelGroups = AI_AGENT_MODELS.reduce((acc, model) => {
-  if (!acc[AiModelInformationMap[model].providerLabel]) {
-    acc[AiModelInformationMap[model].providerLabel] = [model];
-  } else {
-    acc[AiModelInformationMap[model].providerLabel].push(model);
-  }
-  return acc;
-}, {} as Record<string, AiModel[]>);
+const modelSuggestionUi = buildAiModelSuggestionUiOptions(AI_AGENT_MODELS);
 
 /** The JSON Schema for AiAgentActor options (for UI rendering) */
 export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use for the agent. LLM calls are routed through the BorgIQ AI gateway.',
+      description: 'The model to use for the agent. Pick a known model, or type "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). LLM calls are routed through the BorgIQ AI gateway.',
       title: 'Model',
-      enum: AI_AGENT_MODELS.map((model) => model.toString()),
-      default: AI_AGENT_MODELS[0].toString(),
+      default: AI_AGENT_MODELS[0],
       ui: {
-        component: 'searchSelect',
+        component: 'suggestion',
         order: 0,
         options: {
-          enumLabels: modelLabels,
-          enumGroups: modelGroups,
+          placeholder: 'Select or type a model',
+          ...modelSuggestionUi,
         }
       }
     },
@@ -2222,7 +2201,7 @@ import { RuntimeActorSourcePort } from '../../schemas/runtime.js';
 import { DEFAULT_SOURCE_PORT_ID } from '../../canvas.js';
 import { BIQJsonSchemaType } from '../../schemas/index.js';
 import { BIQJsonSchema } from '../../schemas/index.js';
-import { AiModel, AiModelInformationMap, BIQAiMessageSchema } from '../../ai/index.js';
+import { AiModel, AiModelRef, AiModelRefSchema, BIQAiMessageSchema, buildAiModelSuggestionUiOptions } from '../../ai/index.js';
 import { AiDefaultParameters } from '../../ai/index.js';
 
 export enum AiRouterActorEmitType {
@@ -2232,8 +2211,8 @@ export enum AiRouterActorEmitType {
 
 /** The options schema builder for the AiRouterActor since it changes for the sourcePorts configuration for the actor */
 export const buildAiRouterActorOptionsSchema = (sourcePorts: RuntimeActorSourcePort[]): ZodObject<any> => z.object({ // eslint-disable-line @typescript-eslint/no-explicit-any
-  model: z.string().nullish()
-    .describe('The model to use for the AI provider. Defaults to gpt-4o-mini if not provided'),
+  model: AiModelRefSchema.nullish()
+    .describe('The model to use for the AI provider: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers. Defaults to gpt-4o-mini if not provided'),
   emitType: z.enum(AiRouterActorEmitType).nullish()
     .describe('How the AI router actor will function, either can be singleRoute or multiRoute where singleRoute emits only on one of the conditions being true and multiRoute emits on all of the conditions being true'),
   input: z.any().describe('The input to the AI router actor'),
@@ -2271,41 +2250,28 @@ export const buildAiRouterActorOptionsSchema = (sourcePorts: RuntimeActorSourceP
 
 export type AiRouterActorOptions = {
   input: unknown,
-  model?: AiModel,
+  model?: AiModelRef,
   emitType?: AiRouterActorEmitType,
   routeDescriptions: { [portName: string]: string },
   emitInput?: boolean,
 };
 
-const modelLabels = Object.values(AiModel).reduce((acc, model) => {
-  acc[model] = AiModelInformationMap[model].label;
-  return acc;
-}, {} as Record<AiModel, string>);
-
-const modelGroups = Object.values(AiModel).reduce((acc, model) => {
-  if (!acc[AiModelInformationMap[model].providerLabel]) {
-    acc[AiModelInformationMap[model].providerLabel] = [model];
-  } else {
-    acc[AiModelInformationMap[model].providerLabel].push(model);
-  }
-  return acc;
-}, {} as Record<string, AiModel[]>);
+const modelSuggestionUi = buildAiModelSuggestionUiOptions(Object.values(AiModel));
 
 /** this is a partial schema, since the emitType and routeDescriptions will be handled by the sourcePorts configuration */
 export const AiRouterActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use for the AI provider',
+      description: 'The model to use for the AI provider. Pick a known model, or type "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct")',
       title: 'Model',
-      enum: Object.values(AiModel),
       default: AiDefaultParameters.model,
       ui: {
-        component: 'searchSelect',
+        component: 'suggestion',
         order: 0,
         options: {
-          enumLabels: modelLabels,
-          enumGroups: modelGroups,
+          placeholder: 'Select or type a model',
+          ...modelSuggestionUi,
         },
       },
     },

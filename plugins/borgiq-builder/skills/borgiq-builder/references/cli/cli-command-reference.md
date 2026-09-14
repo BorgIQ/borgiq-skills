@@ -996,6 +996,55 @@ borgiq connections list --json
 }
 ```
 
+### `borgiq ai-providers list`
+
+List the workspace AI providers: built-in provider credential links (`name` = provider) and custom providers (`provider: custom`, `name` = slug). Requires `@borgiq/cli` >= 0.12.0.
+
+```bash
+borgiq ai-providers list --json
+```
+
+**Output:**
+```json
+[
+  { "id": "AIST01kd6gqghj04j8765nnqyp09", "name": "anthropic", "provider": "anthropic", "connectionId": "CONN01…", "data": {} },
+  { "id": "AIST01kd6gr3vjxm2rs0k8s3fjq4n", "name": "fireworks", "provider": "custom", "connectionId": "CONN02…",
+    "data": { "models": [{ "id": "accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 70B" }] } }
+]
+```
+
+### `borgiq ai-providers models`
+
+List every model reference usable in actor `model` options: the known models, then each custom provider's catalog as `<slug>/<model-id>`.
+
+```bash
+borgiq ai-providers models --json
+borgiq ai-providers models --custom --json
+```
+
+**Output:**
+```json
+{
+  "models": [
+    { "ref": "claude-sonnet-5", "label": "Claude Sonnet 5", "provider": "anthropic", "group": "Anthropic", "custom": false },
+    { "ref": "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 70B", "provider": "fireworks", "group": "Custom Provider — fireworks", "custom": true }
+  ]
+}
+```
+
+### `borgiq ai-providers create`
+
+Add a custom provider (an OpenAI-compatible endpoint under a slug) or link a built-in provider's connection.
+
+```bash
+borgiq ai-providers create --provider custom --name fireworks --connection fireworks \
+  --models accounts/fireworks/models/llama-v3p1-70b-instruct --json
+borgiq ai-providers edit fireworks --add-model accounts/fireworks/models/deepseek-v3 --json
+borgiq ai-providers delete fireworks -y
+```
+
+See [custom-ai-providers.md](../custom-ai-providers.md) for the connection type, the catalog fields and the model reference rules.
+
 ### `borgiq connections types`
 
 List available connection types.
