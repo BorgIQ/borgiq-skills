@@ -379,11 +379,16 @@ export const AgentLambdaAiProviderConfigSchema = z.object({
    * to a built-in provider. Absent on payloads from before custom providers had slugs (the host
    * then uses `aiProvider`). */
   providerId: z.string().optional(),
-  /** the endpoint's base URL (e.g. `https://api.groq.com/openai/v1`) — required for a provider pi
-   * does not have built in; omitted when only a model is being added to a built-in provider */
+  /** the endpoint's effective base URL (the custom provider's override, else its connection's, else
+   * the connection type's vendor default — e.g. `https://api.groq.com/openai/v1`) — required for a
+   * provider pi does not have built in; omitted when only a model is being added to a built-in provider */
   baseUrl: z.string().optional(),
   /** extra request headers from the connection (never credentials) */
   headers: z.record(z.string(), z.string()).optional(),
+  /** the header the API key travels in when the connection's auth type is a named-header API key
+   * (`x-api-key`); the host then sends the placeholder in that header instead of
+   * `Authorization: Bearer`. Absent = bearer. */
+  apiKeyHeader: z.string().optional(),
   /** whether the placeholder key is a real credential the proxy substitutes (`false` for keyless
    * local servers: the host still hands pi a dummy key because pi requires one) */
   hasApiKey: z.boolean(),

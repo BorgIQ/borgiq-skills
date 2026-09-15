@@ -10,6 +10,7 @@ Shared TypeScript types and utilities: common types, AI model definitions (Anthr
 - [ai/lib.ts](#ailib)
 - [ai/modelRef.ts](#aimodelref)
 - [ai/openAi.ts](#aiopenai)
+- [ai/providerBaseUrl.ts](#aiproviderbaseurl)
 - [ai/xAi.ts](#aixai)
 - [asset.ts](#asset)
 - [canvas.ts](#canvas)
@@ -921,6 +922,7 @@ import { BIQFileSchema } from '../schemas/file.js';
 export { AiProvider, AI_MODEL_PROVIDERS, AiProviderLabels } from './lib.js';
 export type { AiModelProvider, AiModelInformation } from './lib.js';
 export * from './modelRef.js';
+export * from './providerBaseUrl.js';
 export { AnthropicAgentModels } from './anthropic.js';
 export { OpenAiAgentModels } from './openAi.js';
 export { GoogleAgentModels } from './google.js';
@@ -1322,8 +1324,10 @@ export enum AiProvider {
    * OpenAI-compatible or uses the OpenAI chat completions schema (Fireworks, Groq, Together,
    * DeepInfra, OpenRouter, LiteLLM, Ollama, vLLM, LM Studio, llama.cpp, Azure OpenAI's /openai/v1,
    * ...). A workspace may add several, each an AI setting whose `name` is the provider's slug, with
-   * its own `custom-provider-apikey` connection (base URL, optional key) and model catalog; models
-   * are referenced as `<slug>/<model-id>` (see ./modelRef.ts), not through a build-time enum. */
+   * a connection for the key (a vendor connection type flagged `aiProvider`, a generic bearer /
+   * API-key type, or `custom-provider-apikey`), a base URL (its own override, else the connection's,
+   * else the connection type's vendor default — see ./providerBaseUrl.ts) and a model catalog;
+   * models are referenced as `<slug>/<model-id>` (see ./modelRef.ts), not through a build-time enum. */
   Custom = 'custom',
 }
 
@@ -1445,6 +1449,25 @@ export function isValidCustomProviderSlug(slug: unknown): slug is string {
   return typeof slug === 'string' && AI_PROVIDER_SLUG_REGEX.test(slug) && !RESERVED_AI_PROVIDER_SLUGS.has(slug);
 }
 
+/** Connection-type name suffixes that name the auth method rather than the vendor (`groq-bearer` → `groq`). */
+const CONNECTION_TYPE_AUTH_SUFFIX_REGEX = /-(bearer|apikey|api-key|oauth2|oauth1|basic|pat|token|awskeybased|awsrolebased)$/;
+
+/** Connection-type name prefixes that name no vendor, so they suggest no slug. */
+const NON_VENDOR_CONNECTION_TYPE_REGEX = /^(generic-|custom)/;
+
+/**
+ * The slug to prefill for a custom provider backed by a connection of the given type: the type's
+ * name without its auth-method suffix (`groq-bearer` → `groq`, `openrouter-bearer` → `openrouter`).
+ * `undefined` for generic and custom types, for a name that is a reserved provider id (an
+ * `openai-bearer` connection is fine behind a custom provider, but `openai` cannot be its slug),
+ * or for anything that is not a valid slug.
+ */
+export function suggestCustomProviderSlug(connectionTypeName: unknown): string | undefined {
+  if (typeof connectionTypeName !== 'string' || NON_VENDOR_CONNECTION_TYPE_REGEX.test(connectionTypeName)) return undefined;
+  const slug = connectionTypeName.replace(CONNECTION_TYPE_AUTH_SUFFIX_REGEX, '');
+  return isValidCustomProviderSlug(slug) ? slug : undefined;
+}
+
 /** One model of a custom provider's catalog (stored in the AI setting's `data.models`). Only `id`
  * is required; everything else refines pricing, limits and the flags the two LLM stacks need
  * (pi's `reasoning`/`input`/`compat`, the AI SDK's structured-output support). */
@@ -1479,8 +1502,10 @@ export type AiCustomModelCatalogEntry = z.infer<typeof AiCustomModelCatalogEntry
 
 /** The non-secret `data` of a custom provider's AI setting. */
 export const CustomProviderAiSettingDataSchema = z.object({
-  /** legacy direct-credential base URL (connection-backed settings carry it on the connection) */
-  baseURL: z.string().optional(),
+  /** the provider's base URL override — wins over the connection's own base URL and the connection
+   * type's vendor default (see ./providerBaseUrl.ts). Lenient here so a stale value never hides the
+   * catalog; the API validates it strictly on write and the resolver ignores an unusable one. */
+  baseURL: z.string().max(2048).optional(),
   /** the custom provider's model catalog */
   models: z.array(AiCustomModelCatalogEntrySchema).max(500).optional(),
 });
@@ -2418,6 +2443,101 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     maxTokens: 128000,
   },
 } as const;
+```
+
+## ai/providerBaseUrl
+
+**Source:** `ai/providerBaseUrl.ts`
+
+```typescript
+import { z } from 'zod';
+
+/**
+ * The base URL an AI provider's LLM requests go to, and where it comes from.
+ *
+ * A custom provider (`AiProvider.Custom`) resolves its base URL from three places, first hit wins:
+ *
+ * 1. **the AI setting** — `data.baseURL`, an explicit override the user typed on the provider;
+ * 2. **the connection** — the connection's own `baseUrl` input (rendered as `result.baseUrl`), for
+ *    connection types whose base URL *is* the LLM endpoint (`custom-provider-apikey`, or a vendor
+ *    type whose optional base URL was filled in);
+ * 3. **the connection type** — the vendor default declared on the connection type
+ *    (`aiProvider.baseUrl` in its YAML: `https://api.groq.com/openai/v1` for `groq-bearer`, ...).
+ *
+ * The same function serves the credential resolver (what the LLM call uses), the API (what it
+ * reports as `effectiveBaseUrl` / `derivedBaseUrl`) and the web add form (the placeholder it
+ * shows before a setting exists), so the three never disagree.
+ */
+
+/** Upper bound on a base URL (matches the connection input's own limit). */
+export const AI_PROVIDER_BASE_URL_MAX_LENGTH = 2048;
+
+/** A base URL a custom provider may use: absolute `http(s)://` URL, no query or fragment. */
+export const AiProviderBaseUrlSchema = z.string()
+  .trim()
+  .min(1, 'Base URL is required')
+  .max(AI_PROVIDER_BASE_URL_MAX_LENGTH)
+  .refine((value) => normalizeAiProviderBaseUrl(value) !== undefined, {
+    message: 'Base URL must be an absolute http:// or https:// URL, e.g. https://api.groq.com/openai/v1',
+  });
+
+/**
+ * Trim a base URL and strip a trailing slash; `undefined` for an empty value or anything that is
+ * not an absolute `http(s)://` URL (so a junk legacy value falls through to the next source
+ * instead of being sent to the SDK).
+ */
+export function normalizeAiProviderBaseUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > AI_PROVIDER_BASE_URL_MAX_LENGTH) return undefined;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  if (url.search || url.hash || !url.hostname) return undefined;
+  return trimmed.replace(/\/+$/, '');
+}
+
+/** Where an effective base URL came from. */
+export type AiProviderBaseUrlSource = 'setting' | 'connection' | 'connectionType';
+
+export interface AiProviderBaseUrlCandidates {
+  /** the AI setting's `data.baseURL` (explicit override) */
+  settingBaseUrl?: unknown;
+  /** the connection's own base URL (its `baseUrl` input / rendered `result.baseUrl`) */
+  connectionBaseUrl?: unknown;
+  /** the connection type's vendor default (`aiProvider.baseUrl`) */
+  connectionTypeBaseUrl?: unknown;
+}
+
+export interface ResolvedAiProviderBaseUrl {
+  /** the base URL to use, normalized; `undefined` when no candidate is usable */
+  baseUrl?: string;
+  /** which candidate won */
+  source?: AiProviderBaseUrlSource;
+}
+
+/** Pick a custom provider's effective base URL: setting override → connection → connection type. */
+export function resolveEffectiveAiProviderBaseUrl(candidates: AiProviderBaseUrlCandidates): ResolvedAiProviderBaseUrl {
+  const ordered: [AiProviderBaseUrlSource, unknown][] = [
+    ['setting', candidates.settingBaseUrl],
+    ['connection', candidates.connectionBaseUrl],
+    ['connectionType', candidates.connectionTypeBaseUrl],
+  ];
+  for (const [source, candidate] of ordered) {
+    const baseUrl = normalizeAiProviderBaseUrl(candidate);
+    if (baseUrl) return { baseUrl, source };
+  }
+  return {};
+}
+
+/** Whether a base URL is plaintext `http://` (the secret proxy never injects a key into plaintext requests). */
+export function isPlaintextAiProviderBaseUrl(baseUrl: string | undefined): boolean {
+  return typeof baseUrl === 'string' && /^http:\/\//i.test(baseUrl.trim());
+}
 ```
 
 ## ai/xAi

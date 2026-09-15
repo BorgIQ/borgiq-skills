@@ -1009,9 +1009,12 @@ borgiq ai-providers list --json
 [
   { "id": "AIST01kd6gqghj04j8765nnqyp09", "name": "anthropic", "provider": "anthropic", "connectionId": "CONN01…", "data": {} },
   { "id": "AIST01kd6gr3vjxm2rs0k8s3fjq4n", "name": "fireworks", "provider": "custom", "connectionId": "CONN02…",
+    "effectiveBaseUrl": "https://api.fireworks.ai/inference/v1", "derivedBaseUrl": "https://api.fireworks.ai/inference/v1", "baseUrlSource": "connectionType",
     "data": { "models": [{ "id": "accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 70B" }] } }
 ]
 ```
+
+Custom rows carry `effectiveBaseUrl` (the setting's `data.baseURL` override, else `derivedBaseUrl`: the connection's own base URL, else the connection type's vendor default) and `baseUrlSource` (`setting` | `connection` | `connectionType`).
 
 ### `borgiq ai-providers models`
 
@@ -1034,12 +1037,16 @@ borgiq ai-providers models --custom --json
 
 ### `borgiq ai-providers create`
 
-Add a custom provider (an OpenAI-compatible endpoint under a slug) or link a built-in provider's connection.
+Add a custom provider (an OpenAI-compatible endpoint under a slug) or link a built-in provider's connection. A custom provider's connection is a vendor connection type (`groq-bearer`, `fireworks-bearer`, …, which carry the base URL), a generic bearer / API-key connection, or `custom-provider-apikey`; `--base-url` overrides the base URL the connection supplies.
 
 ```bash
 borgiq ai-providers create --provider custom --name fireworks --connection fireworks \
   --models accounts/fireworks/models/llama-v3p1-70b-instruct --json
+borgiq ai-providers create --provider custom --name local-vllm --connection vllm-key \
+  --base-url http://vllm.internal:8000/v1 --models qwen2.5-coder:7b --json
 borgiq ai-providers edit fireworks --add-model accounts/fireworks/models/deepseek-v3 --json
+borgiq ai-providers edit fireworks --base-url https://gateway.example/fireworks/v1 --json
+borgiq ai-providers edit fireworks --no-base-url --json
 borgiq ai-providers delete fireworks -y
 ```
 
