@@ -795,7 +795,7 @@ import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
 /** The options for the AIActor */
 export const AiActorOptionsSchema = z.object({
   model: AiModelRefSchema.nullish()
-    .describe('The model to use for the AI provider: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(2).nullish()
@@ -841,7 +841,7 @@ export const AiActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use for the AI provider. Pick a known model, or type "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct")',
+      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided',
       title: 'Model',
       default: AiDefaultParameters.model,
       ui: {
@@ -1598,7 +1598,7 @@ import { z } from 'zod';
 
 import { BIQActorType } from '../../canvas.js';
 import { BIQFileSchema, BIQJsonSchema, BIQJsonSchemaType, McpAuthDataSchema } from '../../schemas/index.js';
-import { AiModelRefSchema, AiAgentModels, AI_AGENT_THINKING_LEVELS, AiAgentThinkingLevelSchema, buildAiModelSuggestionUiOptions } from '../../ai/index.js';
+import { AiModelRefSchema, AiAgentModels, AiAgentModelsByProvider, AI_AGENT_THINKING_LEVELS, AiAgentThinkingLevelSchema, buildAiModelSuggestionUiOptions, parseAiModelRef } from '../../ai/index.js';
 import { DeprecatedAiAgentStatusPortResultSchema } from './deprecatedAiAgent.js';
 
 /** The ai agent done source port id */
@@ -1641,10 +1641,27 @@ export const AI_AGENT_BUILTIN_TOOLS = [
   ...AI_AGENT_FILTERABLE_TOOLS, AI_AGENT_CODE_EXECUTION_TOOL_NAME,
 ] as const;
 
-/** The curated agent models offered as suggestions. The field accepts any valid model reference,
- * so a workspace's custom providers' models (`<slug>/<id>`) run here too — pi is told about them
- * at segment start from the workspace catalog. */
+/** The curated agent models offered as suggestions. A known model id must be one of them; the
+ * field also accepts any other valid reference, so a built-in provider's unlisted model
+ * (`<provider>/<id>`) and a workspace's custom providers' models (`<slug>/<id>`) run here too — pi
+ * is told about them at segment start from the workspace catalog. */
 const AI_AGENT_MODELS: readonly string[] = AiAgentModels;
+
+/** The AI Agent actor's model: a valid reference whose known model, if it is one, is in its
+ * provider's curated agent list (`AiAgentModelsByProvider`). Unlisted built-in and custom models
+ * pass here; a custom model's `agent: false` catalog flag is enforced at dispatch, where the
+ * workspace catalog is at hand. */
+const AiAgentModelRefSchema = AiModelRefSchema.superRefine((model, ctx) => {
+  const parts = parseAiModelRef(model);
+  if (parts?.kind !== 'known') return;
+  const agentModels: readonly string[] = AiAgentModelsByProvider[parts.provider];
+  if (!agentModels.includes(parts.modelId)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `Model "${model}" is not one of the AI Agent actor's ${parts.provider} models (${agentModels.join(', ')})`,
+    });
+  }
+});
 
 /** Transport for a remote MCP server. The AI agent only supports REMOTE MCP servers over Streamable
  * HTTP — the orchestrator makes the JSON-RPC calls so they survive segment checkpoints; there is no
@@ -1708,8 +1725,8 @@ export function isBorgiqAiAgentMcpServer(server: AiAgentMcpServer): server is Bo
  * (orchestrator-mediated) here rather than stdio subprocesses. The harness is always pi and the
  * runtime is always the agent-sessions Lambda. */
 export const AiAgentActorOptionsSchema = z.object({
-  model: AiModelRefSchema.nullish()
-    .describe('The model to use for the agent: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Provider-agnostic; LLM calls are routed through the BorgIQ AI gateway.'),
+  model: AiAgentModelRefSchema.nullish()
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). A known model id must be one of the curated agent models. Provider-agnostic; LLM calls are routed through the BorgIQ AI gateway.'),
   prompt: z.string()
     .describe('The task prompt for the agent'),
   systemPrompt: z.string().nullish()
@@ -1805,7 +1822,7 @@ export const AiAgentActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use for the agent. Pick a known model, or type "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). LLM calls are routed through the BorgIQ AI gateway.',
+      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). A known model id must be one of the curated agent models. Provider-agnostic; LLM calls are routed through the BorgIQ AI gateway.',
       title: 'Model',
       default: AI_AGENT_MODELS[0],
       ui: {
@@ -2212,7 +2229,7 @@ export enum AiRouterActorEmitType {
 /** The options schema builder for the AiRouterActor since it changes for the sourcePorts configuration for the actor */
 export const buildAiRouterActorOptionsSchema = (sourcePorts: RuntimeActorSourcePort[]): ZodObject<any> => z.object({ // eslint-disable-line @typescript-eslint/no-explicit-any
   model: AiModelRefSchema.nullish()
-    .describe('The model to use for the AI provider: a known model id, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers. Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
   emitType: z.enum(AiRouterActorEmitType).nullish()
     .describe('How the AI router actor will function, either can be singleRoute or multiRoute where singleRoute emits only on one of the conditions being true and multiRoute emits on all of the conditions being true'),
   input: z.any().describe('The input to the AI router actor'),
@@ -2263,7 +2280,7 @@ export const AiRouterActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use for the AI provider. Pick a known model, or type "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct")',
+      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided',
       title: 'Model',
       default: AiDefaultParameters.model,
       ui: {

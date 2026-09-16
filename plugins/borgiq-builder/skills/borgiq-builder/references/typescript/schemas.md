@@ -370,8 +370,9 @@ export const AGENT_LAMBDA_SEGMENT_EVENT_KIND = 'agent-lambda-segment';
  * reaches the endpoint as-is. It is not a proxy placeholder; nothing substitutes it. */
 export const AGENT_LAMBDA_NO_API_KEY = 'no-api-key';
 
-/** The session-specific data for one segment. Everything credential/transport-related
- * (token, apiUrl, proxy URL, CA bundle) rides in the event envelope / envVars instead. */
+/** The ids a `providerId` may carry without a base URL: pi has these providers built in. */
+const BUILTIN_PROVIDER_IDS: ReadonlySet<string> = new Set<string>(Object.values(AiProvider));
+
 /** Provider + model metadata the segment host registers on pi (see `aiProviderConfig`). */
 export const AgentLambdaAiProviderConfigSchema = z.object({
   /** the id the host registers on pi's ModelRuntime and resolves the model under: a custom
@@ -394,10 +395,25 @@ export const AgentLambdaAiProviderConfigSchema = z.object({
   hasApiKey: z.boolean(),
   /** the model's catalog entry, when the workspace catalog lists it */
   model: AiCustomModelCatalogEntrySchema.optional(),
+}).superRefine((config, ctx) => {
+  // A provider pi does not have built in is registered under an id the host must be told.
+  if (config.baseUrl !== undefined && config.providerId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['providerId'], message: 'providerId is required when baseUrl is set' });
+  }
+  // An id that is not a built-in provider names a custom provider, which only exists as an endpoint.
+  if (config.providerId !== undefined && !BUILTIN_PROVIDER_IDS.has(config.providerId) && config.baseUrl === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: `baseUrl is required for the custom provider "${config.providerId}"` });
+  }
+  // A named key header is where the key goes; without a key there is nothing to put in it.
+  if (config.apiKeyHeader !== undefined && !config.hasApiKey) {
+    ctx.addIssue({ code: 'custom', path: ['apiKeyHeader'], message: 'apiKeyHeader requires hasApiKey' });
+  }
 });
 
 export type AgentLambdaAiProviderConfig = z.infer<typeof AgentLambdaAiProviderConfigSchema>;
 
+/** The session-specific data for one segment. Everything credential/transport-related
+ * (token, apiUrl, proxy URL, CA bundle) rides in the event envelope / envVars instead. */
 export const AgentLambdaSegmentPayloadSchema = z.object({
   /** Status-hook URL the segment posts heartbeats / loop / tool-result / checkpointed / complete to */
   statusHookUrl: z.string(),
@@ -2401,6 +2417,10 @@ export const PlaceholderAiProviderEntrySchema = z.object({
    * several, one per slug) so the key the proxy substitutes and the base URL the segment was
    * dispatched with always come from the same row. Optional: built-in providers have one setting. */
   aiSettingId: z.string().optional(),
+}).superRefine((entry, ctx) => {
+  if (entry.provider === AiProvider.Custom && entry.aiSettingId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['aiSettingId'], message: 'aiSettingId is required for a custom provider placeholder' });
+  }
 });
 
 export type PlaceholderAiProviderEntry = z.infer<typeof PlaceholderAiProviderEntrySchema>;
@@ -2832,7 +2852,8 @@ export type RuntimeActorSourcePort = z.infer<typeof RuntimeActorSourcePortSchema
  * environment and the legacy dependency-resolution chain.
  *
  * The runtime downloads the object, verifies it against `sha256`/`bytes` **before** extracting, and
- * refuses it if `imageBuildId` is known on both sides and differs. Any failure is reported as the
+ * refuses it if `imageBuildId` is known on both sides and differs, or if `architecture` is known and
+ * differs from the runtime's own. Any failure is reported as the
  * retryable `RUNTIME_CACHE_UNAVAILABLE_ERROR_NAME` error rather than silently resolving dependencies
  * inside an environment shared by a whole canvas.
  */
@@ -2864,6 +2885,8 @@ export const RuntimeCacheSchema = z.object({
   actorHash: BuildIdentityHashSchema,
   /** the runtime image the artifact was built on; compared with the runtime's own when both are known */
   imageBuildId: z.string().optional(),
+  /** the CPU architecture the artifact was built on; the runtime refuses it when it differs from its own */
+  architecture: z.enum(['x86_64', 'arm64']).optional(),
   /** the runtime function's image URI at build time, carried for diagnostics */
   runtimeVersion: z.string().optional(),
 });

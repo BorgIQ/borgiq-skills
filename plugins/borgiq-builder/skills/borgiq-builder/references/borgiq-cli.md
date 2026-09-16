@@ -197,11 +197,11 @@ borgiq connections list --json
 ### List AI providers and usable models
 
 ```bash
-borgiq ai-providers list --json      # built-in credential links + custom providers (slug, connection, catalog)
-borgiq ai-providers models --json    # every model reference an AI / AI Agent / AI Router actor can use
+borgiq ai-providers list --json      # built-in credential links + custom providers (slug, connection, catalog, modelCount)
+borgiq ai-providers models --json    # a top-level array of listed model references; `agent` says whether the AI Agent accepts each
 ```
 
-Custom providers (Groq, Fireworks, OpenRouter, a self-hosted vLLM, …) show as `provider: custom` with a slug and the effective base URL their requests go to; their models are referenced as `<slug>/<model-id>`. Requires `@borgiq/cli` >= 0.12.0; see [custom-ai-providers.md](custom-ai-providers.md).
+Custom providers (Groq, Fireworks, OpenRouter, a self-hosted vLLM, …) show as `provider: custom` with a slug and the effective base URL their requests go to (`connectionMissing: true` means the linked connection was deleted); their models are referenced as `<slug>/<model-id>`. Actors also accept `<provider>/<model-id>` for a built-in provider's unlisted model, which `models` does not enumerate. Requires `@borgiq/cli` >= 0.12.0; see [custom-ai-providers.md](custom-ai-providers.md).
 
 Check if the connection the actor needs already exists. If it does, use its `key` in the actor's `connection` config:
 

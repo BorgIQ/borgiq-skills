@@ -918,6 +918,7 @@ import { AnthropicModelInformationMap, AnthropicModels, AnthropicAgentModels } f
 import { GoogleModelInformationMap, GoogleAiModels, GoogleAgentModels } from './google.js';
 import { xAiModelInformationMap, xAiModels, xAiAgentModels } from './xAi.js';
 import { BIQFileSchema } from '../schemas/file.js';
+import type { AiModelRef } from './modelRef.js';
 
 export { AiProvider, AI_MODEL_PROVIDERS, AiProviderLabels } from './lib.js';
 export type { AiModelProvider, AiModelInformation } from './lib.js';
@@ -958,6 +959,10 @@ export const AiModel = {
   ...xAiModels,
 } as const;
 export type AiModel = (typeof AiModel)[keyof typeof AiModel];
+
+/** What the AI services accept as a model: a validated reference (`AiModelRefSchema`), or a known
+ * model id, which is a valid reference by construction. */
+export type AiModelRefInput = AiModelRef | AiModel;
 
 /** Curated agent lists per provider (single source of truth, defined alongside each
  * provider's models). The first entry seeds the cross-provider default — keep it an
@@ -1344,7 +1349,9 @@ export const AI_MODEL_PROVIDERS = [
 
 export type AiModelProvider = (typeof AI_MODEL_PROVIDERS)[number];
 
-/** Human-readable provider names (the `providerLabel` of a model, also the model dropdown's group titles). */
+/** Human-readable provider names: the `providerLabel` of a built-in provider's model and the model
+ * dropdown's group title for it. A custom provider's models group under "Custom Provider — <slug>"
+ * (see ./modelRef.ts `getAiModelInformation`), so the `custom` label here is only its prefix. */
 export const AiProviderLabels: Record<AiProvider, string> = {
   [AiProvider.OpenAI]: 'OpenAI',
   [AiProvider.Anthropic]: 'Anthropic',
@@ -1395,7 +1402,8 @@ import { xAiModelInformationMap } from './xAi.js';
  *   `claude-sonnet-4-5`, ...). Resolves to its provider and pricing through the static
  *   `AiModelInformationMap`.
  * - a **built-in provider's** model the build does not list: `<provider>/<model-id>` where
- *   `<provider>` is one of the built-in `AI_MODEL_PROVIDERS` (`openai/gpt-6`).
+ *   `<provider>` is a built-in model provider (`BuiltinAiProvider`: every entry of
+ *   `AI_MODEL_PROVIDERS` except `custom`, which is never a prefix) — `openai/gpt-6`.
  * - a **custom provider's** model: `<slug>/<model-id>` where `<slug>` names one of the workspace's
  *   custom providers (an AI setting with `provider: custom` — any OpenAI-compatible endpoint,
  *   gateway or self-hosted server): `fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct`,
@@ -1439,10 +1447,20 @@ const KNOWN_MODEL_INFORMATION: Record<string, AiModelInformation> = {
   ...xAiModelInformationMap,
 };
 
+/** A built-in model provider: one a `<provider>/<model-id>` reference may name, and the only
+ * providers whose models the build-time catalog lists. Excludes `custom` (reached through a
+ * custom provider's slug) and the agent-harness credential providers (`claude-code`, `codex`). */
+export type BuiltinAiProvider = Exclude<AiProvider, AiProvider.Custom | AiProvider.ClaudeCode | AiProvider.Codex>;
+
 /** The built-in providers a `<provider>/<model-id>` reference may name (every model provider but `custom`). */
 const BUILTIN_MODEL_PROVIDER_SET: ReadonlySet<string> = new Set<string>(
   AI_MODEL_PROVIDERS.filter((provider) => provider !== AiProvider.Custom),
 );
+
+/** Whether a string is a built-in model provider id. */
+function isBuiltinAiProvider(prefix: string): prefix is BuiltinAiProvider {
+  return BUILTIN_MODEL_PROVIDER_SET.has(prefix);
+}
 
 /** Whether a string is an acceptable custom provider slug (shape + not a reserved provider id). */
 export function isValidCustomProviderSlug(slug: unknown): slug is string {
@@ -1488,14 +1506,29 @@ export const AiCustomModelCatalogEntrySchema = z.object({
    * Set false for servers that only do prompt-based JSON — the AI actor then falls back to text +
    * repair. */
   structuredOutputs: z.boolean().optional(),
+  /** whether the AI Agent actor may run on this model (tool calling over long sessions).
+   * Undefined means usable — every catalog model is offered to the agent unless the entry says
+   * `false`, which hides it from the agent's model picker and makes the orchestrator refuse it. */
+  agent: z.boolean().optional(),
   /** pricing in USD per million tokens, for the `aiLog` cost estimate; defaults to zero */
   costPerMTokens: z.object({
     input: z.number().nonnegative(),
     output: z.number().nonnegative(),
   }).optional(),
-  /** pi OpenAI-completions compatibility overrides (`supportsDeveloperRole`, `maxTokensField`,
-   * `thinkingFormat`, ...) passed through verbatim to the Lambda's pi provider registration */
-  compat: z.record(z.string(), z.unknown()).optional(),
+  /** pi OpenAI-completions compatibility overrides, passed through verbatim to the Lambda's pi
+   * provider registration. The listed keys are pi's `OpenAICompletionsCompat`; unknown keys pass
+   * through so a newer pi option needs no schema change. */
+  compat: z.object({
+    supportsStore: z.boolean().optional(),
+    supportsDeveloperRole: z.boolean().optional(),
+    supportsReasoningEffort: z.boolean().optional(),
+    supportsUsageInStreaming: z.boolean().optional(),
+    supportsFinishReason: z.boolean().optional(),
+    requiresToolResultName: z.boolean().optional(),
+    requiresAssistantAfterToolResult: z.boolean().optional(),
+    requiresThinkingAsText: z.boolean().optional(),
+    maxTokensField: z.enum(['max_completion_tokens', 'max_tokens']).optional(),
+  }).passthrough().optional(),
 });
 
 export type AiCustomModelCatalogEntry = z.infer<typeof AiCustomModelCatalogEntrySchema>;
@@ -1506,8 +1539,19 @@ export const CustomProviderAiSettingDataSchema = z.object({
    * type's vendor default (see ./providerBaseUrl.ts). Lenient here so a stale value never hides the
    * catalog; the API validates it strictly on write and the resolver ignores an unusable one. */
   baseURL: z.string().max(2048).optional(),
-  /** the custom provider's model catalog */
-  models: z.array(AiCustomModelCatalogEntrySchema).max(500).optional(),
+  /** the custom provider's model catalog; ids are unique within it (an id is looked up by
+   * `<slug>/<id>`, so a repeated id would make one entry unreachable) */
+  models: z.array(AiCustomModelCatalogEntrySchema).max(500).optional()
+    .superRefine((models, ctx) => {
+      if (!models) return;
+      const seen = new Set<string>();
+      models.forEach((entry, index) => {
+        if (seen.has(entry.id)) {
+          ctx.addIssue({ code: 'custom', path: [index, 'id'], message: `Duplicate model id "${entry.id}" in the model catalog` });
+        }
+        seen.add(entry.id);
+      });
+    }),
 });
 
 export type CustomProviderAiSettingData = z.infer<typeof CustomProviderAiSettingDataSchema>;
@@ -1520,69 +1564,124 @@ export interface AiCustomProviderCatalog {
   models: readonly AiCustomModelCatalogEntry[];
 }
 
-/** A model reference string — a known model id, `<provider>/<model-id>` or `<slug>/<model-id>`. */
-export type AiModelRef = string;
+/** The parsed parts of a model reference, discriminated by `kind`:
+ * - `known` — a model of the build-time catalog (`AiModelInformationMap`), bare or qualified with
+ *   its own provider (`gpt-4o-mini`, `openai/gpt-4o-mini`);
+ * - `builtin` — a built-in provider's model the catalog does not list (`openai/gpt-6`);
+ * - `custom` — a model served by one of the workspace's custom providers, named by slug
+ *   (`fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct`). */
+export type AiModelRefParts = KnownAiModelRefParts | BuiltinAiModelRefParts | CustomAiModelRefParts;
 
-/** The parsed parts of a model reference. */
-export interface AiModelRefParts {
+/** A reference to a model of the build-time catalog. */
+export interface KnownAiModelRefParts {
+  kind: 'known';
   /** the reference as written */
   ref: AiModelRef;
-  /** the provider the model runs on (`custom` for a custom provider's model) */
-  provider: AiProvider;
-  /** the custom provider's slug; only set when `provider` is `custom` */
-  endpointSlug?: string;
-  /** the id sent to the provider (the reference itself for a known model) */
+  /** the built-in provider the model runs on */
+  provider: BuiltinAiProvider;
+  /** the id sent to the provider (the reference itself when bare) */
   modelId: string;
-  /** whether the id is in the build-time catalog (`AiModelInformationMap`) */
-  known: boolean;
+  /** the id is in the build-time catalog */
+  known: true;
 }
 
-/** Build a qualified reference for a built-in provider's or a custom provider's (slug) model. */
-export function qualifyAiModelRef(providerOrSlug: string, modelId: string): AiModelRef {
-  return `${providerOrSlug}${AI_MODEL_REF_SEPARATOR}${modelId}`;
+/** A reference to a built-in provider's model the build-time catalog does not list. */
+export interface BuiltinAiModelRefParts {
+  kind: 'builtin';
+  /** the reference as written */
+  ref: AiModelRef;
+  /** the built-in provider the model runs on */
+  provider: BuiltinAiProvider;
+  /** the id sent to the provider */
+  modelId: string;
+  /** the id is not in the build-time catalog */
+  known: false;
+}
+
+/** A reference to a custom provider's model; the provider it runs on is `AiProvider.Custom`. */
+export interface CustomAiModelRefParts {
+  kind: 'custom';
+  /** the reference as written */
+  ref: AiModelRef;
+  /** the custom provider's slug (the AI setting's `name`) */
+  slug: string;
+  /** the id sent to the endpoint */
+  modelId: string;
+  /** a custom provider's model is never in the build-time catalog, even when its id is a known
+   * model's (`openrouter/gpt-4o-mini` runs on the gateway, not on OpenAI) */
+  known: false;
 }
 
 /** Parse a model reference; `undefined` when it is neither a known id nor a valid qualified reference. */
 export function parseAiModelRef(ref: unknown): AiModelRefParts | undefined {
   if (typeof ref !== 'string' || ref.length === 0 || ref.length > AI_MODEL_REF_MAX_LENGTH) return undefined;
+  // every parsed reference is by definition a valid one
+  const validRef = ref as AiModelRef;
 
   const known = KNOWN_MODEL_INFORMATION[ref];
-  if (known) return { ref, provider: known.provider, modelId: ref, known: true };
+  // the build-time catalog only lists built-in providers' models (see the invariant test)
+  if (known && isBuiltinAiProvider(known.provider)) {
+    return { kind: 'known', ref: validRef, provider: known.provider, modelId: ref, known: true };
+  }
 
   const separatorIndex = ref.indexOf(AI_MODEL_REF_SEPARATOR);
   if (separatorIndex <= 0 || separatorIndex === ref.length - 1) return undefined;
   const prefix = ref.slice(0, separatorIndex);
   const modelId = ref.slice(separatorIndex + 1);
 
-  if (BUILTIN_MODEL_PROVIDER_SET.has(prefix)) {
-    const provider = prefix as AiProvider;
+  if (isBuiltinAiProvider(prefix)) {
     // `openai/gpt-4o-mini` names a known model through its provider; keep its metadata.
-    return { ref, provider, modelId, known: KNOWN_MODEL_INFORMATION[modelId]?.provider === provider };
+    return KNOWN_MODEL_INFORMATION[modelId]?.provider === prefix
+      ? { kind: 'known', ref: validRef, provider: prefix, modelId, known: true }
+      : { kind: 'builtin', ref: validRef, provider: prefix, modelId, known: false };
   }
 
   if (isValidCustomProviderSlug(prefix)) {
-    return { ref, provider: AiProvider.Custom, endpointSlug: prefix, modelId, known: false };
+    return { kind: 'custom', ref: validRef, slug: prefix, modelId, known: false };
   }
 
   return undefined;
 }
+
+/** Zod schema for a model reference: a known model id, `<provider>/<model-id>` for a built-in
+ * provider, or `<custom-provider-slug>/<model-id>`. Branded, so a plain string only becomes an
+ * `AiModelRef` by parsing (`AiModelRefSchema.parse`, `qualifyAiModelRef`, `isValidAiModelRef`). */
+export const AiModelRefSchema = z.string()
+  .superRefine((ref, ctx) => {
+    if (parseAiModelRef(ref) === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Unknown model. Use a known model id, "<provider>/<model-id>" for a built-in provider, or "<custom-provider-slug>/<model-id>" for a custom provider (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct").',
+      });
+    }
+  })
+  .brand<'AiModelRef'>();
+
+/** A validated model reference string — a known model id, `<provider>/<model-id>` or `<slug>/<model-id>`. */
+export type AiModelRef = z.infer<typeof AiModelRefSchema>;
 
 /** Whether a string is a valid model reference. */
 export function isValidAiModelRef(ref: unknown): ref is AiModelRef {
   return parseAiModelRef(ref) !== undefined;
 }
 
-/** Zod schema for a model reference (replaces `z.enum(AiModel)` on actor options and signals). */
-export const AiModelRefSchema = z.string()
-  .min(1)
-  .max(AI_MODEL_REF_MAX_LENGTH)
-  .refine(isValidAiModelRef, {
-    message: 'Unknown model. Use a known model id, "<provider>/<model-id>" for a built-in provider, or "<custom-provider-slug>/<model-id>" for a custom provider (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct").',
-  });
+/** Build a qualified reference for a built-in provider's or a custom provider's (slug) model;
+ * `undefined` when the pair does not form a valid reference (a reserved or malformed slug, an
+ * empty id, over the length cap). */
+export function qualifyAiModelRef(providerOrSlug: string, modelId: string): AiModelRef | undefined {
+  const parsed = AiModelRefSchema.safeParse(`${providerOrSlug}${AI_MODEL_REF_SEPARATOR}${modelId}`);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The provider a parsed reference runs on: its built-in provider, or `custom` for a custom provider's model. */
+export function getAiModelRefProvider(parts: AiModelRefParts): AiProvider {
+  return parts.kind === 'custom' ? AiProvider.Custom : parts.provider;
+}
 
 /** The provider a model reference runs on, or `undefined` for an invalid reference. */
 export function getAiModelProvider(ref: unknown): AiProvider | undefined {
-  return parseAiModelRef(ref)?.provider;
+  const parts = parseAiModelRef(ref);
+  return parts ? getAiModelRefProvider(parts) : undefined;
 }
 
 /** The provider label used for a custom model's `providerLabel`. */
@@ -1601,14 +1700,15 @@ export function getAiProviderLabel(provider: AiProvider): string {
 export function getAiModelInformation(ref: unknown, catalogEntry?: AiCustomModelCatalogEntry): AiModelInformation | undefined {
   const parts = parseAiModelRef(ref);
   if (!parts) return undefined;
-  if (parts.known) return KNOWN_MODEL_INFORMATION[parts.modelId];
+  if (parts.kind === 'known') return KNOWN_MODEL_INFORMATION[parts.modelId];
   const base = KNOWN_MODEL_INFORMATION[parts.modelId];
   const cost = catalogEntry?.costPerMTokens;
-  const providerLabel = parts.endpointSlug
-    ? `${getAiProviderLabel(parts.provider)} — ${parts.endpointSlug}`
-    : getAiProviderLabel(parts.provider);
+  const provider = getAiModelRefProvider(parts);
+  const providerLabel = parts.kind === 'custom'
+    ? `${getAiProviderLabel(provider)} — ${parts.slug}`
+    : getAiProviderLabel(provider);
   return {
-    provider: parts.provider,
+    provider,
     label: catalogEntry?.label ?? base?.label ?? parts.modelId,
     providerLabel,
     date: base?.date ?? '',
@@ -1638,8 +1738,8 @@ export function findAiModelCatalogEntryForProviders(
   customProviders: readonly AiCustomProviderCatalog[] | undefined,
 ): AiCustomModelCatalogEntry | undefined {
   const parts = parseAiModelRef(ref);
-  if (!parts?.endpointSlug || !customProviders) return undefined;
-  const provider = customProviders.find((candidate) => candidate.slug === parts.endpointSlug);
+  if (parts?.kind !== 'custom' || !customProviders) return undefined;
+  const provider = customProviders.find((candidate) => candidate.slug === parts.slug);
   return provider ? findAiModelCatalogEntry(ref, provider.models) : undefined;
 }
 
@@ -1656,7 +1756,7 @@ export interface AiModelSuggestionUiOptions {
  * (curated known models) and by the web, which merges the workspace's custom providers'
  * `<slug>/<id>` references into the same structure. */
 export function buildAiModelSuggestionUiOptions(
-  refs: readonly AiModelRef[],
+  refs: readonly string[],
   customProviders?: readonly AiCustomProviderCatalog[],
 ): AiModelSuggestionUiOptions {
   const options: AiModelSuggestionUiOptions = { suggestions: [], suggestionLabels: {}, suggestionGroups: {} };
@@ -1664,9 +1764,9 @@ export function buildAiModelSuggestionUiOptions(
     const parts = parseAiModelRef(ref);
     const information = getAiModelInformation(ref, findAiModelCatalogEntryForProviders(ref, customProviders));
     if (!parts || !information || options.suggestions.includes(ref)) continue;
-    const viaGateway = parts.endpointSlug && !parts.known && KNOWN_MODEL_INFORMATION[parts.modelId];
+    const gatewaySlug = parts.kind === 'custom' && KNOWN_MODEL_INFORMATION[parts.modelId] ? parts.slug : undefined;
     options.suggestions.push(ref);
-    options.suggestionLabels[ref] = viaGateway ? `${information.label} (via ${parts.endpointSlug})` : information.label;
+    options.suggestionLabels[ref] = gatewaySlug ? `${information.label} (via ${gatewaySlug})` : information.label;
     (options.suggestionGroups[information.providerLabel] ??= []).push(ref);
   }
   return options;
@@ -2466,7 +2566,12 @@ import { z } from 'zod';
  *
  * The same function serves the credential resolver (what the LLM call uses), the API (what it
  * reports as `effectiveBaseUrl` / `derivedBaseUrl`) and the web add form (the placeholder it
- * shows before a setting exists), so the three never disagree.
+ * shows before a setting exists). They never disagree only because of a contract on flagged
+ * connection types: the API and the web read the connection's *input* `baseUrl` (they have no
+ * secrets to render the result template with) while the resolver reads the *rendered*
+ * `result.baseUrl`. So a connection type flagged `aiProvider` must name its base URL input
+ * `baseUrl`, and its result's base URL must be exactly `{{ inputs.baseUrl }}` — a type that
+ * renders anything else would report one URL and call another.
  */
 
 /** Upper bound on a base URL (matches the connection input's own limit). */
@@ -2478,27 +2583,44 @@ export const AiProviderBaseUrlSchema = z.string()
   .min(1, 'Base URL is required')
   .max(AI_PROVIDER_BASE_URL_MAX_LENGTH)
   .refine((value) => normalizeAiProviderBaseUrl(value) !== undefined, {
-    message: 'Base URL must be an absolute http:// or https:// URL, e.g. https://api.groq.com/openai/v1',
+    message: 'Base URL must be an absolute http:// or https:// URL without a query, fragment or credentials, e.g. https://api.groq.com/openai/v1',
   });
 
+/** The outcome of checking a base URL candidate: the normalized URL, or why it is unusable. */
+export type AiProviderBaseUrlCheck = { ok: true; baseUrl: string } | { ok: false; reason: string };
+
 /**
- * Trim a base URL and strip a trailing slash; `undefined` for an empty value or anything that is
- * not an absolute `http(s)://` URL (so a junk legacy value falls through to the next source
- * instead of being sent to the SDK).
+ * Check a base URL candidate: trim it and strip a trailing slash, or say why it is unusable — not a
+ * string, empty, too long, not an absolute `http(s)://` URL, carrying a query/fragment, or carrying
+ * credentials (`https://user:pass@host`: a key belongs on the connection, never in the URL, which is
+ * logged and shown).
  */
-export function normalizeAiProviderBaseUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
+export function checkAiProviderBaseUrl(value: unknown): AiProviderBaseUrlCheck {
+  if (typeof value !== 'string') return { ok: false, reason: 'not a string' };
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > AI_PROVIDER_BASE_URL_MAX_LENGTH) return undefined;
+  if (trimmed.length === 0) return { ok: false, reason: 'empty' };
+  if (trimmed.length > AI_PROVIDER_BASE_URL_MAX_LENGTH) return { ok: false, reason: `longer than ${AI_PROVIDER_BASE_URL_MAX_LENGTH} characters` };
   let url: URL;
   try {
     url = new URL(trimmed);
   } catch {
-    return undefined;
+    return { ok: false, reason: 'not an absolute URL' };
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
-  if (url.search || url.hash || !url.hostname) return undefined;
-  return trimmed.replace(/\/+$/, '');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, reason: `unsupported scheme ${url.protocol}` };
+  if (!url.hostname) return { ok: false, reason: 'no host' };
+  if (url.search || url.hash) return { ok: false, reason: 'has a query string or fragment' };
+  if (url.username || url.password) return { ok: false, reason: 'has credentials in the URL' };
+  return { ok: true, baseUrl: trimmed.replace(/\/+$/, '') };
+}
+
+/**
+ * Trim a base URL and strip a trailing slash; `undefined` for an empty value or anything that is
+ * not an absolute `http(s)://` URL without a query, fragment or `user:password@` (so a junk legacy
+ * value falls through to the next source instead of being sent to the SDK).
+ */
+export function normalizeAiProviderBaseUrl(value: unknown): string | undefined {
+  const check = checkAiProviderBaseUrl(value);
+  return check.ok ? check.baseUrl : undefined;
 }
 
 /** Where an effective base URL came from. */
@@ -2513,11 +2635,22 @@ export interface AiProviderBaseUrlCandidates {
   connectionTypeBaseUrl?: unknown;
 }
 
+/** A candidate that was set but unusable, and so skipped for the next source. */
+export interface DiscardedAiProviderBaseUrl {
+  source: AiProviderBaseUrlSource;
+  /** why it was skipped (see checkAiProviderBaseUrl) */
+  reason: string;
+}
+
 export interface ResolvedAiProviderBaseUrl {
   /** the base URL to use, normalized; `undefined` when no candidate is usable */
   baseUrl?: string;
   /** which candidate won */
   source?: AiProviderBaseUrlSource;
+  /** candidates that were set (non-empty) but invalid and were skipped — a stored override
+   * silently rerouting to the next source; callers with a logger should warn about each. Only
+   * candidates before the winner are listed. */
+  discarded?: DiscardedAiProviderBaseUrl[];
 }
 
 /** Pick a custom provider's effective base URL: setting override → connection → connection type. */
@@ -2527,11 +2660,16 @@ export function resolveEffectiveAiProviderBaseUrl(candidates: AiProviderBaseUrlC
     ['connection', candidates.connectionBaseUrl],
     ['connectionType', candidates.connectionTypeBaseUrl],
   ];
+  const discarded: DiscardedAiProviderBaseUrl[] = [];
   for (const [source, candidate] of ordered) {
-    const baseUrl = normalizeAiProviderBaseUrl(candidate);
-    if (baseUrl) return { baseUrl, source };
+    const check = checkAiProviderBaseUrl(candidate);
+    if (check.ok) return discarded.length ? { baseUrl: check.baseUrl, source, discarded } : { baseUrl: check.baseUrl, source };
+    // absent (undefined / null / blank) is "not set", not a discard
+    if (candidate !== undefined && candidate !== null && !(typeof candidate === 'string' && candidate.trim() === '')) {
+      discarded.push({ source, reason: check.reason });
+    }
   }
-  return {};
+  return discarded.length ? { discarded } : {};
 }
 
 /** Whether a base URL is plaintext `http://` (the secret proxy never injects a key into plaintext requests). */
@@ -3371,6 +3509,9 @@ export const SandboxStatusUpdateDataSchema = z.object({
     /** Function ephemeral storage (/tmp) size — the host knows it from its segment payload;
      * carried here so the orchestrator can price the invoke without re-resolving runtime config. */
     ephemeralMB: z.number().int().positive(),
+    /** The architecture the host ran on (`x86_64` | `arm64`), so the orchestrator prices the segment
+     * at the right rate. Absent from hosts predating arm64 support (priced as x86_64). */
+    architecture: z.enum(['x86_64', 'arm64']).optional(),
   }).optional(),
   /** Assistant turns consumed across ALL segments so far (this segment's count seeded by the prior
    * segments' total). Reported on checkpointed + complete; the orchestrator persists it to the
