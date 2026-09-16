@@ -394,3 +394,17 @@ actors:
 ```
 
 ---
+
+## Custom provider model (OpenRouter, Fireworks, a self-hosted server)
+
+Models of a workspace [custom provider](custom-ai-providers.md) are referenced as `<slug>/<model-id>`; nothing else in the actor changes.
+
+```yaml
+type: AiActor
+name: Summarize with Kimi
+configuration:
+  options: |
+    model: openrouter/moonshotai/kimi-k2
+    systemPrompt: Summarize the text in three bullet points.
+    prompt: ${{ inputs.text }}
+```

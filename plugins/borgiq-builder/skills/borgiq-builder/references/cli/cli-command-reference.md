@@ -996,6 +996,132 @@ borgiq connections list --json
 }
 ```
 
+### `borgiq ai-providers list`
+
+List the workspace AI providers: built-in provider credential links (`name` = provider) and custom providers (`provider: custom`, `name` = slug). Requires `@borgiq/cli` >= 0.12.0.
+
+```bash
+borgiq ai-providers list --json
+borgiq ai-providers list --provider custom --json
+```
+
+**Output:**
+```json
+[
+  { "id": "AIST01kd6gqghj04j8765nnqyp09", "name": "anthropic", "provider": "anthropic", "hasAuthenticationData": false,
+    "connectionId": "CONN01…", "connectionMissing": false, "data": {}, "modelCount": 0,
+    "createdAt": "2026-09-01T10:00:00.000Z", "updatedAt": null },
+  { "id": "AIST01kd6gr3vjxm2rs0k8s3fjq4n", "name": "fireworks", "provider": "custom", "hasAuthenticationData": false,
+    "connectionId": "CONN02…", "connectionMissing": false,
+    "effectiveBaseUrl": "https://api.fireworks.ai/inference/v1", "derivedBaseUrl": "https://api.fireworks.ai/inference/v1", "baseUrlSource": "connectionType",
+    "data": { "models": [{ "id": "accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 70B" }] }, "modelCount": 1,
+    "createdAt": "2026-09-01T10:05:00.000Z", "updatedAt": "2026-09-02T08:00:00.000Z" }
+]
+```
+
+- `modelCount` — the number of entries in the provider's catalog (`data.models`); the table shows it as `MODELS`.
+- `connectionMissing: true` — the provider points at a connection that no longer exists; its models cannot resolve until it is relinked (`borgiq ai-providers edit <name> --connection <key>`).
+- Custom rows also carry `effectiveBaseUrl` (the setting's `data.baseURL` override, else `derivedBaseUrl`: the connection's own base URL, else the connection type's vendor default) and `baseUrlSource` (`setting` | `connection` | `connectionType`). `effectiveBaseUrl` is absent when nothing supplies one. The table shows it as `BASE URL`.
+
+### `borgiq ai-providers models`
+
+List every model reference usable in actor `model` options: the known models, then each custom provider's catalog as `<slug>/<model-id>`. Actors also accept `<provider>/<model-id>` for a built-in provider's unlisted models, which this list does not enumerate.
+
+```bash
+borgiq ai-providers models --json
+borgiq ai-providers models --custom --json
+borgiq ai-providers models --provider groq --json
+```
+
+**Output** (a top-level array):
+```json
+[
+  { "ref": "claude-sonnet-5", "label": "Claude Sonnet 5", "provider": "anthropic", "group": "Anthropic", "custom": false, "agent": true },
+  { "ref": "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 70B", "provider": "fireworks", "group": "Custom Provider — fireworks", "custom": true, "agent": true },
+  { "ref": "groq/whisper-large-v3", "label": "whisper-large-v3", "provider": "groq", "group": "Custom Provider — groq", "custom": true, "agent": false }
+]
+```
+
+`agent` (the `AGENT` column in the table) says whether the model may drive an AI Agent actor: a known model when it is in the AI Agent's curated list, a custom catalog model unless its entry says `agent: false`.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--custom` | Only models from custom providers |
+| `--provider <id-or-slug>` | Only one provider's models; prints `No provider named '<x>'` on stderr when no provider matches |
+
+### `borgiq ai-providers create`
+
+Add a custom provider (an OpenAI-compatible endpoint under a slug) or link a built-in provider's connection. A custom provider's connection is a vendor connection type (`groq-bearer`, `fireworks-bearer`, …, which carry the base URL), a generic bearer / API-key connection, or `custom-provider-apikey`; `--base-url` overrides the base URL the connection supplies.
+
+```bash
+borgiq ai-providers create --provider custom --name fireworks --connection fireworks \
+  --models accounts/fireworks/models/llama-v3p1-70b-instruct --json
+borgiq ai-providers create --provider custom --name my-gateway --connection gateway-key \
+  --base-url https://llm.example.com/v1 --models qwen2.5-coder:7b --json
+borgiq ai-providers create --provider openai --connection openai-main --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--provider <id>` | `custom`, or a built-in provider id (required when not interactive) |
+| `--name <slug>` | Custom providers: **required** (no default) — lowercase letters, digits and dashes, starting with a letter or digit, at most 40 characters, not a built-in provider id. Built-in providers default to the provider id |
+| `--connection <key-or-id>` | Connection providing the credential; a key is resolved to its id, and an unknown key is a usage error (`Connection '<x>' not found`) |
+| `--base-url <url>` | Custom providers only: base URL override (absolute http(s) URL) |
+| `--models <ids>` / `--models-file <path>` | Custom providers only: the catalog (ids, or `[{ id, label?, agent?, … }]` / `{ models: [...] }`); not both |
+| `--data-file <path>` | Replace the whole non-secret `data` object; cannot be combined with `--models`, `--models-file` or `--base-url` |
+
+A custom provider created non-interactively with no models prints a warning: actors cannot use it until its catalog is filled.
+
+### `borgiq ai-providers edit`
+
+Rename a custom provider, change its connection or base URL, or edit its catalog. The request is a full replacement, so unchanged parts are resent as they are.
+
+```bash
+borgiq ai-providers edit fireworks --add-model accounts/fireworks/models/deepseek-v3 --json
+borgiq ai-providers edit fireworks --remove-model accounts/fireworks/models/qwen2p5-coder-32b-instruct --json
+borgiq ai-providers edit fireworks --base-url https://gateway.example/fireworks/v1 --json
+borgiq ai-providers edit fireworks --no-base-url --json
+borgiq ai-providers edit fireworks --name fireworks-eu --connection fireworks-eu --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--name <slug>` | New slug (custom providers; same rule as `create --name`). Warns first when canvases reference the provider |
+| `--connection <key-or-id>` / `--no-connection` | Set or remove the connection (an unknown key is a usage error) |
+| `--base-url <url>` / `--no-base-url` | Custom providers only: set or remove the base URL override |
+| `--models <ids>` / `--models-file <path>` | Custom providers only: replace the catalog |
+| `--add-model <id>` / `--remove-model <id>` | Custom providers only: adjust the catalog (repeatable, comma-separated allowed) |
+| `--data-file <path>` | Replace the whole `data` object (warns when it replaces an existing catalog); cannot be combined with the model flags or `--base-url` |
+
+With no flags, `edit` prints `Nothing to update.` and sends no request.
+
+### `borgiq ai-providers delete`
+
+```bash
+borgiq ai-providers delete fireworks -y
+```
+
+Before the confirmation (or `-y` / `--force`) the command checks which canvases reference the provider's models and warns on stderr.
+
+**Errors and warnings (all `ai-providers` subcommands):**
+
+| Situation | Result |
+|-----------|--------|
+| `--base-url`, `--no-base-url`, `--models`, `--models-file`, `--add-model` or `--remove-model` on a built-in provider | Usage error, exit 2 (`<flag> applies to custom providers only …`) |
+| `--provider custom` without `--name` (non-interactive) | Usage error, exit 2 (`--name is required for a custom provider.`) |
+| `--base-url` together with `--no-base-url`, or `--connection` together with `--no-connection` | Usage error, exit 2 (`Use either --base-url <url> or --no-base-url, not both.`) |
+| `--connection` names a key that does not exist | Usage error, exit 2 (`Connection '<x>' not found. Run \`borgiq connections list\` …`) |
+| `edit` / `delete` names a provider that does not exist | Not found, exit 5 (`AI provider '<x>' not found in workspace. …`) |
+| `edit --name` (rename) or `delete` of a provider referenced by canvases | Proceeds, after a stderr warning: `Warning: <n> canvas(es) reference this provider (<names>) — their "<slug>/<model-id>" models will stop resolving after the rename` (or `delete`). References are not rewritten |
+
+See [custom-ai-providers.md](../custom-ai-providers.md) for the connection types, the catalog fields and the model reference rules.
+
 ### `borgiq connections types`
 
 List available connection types.

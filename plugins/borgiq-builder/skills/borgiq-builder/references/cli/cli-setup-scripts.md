@@ -451,7 +451,7 @@ All three shell templates plus two additional ones:
 | `webhook-router` | WebhookTrigger -> Router -> 2x WebhookResponse | Same as shell version |
 | `button-deno` | ButtonTrigger -> DenoActor | Same as shell version |
 | `scheduled-http` | ScheduledTrigger -> HttpRequest | Cron-based health check pattern |
-| `button-ai` | ButtonTrigger -> AiActor | Uses claude-sonnet-4-5-20250514, wires prompt input |
+| `button-ai` | ButtonTrigger -> AiActor | Uses claude-sonnet-4-5, wires prompt input |
 
 ### Differences from scaffold-canvas.sh
 
@@ -520,7 +520,7 @@ Sample output (button-ai):
         "msgVar": "ai_response",
         "configuration": {
           "options": {
-            "model": "claude-sonnet-4-5-20250514",
+            "model": "claude-sonnet-4-5",
             "maxTokens": 4096,
             "systemPrompt": "You are a helpful assistant.",
             "prompt": "${{ inputs.prompt }}"

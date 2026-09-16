@@ -144,7 +144,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | [actor-schemas-comment.md](references/typescript/actor-schemas-comment.md) | CommentActor schema |
 | [form-components.md](references/typescript/form-components.md) | Interface form component schemas (InterfaceTriggerActor and InterfaceActor only, not used by AppTriggerActor) |
 | [schemas.md](references/typescript/schemas.md) | Common schemas (IDs, files, runtime types, context, signals) |
-| [common-types.md](references/typescript/common-types.md) | Shared types, AI model definitions, canvas, runtime, sandbox types |
+| [common-types.md](references/typescript/common-types.md) | Shared types, AI model definitions and model references (`ai/modelRef`: custom providers, `<slug>/<model-id>`), canvas, runtime, sandbox types |
 
 **Usage:** When building actors or understanding output structures, read the relevant TypeScript reference markdown file to find exact field names, types, and validation rules. Each file contains a table of contents linking to individual type definitions.
 
@@ -155,7 +155,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | **HttpRequestActor** | Makes REST API calls to external services (Gmail, GitHub, Airtable, etc.) | [http-request-actor.md](references/http-request-actor.md) |
 | **DenoActor** | Executes custom TypeScript/JavaScript code in a sandboxed Deno runtime | [deno-actor.md](references/deno-actor.md) |
 | **PythonActor** | Executes custom Python code in a sandboxed Python runtime with UV package management | [python-actor.md](references/python-actor.md) |
-| **AiActor** | Invokes AI models (LLMs) for text generation, structured output, and AI-powered tasks | [ai-actor.md](references/ai-actor.md) |
+| **AiActor** | Invokes AI models (LLMs) for text generation, structured output, and AI-powered tasks. Built-in providers or a workspace [custom provider](references/custom-ai-providers.md) (`<slug>/<model-id>`) | [ai-actor.md](references/ai-actor.md) |
 | **AiAgentActor** | Autonomous AI coding agent running in checkpointed serverless segments. Has a private workspace with built-in filesystem/bash tools (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, plus an opt-in `code_execution` tool for running code) plus BorgIQ actors as tools, session continuation via `sessionId`, and workspace zip in/out (`volumeZipFile` → `outputZipFile`). Has two output ports: Done (final result + zips) and Status (assistant turns + tool results). Tool actors are rendered inside the agent boundary with empty edges. | [ai-agent-actor.md](references/ai-agent-actor.md) |
 | **DeprecatedAiAgent** | Legacy orchestrator-loop AI agent (pre-2026 `AiAgentActor`) — no filesystem or sessions. Hidden from the palette; existing instances keep running. **Do not create new instances — use AiAgentActor.** | [deprecated-ai-agent.md](references/deprecated-ai-agent.md) |
 | **AgentHarnessActor** | Runs Claude Code in an isolated sandbox (E2B or Daytona) with full filesystem access, code execution, session persistence via `sessionId`, and queued inbound messages. Supports `volumeZipFile` for context, network control, MCP servers, environment variables, and returns workspace + session data zips. Use when the agent needs to execute code, install packages, or persist state across sessions. Has two output ports: Done (final result with output files) and Status (real-time execution updates). | [agent-harness-actor.md](references/agent-harness-actor.md) |
@@ -805,7 +805,7 @@ The `borgiq` CLI (`@borgiq/cli`) lets you deploy workflows to the platform, trig
 
 **Install:** `npm install -g @borgiq/cli`
 
-Canvas bundles require **`@borgiq/cli` >= 0.8.0**. Detect the capability directly and fall back to the direct path if missing:
+Canvas bundles require **`@borgiq/cli` >= 0.8.0**; `borgiq ai-providers` (workspace AI providers and usable models, see [custom-ai-providers.md](references/custom-ai-providers.md)) requires **>= 0.12.0**. Detect the capability directly and fall back to the direct path if missing:
 
 ```bash
 borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"

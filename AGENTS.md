@@ -47,6 +47,8 @@ If `borgiq` commands fail with `401`, run `borgiq auth login` again. The five li
 
 **Offline helpers (no auth, no script install).** ID generation, workflow validation, and JSON scaffolding are provided by the CLI itself — `borgiq generate`, `borgiq validate`, and `borgiq scaffold`. These replaced the local `skills/borgiq-builder/scripts/` TypeScript validators/generators that the skill used to run via `npx tsx`; the skill now shells out to the verified CLI instead. This requires **`@borgiq/cli` >= 0.8.0**; older CLIs lack these commands. The `scaffold-*.sh` helpers under `references/cli/scripts/` are retained and now mint IDs via `borgiq generate`.
 
+**AI providers.** `borgiq ai-providers list/models/create/edit/delete` (workspace AI providers, including custom OpenAI-compatible providers referenced as `<slug>/<model-id>`) require **`@borgiq/cli` >= 0.12.0**; see `references/custom-ai-providers.md`.
+
 **Canvas bundles.** `borgiq bundle init/pull/push/pack/unpack/validate` require **`@borgiq/cli` >= 0.8.0**. If `borgiq bundle` is unavailable, upgrade (`npm install -g @borgiq/cli`); agents must fall back to the direct document/batch workflow when the command is unavailable.
 
 ## Scripts
@@ -57,6 +59,7 @@ The `scripts/` directory contains developer tooling for working on this repo (th
 - `init_skill.py` — initialize a new skill from template
 - `package_skill.py` — *(legacy)* package a skill as a `.skill` zip for Claude API users
 - `install_skills.py` — *(legacy)* install a `.skill` zip into `~/.claude/skills/`
+- `sync_typescript_refs.py` — refresh `references/typescript/*.md` from the platform's prompt type files
 
 The `package_skill.py` workflow is retained for Claude API customers who can't use marketplace install yet. `install_skills.py` is now used both for legacy `.skill` install AND as the file-copy installer for Codex / opencode / Pi from a git clone.
 
@@ -83,6 +86,18 @@ python3 scripts/init_skill.py my-new-spoke --plugin borgiq-builder
 # Or specify an explicit path:
 python3 scripts/init_skill.py custom-skill --path /custom/location
 ```
+
+### sync_typescript_refs.py
+
+The `references/typescript/*.md` files mirror `borgiq-platform`'s `packages/core/src/prompts/typeFiles/runtime-types/src/<path>.txt`, one section per file: a `## <path>` heading, `**Source:** \`<path>.ts\``, and one fenced `typescript` block holding the `.txt` contents (trailing blank lines trimmed). The script reads the section list from the existing `**Source:**` lines and refreshes only the fenced bodies — it never adds or drops a section. A section whose `.txt` no longer exists (or whose heading does not match its source) is an error, and nothing is written until it is resolved by hand.
+
+```bash
+python3 scripts/sync_typescript_refs.py                                 # rewrite drifted sections
+python3 scripts/sync_typescript_refs.py --check                         # list drifted sections, exit 1 if any; writes nothing
+python3 scripts/sync_typescript_refs.py --platform ~/code/borgiq-platform  # default: $BORGIQ_PLATFORM_PATH, else ../borgiq-platform
+```
+
+Run it after the platform regenerates its type files (`import-prompt-files` in `packages/core`), then read the diff: a changed type (a renamed option, a new model, a new status field) usually means prose in the other references needs the same change.
 
 ## Distribution channels
 
