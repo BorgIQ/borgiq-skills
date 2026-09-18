@@ -77,6 +77,7 @@ Actor paths are `actors/<category>/<type-folder>/<ACTOR_ID>/`. The CLI has an ex
 | `canvas.yaml` `canvas`, `actors[]`, `graph.nodes`, `graph.edges` | Agent/user | Edit metadata, index entries, positions, and wiring. |
 | `canvas.yaml` `dependencies`, `exportErrors`, `warnings`, `sync` | CLI-owned/informational | Read them, but do not hand-edit them; pack/pull/push regenerate or refresh them. |
 | `README.md` (bundle root) | Agent/user — **canvas content** | The canvas's own documentation: purpose, how it works, conventions, gotchas. Read it before changing a canvas you did not build, and keep it current when you change what it describes. It is the canvas's `readme` metadata, so it is **managed**: pull overwrites it with the server's copy, deletes it when the canvas has none, and push uploads it. Not a scratch file — keep unrelated notes elsewhere (`NOTES.md`). |
+| `thumbnail.<png\|jpg\|webp\|gif>` beside an app actor's `actor.yaml` | Agent/user | The App / React App actor's thumbnail, named by `thumbnail: thumbnail.png` in `actor.yaml`. Replace the file to change it, delete file and line to remove it. See [App thumbnails](#app-thumbnails). |
 | In-bundle `AGENTS.md` | CLI-owned companion | Read it after `README.md`. It defines format/layout mechanics for the installed CLI version and is never overwritten by pull/unpack. `CLAUDE.md` is a one-line `@AGENTS.md` include. |
 | Skill references | Skill-owned guidance | Use them for actor semantics and platform knowledge: what values belong in the files. |
 
@@ -85,6 +86,22 @@ The three documentation surfaces are complementary: `README.md` is authoritative
 ### The canvas README
 
 `README.md` at the bundle root is the canvas's `readme` metadata field materialized as a file, exported with the canvas and edited in the web editor's README tab as well. `bundle init` seeds one with a heading and a table of contents; a canvas with no README pulls with no file. When you add or change a README in a bundle, `bundle push` sends it with the rest of the metadata (last-writer-wins, like `description`), and a plain `bundle pull` brings the editor's edits back. Keep the table of contents in step with the sections — agents and people skim it first.
+
+### App thumbnails
+
+An App or React App actor's thumbnail is written beside its `actor.yaml` as `thumbnail.<png|jpg|webp|gif>`, the extension following the image type. `actor.yaml` keeps only the file name, as `codeDir: code` does for code:
+
+```text
+actors/triggers/react-app/<actorId>/
+  actor.yaml        # thumbnail: thumbnail.webp
+  thumbnail.webp
+```
+
+- **Change it:** overwrite the file, or drop in a new one (e.g. a screenshot, see the React app skill's *App thumbnail* section) and update the name in `actor.yaml` if the extension changed. Then `bundle push`. The type is read from the bytes, not the extension.
+- **Remove it:** delete the file **and** the `thumbnail:` line, then push. The CLI sends `thumbnail: null` because the server has one.
+- **Unnamed file:** a `thumbnail.*` that `actor.yaml` doesn't name is not pushed; `bundle validate` warns and tells you the line to add. A name without its file is a validate **error**.
+- Size and type (PNG/JPEG/WebP/GIF, ≤ 2 MiB, no SVG) are only **warned** about locally; the API is the authority and rejects the push if it refuses the image.
+- Pull-then-push is a no-op: the image round-trips byte for byte. Older CLIs (< 0.12.0) keep the image inline in `actor.yaml` as `thumbnail: { dataUrl: … }`, which still pushes.
 
 ## Worked webhook to Deno example
 
