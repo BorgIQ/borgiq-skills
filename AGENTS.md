@@ -49,6 +49,8 @@ If `borgiq` commands fail with `401`, run `borgiq auth login` again. The five li
 
 **AI providers.** `borgiq ai-providers list/models/create/edit/delete` (workspace AI providers, including custom OpenAI-compatible providers referenced as `<slug>/<model-id>`) require **`@borgiq/cli` >= 0.12.0**; see `references/custom-ai-providers.md`.
 
+**App thumbnails.** `borgiq canvas-actors app-url` and `borgiq canvas-actors thumbnail set/get/rm`, and the bundle's `thumbnail.<ext>` file, require **`@borgiq/cli` >= 0.12.0**; see the `borgiq-react-app-builder` skill's *App thumbnail* section.
+
 **Canvas bundles.** `borgiq bundle init/pull/push/pack/unpack/validate` require **`@borgiq/cli` >= 0.8.0**. If `borgiq bundle` is unavailable, upgrade (`npm install -g @borgiq/cli`); agents must fall back to the direct document/batch workflow when the command is unavailable.
 
 ## Scripts

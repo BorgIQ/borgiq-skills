@@ -397,6 +397,18 @@ borgiq canvas-actors delete <canvasSlugOrId> <actorId>
 borgiq canvas-actors delete <canvasSlugOrId> <actorId> --edit-version 3
 ```
 
+### App thumbnails
+
+Give an App / React App actor its canvas-node and apps-page image: screenshot the served app, then attach it.
+
+```bash
+SRC=$(borgiq canvas-actors app-url <canvasSlugOrId> <actorId>)   # short-lived; needs app:use
+npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=3000 "$SRC" thumbnail.png
+borgiq canvas-actors thumbnail set <canvasSlugOrId> <actorId> thumbnail.png --json
+```
+
+`thumbnail get [--out file]` and `thumbnail rm` complete the set. In a bundle, the image lives beside `actor.yaml` as `thumbnail.<ext>`. See the React app skill's *App thumbnail* section for limits and fallbacks.
+
 ---
 
 ## Step 5: Validate on Server

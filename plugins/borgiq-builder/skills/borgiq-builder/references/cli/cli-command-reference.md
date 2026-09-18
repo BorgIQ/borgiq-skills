@@ -732,6 +732,31 @@ borgiq canvas-actors batch CANV01kd6gr3vjxm2rs0k8s3fjq4nl \
 
 ---
 
+### `borgiq canvas-actors app-url`
+
+Print the URL an App / React App actor is served from — the page the web app frames, without the editor. Meant for screenshots with your own headless browser; the CLI runs none.
+
+```bash
+SRC=$(borgiq canvas-actors app-url my-canvas ACTR01kd6gqghj04j8765nnqyp09a3)
+npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=3000 "$SRC" thumbnail.png
+```
+
+The URL's content token expires within minutes; stdout carries only the URL (a sensitivity note goes to stderr), and `--json` gives `{ actorId, src }`. Needs the **`app:use`** scope (`403` otherwise). A React app answers `409` until built.
+
+### `borgiq canvas-actors thumbnail set|get|rm`
+
+Manage an App / React App actor's thumbnail (the canvas node and apps-page image).
+
+```bash
+borgiq canvas-actors thumbnail set my-canvas ACTR01… thumbnail.png [--edit-version 3]
+borgiq canvas-actors thumbnail get my-canvas ACTR01… [--out saved.png]
+borgiq canvas-actors thumbnail rm  my-canvas ACTR01… [--edit-version 3]
+```
+
+- `set` sends the image inline (`{ thumbnail: { dataUrl } }`). The API stores it and answers with the stored `{ fileId }`. PNG/JPEG/WebP/GIF, ≤ 2 MiB, no SVG; the API's reason is shown if it refuses.
+- `get` prints `{ actorId, fileId, mimeType, sizeInBytes }` (or `thumbnail: null`), never the base64. `--out` writes the image.
+- `rm` sends `{ thumbnail: null }`.
+
 ## Actor Definition Commands
 
 ### `borgiq actors list`
