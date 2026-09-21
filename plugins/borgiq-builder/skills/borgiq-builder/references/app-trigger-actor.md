@@ -105,7 +105,7 @@ actors:
 | `script` | string or BIQFile | No | JavaScript code. Can be an inline string or a BIQFile reference. |
 | `allowedScriptDomains` | string[] | No | Whitelisted domains for external scripts (CSP `script-src`) |
 | `allowedStyleDomains` | string[] | No | Whitelisted domains for external stylesheets/fonts (CSP `style-src`) |
-| `allowInlineScripts` | boolean | No | Adds `'unsafe-inline'` to CSP `script-src` instead of hash-based verification. Enables inline event handlers (`onclick`, etc.), `eval()`, `new Function()`, and dynamically generated scripts. Default: `false`. |
+| `allowInlineScripts` | boolean | No | Adds `'unsafe-inline'` to CSP `script-src` instead of hash-based verification. Enables inline `<script>` blocks and inline event handlers (`onclick`, etc.). It does **not** enable `eval()` or `new Function()` — no option does. Default: `false`. |
 | `allowInlineStyling` | boolean | No | Adds `'unsafe-inline'` to CSP `style-src` instead of hash-based verification. Enables inline `style` attributes, `element.style`, and dynamically injected styles. Default: `false`. |
 | `allowedPermissions` | string[] | No | Browser Permissions-Policy directives to enable for the iframe (see [Browser Permissions](#browser-permissions)) |
 
@@ -214,9 +214,21 @@ AppTriggerActor enforces CSP by default. The CSP configuration is at the actor o
 | Mode | Properties | CSP Directive | What's Allowed |
 |------|-----------|---------------|----------------|
 | **Strict (default)** | Neither flag set | `script-src 'self' 'sha256-...'` | Only `<script>`/`<style>` tags whose content matches a SHA-256 hash; inline handlers, inline styles, and `eval()` are blocked |
-| **Relaxed scripts** | `allowInlineScripts: true` | `script-src 'self' 'unsafe-inline'`; `script-src-attr 'unsafe-inline'` | Inline event handlers (`onclick`, etc.), `eval()`, `new Function()`, dynamically generated scripts |
+| **Relaxed scripts** | `allowInlineScripts: true` | `script-src 'self' 'unsafe-inline'`; `script-src-attr 'unsafe-inline'` | Inline `<script>` blocks and inline event handlers (`onclick`, etc.). `eval()` and `new Function()` stay blocked — `'unsafe-inline'` does not cover them |
 | **Relaxed styling** | `allowInlineStyling: true` | `style-src 'self' 'unsafe-inline'`; `style-src-attr 'unsafe-inline'` | Inline `style` attributes, `element.style`, dynamically injected styles |
 | **Fully relaxed** | Both set to `true` | Both `'unsafe-inline'` directives | All inline scripts and styles allowed |
+
+### WebAssembly and workers (React apps only)
+
+`ReactAppTriggerActor` has two further opt-ins; the legacy AppTriggerActor does not. Both are frozen into the build — they take effect on the next Build — and neither widens the domain allowlists, which only ever carry hosts (a keyword or `blob:` entered there is dropped).
+
+| Option | CSP change | What's allowed |
+|--------|------------|----------------|
+| `allowWebAssembly: true` | `script-src … 'wasm-unsafe-eval'` | `WebAssembly.compile` / `instantiate`. JavaScript `eval()` / `new Function()` stay blocked |
+| `allowBlobWorkers: true` | `worker-src 'self' blob:` | Web Workers started from `blob:` URLs, i.e. Vite `?worker&inline` workers (the single-JS build rule rules out separate worker files) |
+| both | both | A blob worker inherits the app's CSP, so it can compile WebAssembly only when both are on |
+
+Network access is unchanged: `connect-src` stays `'self'` plus the BorgIQ API, so a `.wasm` or database file must be served as a same-origin app asset.
 
 ### Configuring Allowed Domains
 
