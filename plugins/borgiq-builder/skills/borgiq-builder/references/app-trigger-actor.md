@@ -35,6 +35,8 @@ AppTriggerActor is the dedicated trigger type for hosting web applications in Bo
 
 **For form-based workflows** (collecting structured input, triggering downstream processing on submit), use [InterfaceTriggerActor](interface-trigger-actor.md) instead.
 
+**Thumbnail.** Like a React app, an AppTriggerActor can carry a `thumbnail` (PNG/JPEG/WebP/GIF ≤ 2 MiB), shown on its canvas node and the workspace apps page. Capture and attach one as described in the React app skill's [App thumbnail](../../borgiq-react-app-builder/SKILL.md#app-thumbnail) section.
+
 ## Configuration Structure
 
 ```yaml

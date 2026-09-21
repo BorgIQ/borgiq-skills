@@ -1,6 +1,6 @@
 ---
 name: borgiq-react-app-builder
-description: Build custom app UIs on a BorgIQ canvas with a React (Vite + TypeScript) app inside a ReactAppTriggerActor — compiled server-side, served in a sandboxed iframe. This is the standard surface for dashboards, data explorers, SPAs, and any bespoke frontend; it also covers maintaining legacy raw-HTML AppTriggerActor apps. Forms and data-entry pages stay in `borgiq-form-builder`. Triggers on "ReactAppTriggerActor", "React app in BorgIQ", "build a web app", "custom dashboard", "single-page app", "data explorer UI", "AppTriggerActor", "vite", "useEndpoint", "useGetSession", "useStreamTail", "live feed in a React app", "tail a stream from an app", "react SPA on a canvas", "multi-file app", "tsx component app", "app theme", "hearth theme", "consistent app styling".
+description: Build custom app UIs on a BorgIQ canvas with a React (Vite + TypeScript) app inside a ReactAppTriggerActor — compiled server-side, served in a sandboxed iframe. This is the standard surface for dashboards, data explorers, SPAs, and any bespoke frontend; it also covers maintaining legacy raw-HTML AppTriggerActor apps. Forms and data-entry pages stay in `borgiq-form-builder`. Triggers on "ReactAppTriggerActor", "app thumbnail", "screenshot the app", "React app in BorgIQ", "build a web app", "custom dashboard", "single-page app", "data explorer UI", "AppTriggerActor", "vite", "useEndpoint", "useGetSession", "useStreamTail", "live feed in a React app", "tail a stream from an app", "react SPA on a canvas", "multi-file app", "tsx component app", "app theme", "hearth theme", "consistent app styling".
 ---
 
 # BorgIQ React App Builder
@@ -342,6 +342,46 @@ Full token sets, base stylesheet, component recipes, and rules live in
 2. **Edit** files in the full-page React editor (file tree + code editor) or via the `borgiq` CLI. Create `src/theme.css` from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) (default `hearth`) before writing components. Declare **endpoints** — and any **streams** the app follows (`options.streams`) — in the options form (or YAML), and asset overlays under `options.files`.
 3. **Build** — the editor's Build button, or `POST /v1/orgs/{org}/workspaces/{wsp}/canvases/{canvas}/apps/{actorId}/build`. Watch the status badge; on failure the editor surfaces the build error.
 4. **Open** the running app at `/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`.
+5. **Thumbnail** — once the built app renders correctly, screenshot it and attach the image as the actor's thumbnail (see [App thumbnail](#app-thumbnail)). Refresh it after a visible UI change.
+
+## App thumbnail
+
+The actor's **thumbnail** is the image shown on its canvas node and on the workspace apps page. An app without one shows a generic placeholder, so give every app you build one. It applies to the legacy **AppTriggerActor** too.
+
+**Limits.** PNG, JPEG, WebP, or GIF, **≤ 2 MiB**; about **1280 px wide** is plenty. **No SVG.** The API checks the bytes, not the file extension, and stores the image itself. You send it inline, with no separate upload step. The CLI never resizes: if a PNG screenshot is too large, capture a smaller viewport or save it as `.jpg`.
+
+**Capture.** Screenshot the app's own page, not the editor around it. `borgiq canvas-actors app-url` prints the URL the app is served from:
+
+```bash
+SRC=$(borgiq canvas-actors app-url <canvas> <actorId>)    # stdout is only the URL
+npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=3000 "$SRC" thumbnail.png
+```
+
+- The URL carries a content token that **expires within minutes**. Fetch it right before the screenshot, never log it, and treat it like a password until then.
+- `--wait-for-timeout` gives the app time to call its endpoints and render real data. Raise it for slow backends. A screenshot of a loading spinner is a bad thumbnail.
+- A **React app must be built first**: an unbuilt one answers `409`. On a deployed workspace the URL serves the active runtime build.
+- `403` means the CLI token lacks the **`app:use`** scope. Mint one for the capture with `borgiq tokens create --name thumbnail --scopes org:access,workspace:access,canvas:read,canvas:write,app:use --json`, use its `rawToken` via `BORGIQ_API_TOKEN` without echoing it, and revoke it afterwards (`borgiq tokens revoke <id> --yes`).
+- `npx playwright screenshot` needs Playwright's Chromium (`npx playwright install chromium` once). If no headless browser is available, don't fake a thumbnail. Ask the user to upload one from the app editor's Settings, or send them `borgiq auth handoff-url --redirect /org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}` for their own browser script.
+
+**Attach**, either directly:
+
+```bash
+borgiq canvas-actors thumbnail set <canvas> <actorId> thumbnail.png
+borgiq canvas-actors thumbnail get <canvas> <actorId> --out check.png   # type/size; --out saves it
+borgiq canvas-actors thumbnail rm  <canvas> <actorId>
+```
+
+or, in a canvas bundle, put the file beside the actor's `actor.yaml` and name it there, then push:
+
+```text
+actors/triggers/react-app/<actorId>/
+  actor.yaml        # thumbnail: thumbnail.png
+  thumbnail.png
+```
+
+`bundle pull` writes an existing thumbnail the same way. A `thumbnail.*` file that `actor.yaml` doesn't name is **not pushed** (`bundle validate` warns). To remove the thumbnail, delete both the file and the `thumbnail:` line, then push. Details are in the hub's [canvas-bundles reference](../borgiq-builder/references/cli/canvas-bundles.md).
+
+These commands and the bundle file need a CLI that has `borgiq canvas-actors thumbnail` (`@borgiq/cli` >= 0.12.0). With an older CLI, set it through the API: `PATCH …/canvases/{canvas}/actors/{actorId}` with `{ "thumbnail": { "dataUrl": "data:image/png;base64,…" } }`, or `{ "thumbnail": null }` to remove it.
 
 ## Boundaries with the hub and sibling skills
 
