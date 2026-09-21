@@ -555,6 +555,10 @@ export const ReactAppTriggerActorOptionsSchema = z.object({
   allowInlineStyling: z.boolean().nullish(),
   /** Permissions-Policy directives to enable */
   allowedPermissions: z.array(PermissionsPolicyDirectiveZodSchema).nullish(),
+  /** Add 'wasm-unsafe-eval' to script-src so WebAssembly can compile (not general JS eval) */
+  allowWebAssembly: z.boolean().nullish(),
+  /** Add `worker-src 'self' blob:` so the app can start inline (blob:) workers */
+  allowBlobWorkers: z.boolean().nullish(),
 });
 
 export type ReactAppTriggerActorOptions = z.infer<typeof ReactAppTriggerActorOptionsSchema>;
@@ -693,6 +697,22 @@ export const ReactAppTriggerActorOptionsJsonSchema: BIQJsonSchema = {
       type: BIQJsonSchemaType.Boolean,
       title: 'Allow inline styling',
       description: 'Uses \'unsafe-inline\' in the CSP style-src directive instead of hashed values. This is less secure but may be needed for dynamically generated styles.',
+      ui: {
+        component: 'switch',
+      },
+    },
+    allowWebAssembly: {
+      type: BIQJsonSchemaType.Boolean,
+      title: 'Allow WebAssembly',
+      description: 'Adds \'wasm-unsafe-eval\' to the CSP script-src directive so the app can compile WebAssembly modules. This does not allow JavaScript eval() or inline scripts. Takes effect after the app is rebuilt.',
+      ui: {
+        component: 'switch',
+      },
+    },
+    allowBlobWorkers: {
+      type: BIQJsonSchemaType.Boolean,
+      title: 'Allow blob workers',
+      description: 'Adds a CSP worker-src \'self\' blob: directive so the app can start Web Workers from blob: URLs (e.g. Vite `?worker&inline`). Workers inherit the app\'s CSP, so a worker that compiles WebAssembly also needs Allow WebAssembly. Takes effect after the app is rebuilt.',
       ui: {
         component: 'switch',
       },

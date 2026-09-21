@@ -3336,7 +3336,7 @@ export const RuntimeMcpServerSignalSchema = z.object({
 export type RuntimeMcpServerSignal = z.infer<typeof RuntimeMcpServerSignalSchema>;
 
 /**
- * A react-app's five security options, evaluated (interpolated) at build time and frozen into the
+ * A react-app's seven security options, evaluated (interpolated) at build time and frozen into the
  * build's manifest until the next build — AppTrigger interpolation parity (§12.1). Shared between the
  * flowrun build's LTM manifest below and the runtime-build serve manifest (`runtimeBuild.ts`), so a
  * deployed build freezes exactly the fields the editor build freezes. All optional so pre-§12.1
@@ -3348,6 +3348,8 @@ export const ReactAppSecurityOptionsSchema = z.object({
   allowInlineScripts: z.boolean().optional(),
   allowInlineStyling: z.boolean().optional(),
   allowedPermissions: z.array(z.string()).optional(),
+  allowWebAssembly: z.boolean().optional(),
+  allowBlobWorkers: z.boolean().optional(),
 });
 
 export type ReactAppSecurityOptions = z.infer<typeof ReactAppSecurityOptionsSchema>;
@@ -3411,7 +3413,7 @@ export const RuntimeReactAppBuildSignalSchema = z.object({
   })),
   totalSizeInBytes: z.number(),
   buildDurationMs: z.number().optional(),
-  // The five security options (see ReactAppSecurityOptionsSchema) — the same options AppTrigger
+  // The seven security options (see ReactAppSecurityOptionsSchema) — the same options AppTrigger
   // evaluates per serve, frozen into the manifest here until the next Build.
   ...ReactAppSecurityOptionsSchema.shape,
   // Resolved endpoints (see ReactAppResolvedEndpointsSchema). Optional so pre-§15 manifests stay
