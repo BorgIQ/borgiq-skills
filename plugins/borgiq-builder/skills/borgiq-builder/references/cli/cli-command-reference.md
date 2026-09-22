@@ -1000,6 +1000,73 @@ borgiq templates apps --category-id TCAT01kd6gqghj04j8765nnqyp09a --json
 
 ---
 
+## Recipe Commands
+
+Recipes are saved, unversioned starting points (an actor, a flow, a segment) that the API adds to a canvas whole. See [borgiq-cli.md — Start from a recipe](../borgiq-cli.md#start-from-a-recipe-a-multi-actor-starting-point) for when to use one. Requires `@borgiq/cli` >= 0.12.0.
+
+### `borgiq recipes list`
+
+Browse or search recipes for the current workspace. Searches name, description and tags server-side.
+
+```bash
+borgiq recipes list --json
+borgiq recipes list --search slack --json
+borgiq recipes list --kind FLOW --kind SEGMENT --json      # repeatable: ACTOR, FLOW, SEGMENT
+borgiq recipes list --app-id TAPP01... --json
+```
+
+Envelope `{ total, data }`; each item is metadata only — `id`, `kind`, `name`, `description`, `actorCount`, `apps` (a recipe can list under several), `settingsCount` (`connections`, `credentials`, `inputs`) and tags. Paginates with `--page` / `--page-size`.
+
+### `borgiq recipes get`
+
+The full recipe: `data.actors` (the `ExportedCanvasData` map), `entry`, `exit`, and `settings`.
+
+```bash
+borgiq recipes get RCPE01... --json | jq '{entry, exit, settings}'
+```
+
+`settings.connections[]` is `{ type, label?, actorIds }`, `settings.credentials[]` is `{ key, type?, source, label?, actorIds }`, `settings.inputs[]` is `{ key, label, type, required?, default?, targets }`. The `actorIds` are recipe-local — use them in a per-actor settings map.
+
+### `borgiq recipes apps`
+
+The template apps that hold at least one recipe (an app holding only recipes appears here, not under `templates apps`).
+
+```bash
+borgiq recipes apps --search slack --json
+```
+
+### `borgiq recipes add`
+
+Add a recipe to a canvas. The API instantiates it: fresh actor and edge ids (references inside code and configuration rewritten), the settings values applied, webhook-keyed triggers given fresh keys, message-variable collisions suffixed, and the recipe wired in at its declared entry and exit.
+
+```bash
+borgiq recipes add RCPE01... --canvas <slug-or-id> [--x <n> --y <n>] \
+  [--after <actorId[:portId]> | --into-edge <edgeId>] [--settings <file|->] --json
+```
+
+| Flag | Meaning |
+|---|---|
+| `--canvas` | required; the canvas to add to |
+| `--x` / `--y` | where the entry actor lands (flow coordinates); default: below the canvas's lowest actor |
+| `--after` | wire that actor's source port (default `SPRTdefault`) to the recipe's entry |
+| `--into-edge` | splice into an edge: its source feeds the entry, the exit feeds the edge's old target |
+| `--settings` | JSON/YAML object of values, keyed as `recipes get` shows the groups (see below); `-` reads stdin |
+
+```yaml
+# settings.yaml
+connections:
+  openai-bearer: openai-main               # one key for the whole group
+  slack-bearer|slack-oauth2:                # or per recipe-local actor id
+    ACTR01...: team-slack
+credentials:
+  apiKey|openai|secret: my-openai-key
+inputs:
+  channel: '#triage'
+  model: gpt-4o
+```
+
+Response: `{ actorIds, entryActorId, exitActorId, edgeIds }`. Errors: `400` with `details` when a settings key names no connection/secret in the workspace, a group is not part of the recipe, or `--after`/`--into-edge` names something not on the canvas; `404` for an unknown recipe or canvas.
+
 ## Resource Commands
 
 ### `borgiq connections list`

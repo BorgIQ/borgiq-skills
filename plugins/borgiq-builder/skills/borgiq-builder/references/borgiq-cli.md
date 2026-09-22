@@ -182,6 +182,33 @@ For batch mode: pipe the converter through `--batch` to emit the operations enve
 
 See [cli-command-reference.md#template-commands](cli/cli-command-reference.md#template-commands) for the full flag list and example outputs.
 
+### Start from a recipe (a multi-actor starting point)
+
+A **recipe** is a saved starting point BorgIQ publishes: a single actor (e.g. an AI agent with its tools already attached), a whole flow (trigger → steps), or a flow segment (a trigger-less chain). Unlike a template it is **not versioned and not linked back** — once added, the actors are the user's and nothing updates them (a step inside that came from a template keeps its own `template` stamp). Prefer a recipe over hand-building when the user's ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"); prefer a template for one integration step you want to keep updatable.
+
+Every recipe declares an **entry** actor (what an incoming edge attaches to) and an **exit** actor and port (what an outgoing edge leaves from), so it can be wired in after an actor or spliced into an edge — the whole recipe always lands. Its **settings** — connection groups (by connection type), credential groups (by key/type/source) and declared inputs — are the values the user is expected to set.
+
+```bash
+# 1. Browse — by kind (ACTOR | FLOW | SEGMENT), app, or search
+borgiq recipes list --kind SEGMENT --json
+borgiq recipes apps --json                                   # the apps that hold recipes
+borgiq recipes list --app-id TAPP01... --json
+
+# 2. Read what it asks for: settings.connections / credentials / inputs, plus entry and exit
+borgiq recipes get RCPE01... --json | jq '{name, kind, entry, exit, settings}'
+
+# 3. Add it — the API instantiates it (fresh ids, settings applied, webhook keys minted, wired in)
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --after ACTR01... --settings settings.yaml --json
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --into-edge EDGE01... --json
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --x 0 --y 800 --json   # unwired, at a position
+```
+
+The `--settings` file is keyed the way `recipes get` shows the groups: a connection group by its type (several types joined with `|`, sorted — e.g. `slack-bearer|slack-oauth2`), a credential group by `key|type|source`, inputs by key. A group takes one workspace key for every actor in it, or `{ <recipe actor id>: <key> }` to choose per actor. Keys must exist in the workspace (`borgiq connections list`, `borgiq secrets list`); the API rejects unknown ones. Anything left out stays unset — fill it with `canvas-actors update` afterwards. `add` returns `{ actorIds, entryActorId, exitActorId, edgeIds }`; the new actors are ordinary canvas actors from then on.
+
+Do **not** reimplement instantiation from `recipes get` + `canvas-actors batch`: id rewriting inside code and configuration, message-variable collision handling and webhook key minting are the API's job (the thin-client rule).
+
+See [cli-command-reference.md#recipe-commands](cli/cli-command-reference.md#recipe-commands) for the flags.
+
 ---
 
 ## Step 3: Discover Workspace Resources
