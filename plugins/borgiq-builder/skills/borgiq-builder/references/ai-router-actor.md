@@ -75,7 +75,7 @@ actors:
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
-| `model` | string | No | AI model to use, in one of three forms: a known model id (any [AI actor model](ai-actor.md#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model (`openai/gpt-6`); or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md). Platform default when omitted: `gpt-4o-mini`; set `claude-haiku-4-5` explicitly |
+| `model` | string | No | AI model to use, in one of three forms: a known model id (any [AI actor model](ai-actor.md#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model (`openai/gpt-6`); or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md). Platform default when omitted: `gpt-6-luna`; set `claude-haiku-4-5` explicitly |
 | `input` | string | Yes | The input text to classify |
 | `emitType` | string | No | Routing behavior: `singleRoute` (default) or `multiRoute` |
 | `routeDescriptions` | object | Yes | Map of route names to their selection criteria |
@@ -99,7 +99,7 @@ export enum AiRouterActorEmitType {
 /** The options schema builder for the AiRouterActor since it changes for the sourcePorts configuration */
 export const buildAiRouterActorOptionsSchema = (sourcePorts: RuntimeActorSourcePort[]) => z.object({
   model: AiModelRefSchema.nullish()
-    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided'),
   emitType: z.enum(['singleRoute', 'multiRoute']).nullish()
     .describe('How the AI router actor will function: singleRoute emits on one condition being true, multiRoute emits on all matching conditions'),
   input: z.any()

@@ -795,7 +795,7 @@ import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
 /** The options for the AIActor */
 export const AiActorOptionsSchema = z.object({
   model: AiModelRefSchema.nullish()
-    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided'),
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(2).nullish()
@@ -841,7 +841,7 @@ export const AiActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided',
+      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided',
       title: 'Model',
       default: AiDefaultParameters.model,
       ui: {
@@ -2229,7 +2229,7 @@ export enum AiRouterActorEmitType {
 /** The options schema builder for the AiRouterActor since it changes for the sourcePorts configuration for the actor */
 export const buildAiRouterActorOptionsSchema = (sourcePorts: RuntimeActorSourcePort[]): ZodObject<any> => z.object({ // eslint-disable-line @typescript-eslint/no-explicit-any
   model: AiModelRefSchema.nullish()
-    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided'),
   emitType: z.enum(AiRouterActorEmitType).nullish()
     .describe('How the AI router actor will function, either can be singleRoute or multiRoute where singleRoute emits only on one of the conditions being true and multiRoute emits on all of the conditions being true'),
   input: z.any().describe('The input to the AI router actor'),
@@ -2280,7 +2280,7 @@ export const AiRouterActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     model: {
       type: BIQJsonSchemaType.String,
-      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided',
+      description: 'The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided',
       title: 'Model',
       default: AiDefaultParameters.model,
       ui: {
@@ -2700,7 +2700,7 @@ export const AI_INPUT_VALUE = '${{aiInput}}';
 /** The options for the DeprecatedAiAgent (legacy loop agent) */
 export const DeprecatedAiAgentOptionsSchema = z.object({
   model: z.enum(AiAgentModels).nullish()
-    .describe('The model to use for the AI provider. Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use for the AI provider. Defaults to gpt-6-luna if not provided'),
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(2).nullish()
