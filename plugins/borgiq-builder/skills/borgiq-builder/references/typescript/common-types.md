@@ -34,6 +34,10 @@ import { AiModelInformation, AiProvider, convertCostPerMTokensToCostPer1kTokens 
 export const PROVIDER_LABEL = 'Anthropic';
 
 export enum AnthropicModels {
+  /** Every Claude 3.x id is retired and requests to it fail: Claude 3 Sonnet on 2025-07-21,
+   * 3.5 Sonnet 2025-10-28, 3 Opus 2026-01-05, 3.5 Haiku and 3.7 Sonnet 2026-02-19, 3 Haiku
+   * 2026-04-20. `claude-3-sonnet-latest` and `claude-3-haiku-latest` never existed. The values
+   * stay because saved actors reference them. */
   CLAUDE_3_7_SONNET = 'claude-3-7-sonnet-latest',
   CLAUDE_3_7_SONNET_2025_02_19 = 'claude-3-7-sonnet-20250219',
   
@@ -51,6 +55,7 @@ export enum AnthropicModels {
   CLAUDE_3_HAIKU = 'claude-3-haiku-latest',
   CLAUDE_3_HAIKU_2024_03_07 = 'claude-3-haiku-20240307',
 
+  /** Retired, requests fail: Opus 4 and Sonnet 4 on 2026-06-15, Opus 4.1 on 2026-08-05. */
   CLAUDE_4_OPUS = 'claude-opus-4-0',
   CLAUDE_4_OPUS_2025_05_14 = 'claude-opus-4-20250514',
   CLAUDE_4_1_OPUS = 'claude-opus-4-1',
@@ -64,6 +69,8 @@ export enum AnthropicModels {
   CLAUDE_4_5_HAIKU = 'claude-haiku-4-5',
   CLAUDE_4_5_HAIKU_2025_10_01 = 'claude-haiku-4-5-20251001',
 
+  /** From the 4.6 generation on, the dateless id is itself the pinned snapshot: the two dated
+   * 4.6 values below were never valid API ids. */
   CLAUDE_4_6_OPUS = 'claude-opus-4-6',
   CLAUDE_4_6_OPUS_2026_02_05 = 'claude-opus-4-6-20260205',
   CLAUDE_4_6_SONNET = 'claude-sonnet-4-6',
@@ -75,6 +82,7 @@ export enum AnthropicModels {
 
   CLAUDE_5_SONNET = 'claude-sonnet-5',
   CLAUDE_5_OPUS = 'claude-opus-5',
+  CLAUDE_5_5_OPUS = 'claude-opus-5-5',
 
   /** Mythos-class tier. Claude Mythos 5 / 5.1 are the same underlying models with
    * safeguards lifted, but are restricted to Anthropic's trusted-access program and
@@ -87,6 +95,7 @@ export enum AnthropicModels {
  * The first entry seeds the cross-provider agent default, so keep a balanced Sonnet first. */
 export const AnthropicAgentModels = [
   AnthropicModels.CLAUDE_5_SONNET,
+  AnthropicModels.CLAUDE_5_5_OPUS,
   AnthropicModels.CLAUDE_5_1_FABLE,
   AnthropicModels.CLAUDE_5_OPUS,
   AnthropicModels.CLAUDE_5_FABLE,
@@ -340,29 +349,29 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
     provider: AiProvider.Anthropic,
     label: 'Claude 4.5 Opus',
     providerLabel: 'Anthropic',
-    date: '2025-11-01',
+    date: '2025-11-24',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(5),
       output: convertCostPerMTokensToCostPer1kTokens(25),
     },
-    maxTokens: 32000,
+    maxTokens: 64000,
   },
   [AnthropicModels.CLAUDE_4_5_OPUS_2025_11_01]: {
     provider: AiProvider.Anthropic,
     label: 'Claude 4.5 Opus 2025-11-01',
     providerLabel: 'Anthropic',
-    date: '2025-11-01',
+    date: '2025-11-24',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(5),
       output: convertCostPerMTokensToCostPer1kTokens(25),
     },
-    maxTokens: 32000,
+    maxTokens: 64000,
   },
   [AnthropicModels.CLAUDE_4_5_HAIKU]: {
     provider: AiProvider.Anthropic,
     label: 'Claude 4.5 Haiku',
     providerLabel: 'Anthropic',
-    date: '2025-10-01',
+    date: '2025-10-15',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(1),
       output: convertCostPerMTokensToCostPer1kTokens(5),
@@ -373,7 +382,7 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
     provider: AiProvider.Anthropic,
     label: 'Claude 4.5 Haiku 2025-10-01',
     providerLabel: 'Anthropic',
-    date: '2025-10-01',
+    date: '2025-10-15',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(1),
       output: convertCostPerMTokensToCostPer1kTokens(5),
@@ -412,7 +421,7 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
       input: convertCostPerMTokensToCostPer1kTokens(3),
       output: convertCostPerMTokensToCostPer1kTokens(15),
     },
-    maxTokens: 64000,
+    maxTokens: 128000,
   },
   [AnthropicModels.CLAUDE_4_6_SONNET_2026_02_17]: {
     provider: AiProvider.Anthropic,
@@ -423,14 +432,14 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
       input: convertCostPerMTokensToCostPer1kTokens(3),
       output: convertCostPerMTokensToCostPer1kTokens(15),
     },
-    maxTokens: 64000,
+    maxTokens: 128000,
   },
 
   [AnthropicModels.CLAUDE_4_7_OPUS]: {
     provider: AiProvider.Anthropic,
     label: 'Claude 4.7 Opus',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-03-13',
+    date: '2026-04-16',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(5),
       output: convertCostPerMTokensToCostPer1kTokens(25),
@@ -471,6 +480,17 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
     },
     maxTokens: 128000,
   },
+  [AnthropicModels.CLAUDE_5_5_OPUS]: {
+    provider: AiProvider.Anthropic,
+    label: 'Claude Opus 5.5',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-22',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(4),
+      output: convertCostPerMTokensToCostPer1kTokens(20),
+    },
+    maxTokens: 128000,
+  },
 
   [AnthropicModels.CLAUDE_5_FABLE]: {
     provider: AiProvider.Anthropic,
@@ -507,11 +527,14 @@ import { AiModelInformation, AiProvider, convertCostPerMTokensToCostPer1kTokens 
 const PROVIDER_LABEL = 'Google';
 
 export enum GoogleAiModels {
+  /** No longer served by the Gemini API, which now lists only Gemma 4. */
   GEMMA_3_1B = 'gemma-3-1b-it',
   GEMMA_3_4B = 'gemma-3-4b-it',
   GEMMA_3_12B = 'gemma-3-12b-it',
   GEMMA_3_27B = 'gemma-3-27b-it',
 
+  /** Every Gemini 2.0 id is shut down: Flash and Flash-Lite on 2026-06-01, the Flash Thinking
+   * experiment on 2025-12-02. */
   GEMINI_2_0_FLASH = 'gemini-2.0-flash',
   GEMINI_2_0_FLASH_001 = 'gemini-2.0-flash-001',
   
@@ -522,6 +545,8 @@ export enum GoogleAiModels {
   GEMINI_2_0_FLASH_THINKING_EXP = 'gemini-2.0-flash-thinking-exp',
   GEMINI_2_0_FLASH_THINKING_EXP_1_21 = 'gemini-2.0-flash-thinking-exp-01-21',
   
+  /** Since 2026-09-18 the 2.5 models serve only projects that already used them; they are not
+   * deprecated. The dated 2.5 preview snapshots are shut down (the last on 2025-12-02). */
   GEMINI_2_5_PRO = 'gemini-2.5-pro',
   GEMINI_2_5_PRO_PREVIEW_03_25 = 'gemini-2.5-pro-preview-03-25',
   GEMINI_2_5_PRO_PREVIEW_06_05 = 'gemini-2.5-pro-preview-06-05',
@@ -532,6 +557,7 @@ export enum GoogleAiModels {
 
   GEMINI_2_5_FLASH_LITE_PREVIEW_06_17 = 'gemini-2.5-flash-lite-preview-06-17',
 
+  /** Shut down 2026-03-09; the id now points to gemini-3.1-pro-preview. */
   GEMINI_3_PRO_PREVIEW = 'gemini-3-pro-preview',
 
   GEMINI_3_FLASH_PREVIEW = 'gemini-3-flash-preview',
@@ -540,6 +566,7 @@ export enum GoogleAiModels {
 
   GEMINI_3_5_FLASH = 'gemini-3.5-flash',
 
+  /** Shuts down 2027-05-07 (Google's substitute: gemini-3.5-flash-lite). */
   GEMINI_3_1_FLASH_LITE = 'gemini-3.1-flash-lite',
   GEMINI_3_5_FLASH_LITE = 'gemini-3.5-flash-lite',
 
@@ -739,7 +766,7 @@ export const GoogleModelInformationMap: Record<GoogleAiModels, AiModelInformatio
       input: convertCostPerMTokensToCostPer1kTokens(0.3),
       output: convertCostPerMTokensToCostPer1kTokens(2.5),
     },
-    maxTokens: 8192,
+    maxTokens: 65536,
   },
 
   [GoogleAiModels.GEMINI_2_5_FLASH_PREVIEW_04_17]: {
@@ -782,7 +809,7 @@ export const GoogleModelInformationMap: Record<GoogleAiModels, AiModelInformatio
     provider: AiProvider.Google,
     label: 'Gemini 3 Pro Preview',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-11-01',
+    date: '2025-11-18',
     costPer1kTokens: {
       200000: {
         input: convertCostPerMTokensToCostPer1kTokens(2.0),
@@ -800,7 +827,7 @@ export const GoogleModelInformationMap: Record<GoogleAiModels, AiModelInformatio
     provider: AiProvider.Google,
     label: 'Gemini 3 Flash Preview',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-12-01',
+    date: '2025-12-17',
     costPer1kTokens: {
       200000: {
         input: convertCostPerMTokensToCostPer1kTokens(0.5),
@@ -848,7 +875,7 @@ export const GoogleModelInformationMap: Record<GoogleAiModels, AiModelInformatio
     provider: AiProvider.Google,
     label: 'Gemini 3.1 Flash Lite',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-02-19',
+    date: '2026-05-07',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(0.25),
       output: convertCostPerMTokensToCostPer1kTokens(1.5),
@@ -1192,7 +1219,7 @@ export interface AiChatCompletionResponse<T = unknown> extends AiResponse<T> {
 }
 
 export const AiDefaultParameters = {
-  model: AiModel.GPT_4O_MINI,
+  model: AiModel.GPT_6_LUNA,
   temperature: 0.2,
   maxTokens: 10000,
 } as const;
@@ -1786,29 +1813,35 @@ export enum OpenAiModels {
   GPT_4O = 'gpt-4o',
   GPT_4O_2024_11_20 = 'gpt-4o-2024-11-20',
   GPT_4O_2024_08_06 = 'gpt-4o-2024-08-06',
+  /** Shuts down 2026-10-23 (OpenAI's substitute: gpt-5.6-sol). */
   GPT_4O_2024_05_13 = 'gpt-4o-2024-05-13',
 
   GPT_4O_MINI = 'gpt-4o-mini',
   GPT_4O_MINI_2024_07_18 = 'gpt-4o-mini-2024-07-18',
 
+  /** o1 and o1-pro shut down 2026-10-23 (OpenAI's substitute: gpt-5.6-sol). */
   OPENAI_O1 = 'o1',
   OPENAI_O1_2024_12_17 = 'o1-2024-12-17',
 
   OPENAI_O1_PRO = 'o1-pro',
   OPENAI_O1_PRO_2025_03_19 = 'o1-pro-2025-03-19',
 
+  /** Shut down 2025-10-27. */
   OPENAI_O1_MINI = 'o1-mini',
   OPENAI_O1_MINI_2024_09_12 = 'o1-mini-2024-09-12',
 
+  /** The dated o3 and o3-pro snapshots shut down 2026-12-11 (OpenAI's substitute: gpt-5.6-sol). */
   OPENAI_O3 = 'o3',
   OPENAI_O3_2025_04_16 = 'o3-2025-04-16',
 
+  /** Shuts down 2026-10-23 (OpenAI's substitute: gpt-5.6-sol). */
   OPENAI_O3_MINI = 'o3-mini',
   OPENAI_O3_MINI_2025_01_31 = 'o3-mini-2025-01-31',
 
   OPENAI_O3_PRO = 'o3-pro',
   OPENAI_O3_PRO_2025_06_10 = 'o3-pro-2025-06-10',
 
+  /** Shuts down 2026-10-23 (OpenAI's substitute: gpt-5.6-terra). */
   OPENAI_O4_MINI = 'o4-mini',
   OPENAI_O4_MINI_2025_04_16 = 'o4-mini-2025-04-16',
 
@@ -1818,9 +1851,12 @@ export enum OpenAiModels {
   GPT_4_1_MINI = 'gpt-4.1-mini',
   GPT_4_1_MINI_2025_04_14 = 'gpt-4.1-mini-2025-04-14',
 
+  /** Shuts down 2026-10-23 (OpenAI's substitute: gpt-5.6-luna). */
   GPT_4_1_NANO = 'gpt-4.1-nano',
   GPT_4_1_NANO_2025_04_14 = 'gpt-4.1-nano-2025-04-14',
 
+  /** The dated gpt-5, gpt-5-mini and gpt-5-nano snapshots shut down 2026-12-11 (OpenAI's
+   * substitutes: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna). */
   GPT_5 = 'gpt-5',
   GPT_5_2025_08_07 = 'gpt-5-2025-08-07',
 
@@ -1830,23 +1866,30 @@ export enum OpenAiModels {
   GPT_5_NANO = 'gpt-5-nano',
   GPT_5_NANO_2025_08_07 = 'gpt-5-nano-2025-08-07',
 
+  /** Every chat-latest id is shut down: gpt-5 and gpt-5.1 on 2026-07-23, gpt-5.2 on 2026-08-10. */
   GPT_5_CHAT_LATEST = 'gpt-5-chat-latest',
   GPT_5_CHAT_LATEST_2025_08_07 = 'gpt-5-chat-latest-2025-08-07',
 
   GPT_5_1_CHAT_LATEST = 'gpt-5.1-chat-latest',
   GPT_5_1 = 'gpt-5.1',
+  GPT_5_1_2025_11_13 = 'gpt-5.1-2025-11-13',
 
   GPT_5_2 = 'gpt-5.2',
+  /** Never a real snapshot id; OpenAI's is gpt-5.2-2025-12-11. Same for the dated Pro, 5.4 and
+   * 5.4 Pro values ending 12-09 / 03-17 below. */
   GPT_5_2_2025_12_09 = 'gpt-5.2-2025-12-09',
+  GPT_5_2_2025_12_11 = 'gpt-5.2-2025-12-11',
 
   GPT_5_2_CHAT_LATEST = 'gpt-5.2-chat-latest',
   GPT_5_2_CHAT_LATEST_2025_12_09 = 'gpt-5.2-chat-latest-2025-12-09',
 
   GPT_5_2_PRO = 'gpt-5.2-pro',
   GPT_5_2_PRO_2025_12_09 = 'gpt-5.2-pro-2025-12-09',
+  GPT_5_2_PRO_2025_12_11 = 'gpt-5.2-pro-2025-12-11',
 
   GPT_5_4 = 'gpt-5.4',
   GPT_5_4_2026_03_17 = 'gpt-5.4-2026-03-17',
+  GPT_5_4_2026_03_05 = 'gpt-5.4-2026-03-05',
 
   GPT_5_4_MINI = 'gpt-5.4-mini',
   GPT_5_4_MINI_2026_03_17 = 'gpt-5.4-mini-2026-03-17',
@@ -1856,9 +1899,13 @@ export enum OpenAiModels {
 
   GPT_5_4_PRO = 'gpt-5.4-pro',
   GPT_5_4_PRO_2026_03_17 = 'gpt-5.4-pro-2026-03-17',
+  GPT_5_4_PRO_2026_03_05 = 'gpt-5.4-pro-2026-03-05',
 
   GPT_5_5 = 'gpt-5.5',
   GPT_5_5_2026_04_23 = 'gpt-5.5-2026-04-23',
+
+  GPT_5_5_PRO = 'gpt-5.5-pro',
+  GPT_5_5_PRO_2026_04_23 = 'gpt-5.5-pro-2026-04-23',
 
   GPT_5_6 = 'gpt-5.6',
   GPT_5_6_SOL = 'gpt-5.6-sol',
@@ -1866,14 +1913,18 @@ export enum OpenAiModels {
   GPT_5_6_LUNA = 'gpt-5.6-luna',
 
   GPT_6_ASTRA = 'gpt-6-astra',
+  GPT_6_SOL = 'gpt-6-sol',
+  GPT_6_LUNA = 'gpt-6-luna',
 }
 
 /** OpenAI models proficient enough to drive agentic workflows (flagship + mid + budget tiers).
- * The first entry is the Codex harness default, so it stays on the balanced `gpt-5.6` alias
- * (which routes to Sol) rather than the pricier GPT-6 Astra. */
+ * The first entry is the Codex harness default, so it is the balanced GPT-6 Sol rather than the
+ * pricier GPT-6 Astra. */
 export const OpenAiAgentModels = [
-  OpenAiModels.GPT_5_6,
+  OpenAiModels.GPT_6_SOL,
   OpenAiModels.GPT_6_ASTRA,
+  OpenAiModels.GPT_6_LUNA,
+  OpenAiModels.GPT_5_6,
   OpenAiModels.GPT_5_6_TERRA,
   OpenAiModels.GPT_5_6_LUNA,
   OpenAiModels.GPT_5_5,
@@ -2282,7 +2333,7 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.1 Chat Latest',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-11-14',
+    date: '2025-11-13',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(1.25),
       output: convertCostPerMTokensToCostPer1kTokens(10),
@@ -2293,19 +2344,30 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.1',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-11-14',
+    date: '2025-11-13',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(1.25),
       output: convertCostPerMTokensToCostPer1kTokens(10),
     },
-    maxTokens: 196000,
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_5_1_2025_11_13]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.1 2025-11-13',
+    providerLabel: PROVIDER_LABEL,
+    date: '2025-11-13',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(1.25),
+      output: convertCostPerMTokensToCostPer1kTokens(10),
+    },
+    maxTokens: 128000,
   },
 
   [OpenAiModels.GPT_5_2]: {
     provider: AiProvider.OpenAI,
     label: 'GPT 5.2',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-12-09',
+    date: '2025-12-11',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(1.75),
       output: convertCostPerMTokensToCostPer1kTokens(14),
@@ -2316,7 +2378,18 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.2 2025-12-09',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-12-09',
+    date: '2025-12-11',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(1.75),
+      output: convertCostPerMTokensToCostPer1kTokens(14),
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_5_2_2025_12_11]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.2 2025-12-11',
+    providerLabel: PROVIDER_LABEL,
+    date: '2025-12-11',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(1.75),
       output: convertCostPerMTokensToCostPer1kTokens(14),
@@ -2351,7 +2424,7 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.2 Pro',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-12-09',
+    date: '2025-12-11',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(21),
       output: convertCostPerMTokensToCostPer1kTokens(168),
@@ -2362,7 +2435,18 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.2 Pro 2025-12-09',
     providerLabel: PROVIDER_LABEL,
-    date: '2025-12-09',
+    date: '2025-12-11',
+    costPer1kTokens: {
+      input: convertCostPerMTokensToCostPer1kTokens(21),
+      output: convertCostPerMTokensToCostPer1kTokens(168),
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_5_2_PRO_2025_12_11]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.2 Pro 2025-12-11',
+    providerLabel: PROVIDER_LABEL,
+    date: '2025-12-11',
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(21),
       output: convertCostPerMTokensToCostPer1kTokens(168),
@@ -2370,14 +2454,22 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     maxTokens: 128000,
   },
 
+  /** From GPT-5.4 on, a prompt over 272K input tokens bills the whole request at 2x input and
+   * 1.5x output (mini and nano excepted). */
   [OpenAiModels.GPT_5_4]: {
     provider: AiProvider.OpenAI,
     label: 'GPT 5.4',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-03-17',
+    date: '2026-03-05',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(2.5),
-      output: convertCostPerMTokensToCostPer1kTokens(15),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(15),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(5),
+        output: convertCostPerMTokensToCostPer1kTokens(22.5),
+      },
     },
     maxTokens: 128000,
   },
@@ -2385,10 +2477,33 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.4 2026-03-17',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-03-17',
+    date: '2026-03-05',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(2.5),
-      output: convertCostPerMTokensToCostPer1kTokens(15),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(15),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(5),
+        output: convertCostPerMTokensToCostPer1kTokens(22.5),
+      },
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_5_4_2026_03_05]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.4 2026-03-05',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-03-05',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(15),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(5),
+        output: convertCostPerMTokensToCostPer1kTokens(22.5),
+      },
     },
     maxTokens: 128000,
   },
@@ -2443,10 +2558,16 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.4 Pro',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-03-17',
+    date: '2026-03-05',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(30),
-      output: convertCostPerMTokensToCostPer1kTokens(180),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(30),
+        output: convertCostPerMTokensToCostPer1kTokens(180),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(60),
+        output: convertCostPerMTokensToCostPer1kTokens(270),
+      },
     },
     maxTokens: 128000,
   },
@@ -2454,10 +2575,33 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.4 Pro 2026-03-17',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-03-17',
+    date: '2026-03-05',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(30),
-      output: convertCostPerMTokensToCostPer1kTokens(180),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(30),
+        output: convertCostPerMTokensToCostPer1kTokens(180),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(60),
+        output: convertCostPerMTokensToCostPer1kTokens(270),
+      },
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_5_4_PRO_2026_03_05]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.4 Pro 2026-03-05',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-03-05',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(30),
+        output: convertCostPerMTokensToCostPer1kTokens(180),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(60),
+        output: convertCostPerMTokensToCostPer1kTokens(270),
+      },
     },
     maxTokens: 128000,
   },
@@ -2466,10 +2610,16 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.5',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-04-23',
+    date: '2026-04-24',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(5),
-      output: convertCostPerMTokensToCostPer1kTokens(30),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(5),
+        output: convertCostPerMTokensToCostPer1kTokens(30),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(10),
+        output: convertCostPerMTokensToCostPer1kTokens(45),
+      },
     },
     maxTokens: 128000,
   },
@@ -2477,22 +2627,71 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     provider: AiProvider.OpenAI,
     label: 'GPT 5.5 2026-04-23',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-04-23',
+    date: '2026-04-24',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(5),
-      output: convertCostPerMTokensToCostPer1kTokens(30),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(5),
+        output: convertCostPerMTokensToCostPer1kTokens(30),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(10),
+        output: convertCostPerMTokensToCostPer1kTokens(45),
+      },
     },
     maxTokens: 128000,
   },
 
+  [OpenAiModels.GPT_5_5_PRO]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.5 Pro',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-04-24',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(30),
+        output: convertCostPerMTokensToCostPer1kTokens(180),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(60),
+        output: convertCostPerMTokensToCostPer1kTokens(270),
+      },
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_5_5_PRO_2026_04_23]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 5.5 Pro 2026-04-23',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-04-24',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(30),
+        output: convertCostPerMTokensToCostPer1kTokens(180),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(60),
+        output: convertCostPerMTokensToCostPer1kTokens(270),
+      },
+    },
+    maxTokens: 128000,
+  },
+
+  /** Sol's $4/$20 is OpenAI's 2026-08-21 promotional rate, "available at least through
+   * November 21, 2026"; its list rate is $5/$30. Revisit these two entries after that date. */
   [OpenAiModels.GPT_5_6]: {
     provider: AiProvider.OpenAI,
     label: 'GPT 5.6',
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(5),
-      output: convertCostPerMTokensToCostPer1kTokens(30),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(20),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(8),
+        output: convertCostPerMTokensToCostPer1kTokens(30),
+      },
     },
     maxTokens: 128000,
   },
@@ -2502,20 +2701,32 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(5),
-      output: convertCostPerMTokensToCostPer1kTokens(30),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(20),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(8),
+        output: convertCostPerMTokensToCostPer1kTokens(30),
+      },
     },
     maxTokens: 128000,
   },
-  /** Repriced 2026-07-30: Terra -20%, Luna -80%. Sol stayed at its launch rate. */
+  /** Repriced 2026-07-30: Terra -20%, Luna -80%. */
   [OpenAiModels.GPT_5_6_TERRA]: {
     provider: AiProvider.OpenAI,
     label: 'GPT 5.6 Terra',
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(2),
-      output: convertCostPerMTokensToCostPer1kTokens(12),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(12),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(18),
+      },
     },
     maxTokens: 128000,
   },
@@ -2525,8 +2736,14 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     providerLabel: PROVIDER_LABEL,
     date: '2026-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(0.2),
-      output: convertCostPerMTokensToCostPer1kTokens(1.2),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(0.2),
+        output: convertCostPerMTokensToCostPer1kTokens(1.2),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(0.4),
+        output: convertCostPerMTokensToCostPer1kTokens(1.8),
+      },
     },
     maxTokens: 128000,
   },
@@ -2537,8 +2754,48 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
     providerLabel: PROVIDER_LABEL,
     date: '2026-09-03',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(10),
-      output: convertCostPerMTokensToCostPer1kTokens(50),
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(10),
+        output: convertCostPerMTokensToCostPer1kTokens(50),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(20),
+        output: convertCostPerMTokensToCostPer1kTokens(75),
+      },
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_6_SOL]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 6 Sol',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-22',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(10),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(15),
+      },
+    },
+    maxTokens: 128000,
+  },
+  [OpenAiModels.GPT_6_LUNA]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 6 Luna',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-22',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(0.1),
+        output: convertCostPerMTokensToCostPer1kTokens(0.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(0.2),
+        output: convertCostPerMTokensToCostPer1kTokens(0.75),
+      },
     },
     maxTokens: 128000,
   },
@@ -2688,6 +2945,9 @@ import { AiModelInformation, AiProvider, convertCostPerMTokensToCostPer1kTokens 
 export const PROVIDER_LABEL = 'xAI Grok';
 
 export enum xAiModels {
+  /** grok-4-0709, both grok-4-fast ids and grok-code-fast-1 were retired 2026-05-15: requests
+   * redirect to grok-4.3 (grok-code-fast-1 to grok-build-0.1) and bill at grok-4.3's rates, which
+   * is what their entries carry. xAI no longer lists the bare grok-4 id. */
   GROK_4 = 'grok-4',
   GROK_4_0709 = 'grok-4-0709',
 
@@ -2702,6 +2962,8 @@ export enum xAiModels {
 
   GROK_4_6 = 'grok-4.6',
 
+  GROK_4_7 = 'grok-4.7',
+
   GROK_4_20_REASONING = 'grok-4.20-0309-reasoning',
   GROK_4_20_NON_REASONING = 'grok-4.20-0309-non-reasoning',
   GROK_4_20_MULTI_AGENT = 'grok-4.20-multi-agent-0309',
@@ -2711,6 +2973,7 @@ export enum xAiModels {
 
 /** xAI models proficient enough to drive agentic workflows (flagship + fast/code). */
 export const xAiAgentModels = [
+  xAiModels.GROK_4_7,
   xAiModels.GROK_4_6,
   xAiModels.GROK_4_5,
   xAiModels.GROK_4_20_REASONING,
@@ -2739,10 +3002,16 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     providerLabel: PROVIDER_LABEL,
     date: '2025-07-09',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(3),
-      output: convertCostPerMTokensToCostPer1kTokens(15),
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
     },
-    maxTokens: 256000,
+    maxTokens: 1000000,
   },
   [xAiModels.GROK_4_FAST_REASONING]: {
     provider: AiProvider.xAi,
@@ -2750,10 +3019,16 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     providerLabel: PROVIDER_LABEL,
     date: '2025-09-20',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(0.2),
-      output: convertCostPerMTokensToCostPer1kTokens(0.5),
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
     },
-    maxTokens: 2000000,
+    maxTokens: 1000000,
   },
   [xAiModels.GROK_4_FAST_NON_REASONING]: {
     provider: AiProvider.xAi,
@@ -2761,10 +3036,16 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     providerLabel: PROVIDER_LABEL,
     date: '2025-09-20',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(0.2),
-      output: convertCostPerMTokensToCostPer1kTokens(0.5),
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
     },
-    maxTokens: 2000000,
+    maxTokens: 1000000,
   },
   [xAiModels.GROK_CODE_FAST_1]: {
     provider: AiProvider.xAi,
@@ -2772,8 +3053,14 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     providerLabel: PROVIDER_LABEL,
     date: '2025-08-01',
     costPer1kTokens: {
-      input: convertCostPerMTokensToCostPer1kTokens(0.2),
-      output: convertCostPerMTokensToCostPer1kTokens(1.5),
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(1.25),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(2.5),
+        output: convertCostPerMTokensToCostPer1kTokens(5),
+      },
     },
     maxTokens: 256000,
   },
@@ -2800,7 +3087,7 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     provider: AiProvider.xAi,
     label: 'Grok 4.5',
     providerLabel: PROVIDER_LABEL,
-    date: '2026-07-08',
+    date: '2026-07-16',
     costPer1kTokens: {
       200000: {
         input: convertCostPerMTokensToCostPer1kTokens(2),
@@ -2818,6 +3105,23 @@ export const xAiModelInformationMap: Record<xAiModels, AiModelInformation> = {
     label: 'Grok 4.6',
     providerLabel: PROVIDER_LABEL,
     date: '2026-08-12',
+    costPer1kTokens: {
+      200000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(6),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(12),
+      },
+    },
+    maxTokens: 500000,
+  },
+  [xAiModels.GROK_4_7]: {
+    provider: AiProvider.xAi,
+    label: 'Grok 4.7',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-21',
     costPer1kTokens: {
       200000: {
         input: convertCostPerMTokensToCostPer1kTokens(2),
@@ -3335,7 +3639,7 @@ export interface BIQActorReceiveResponse<M> {
 
 ```typescript
 /**
- * Sandbox types shared between borgiq-platform and borgiq-lambda-runtime.
+ * Sandbox types shared between the platform and the lambda runtime.
  * NOTE: This file is to ONLY be used for types needed in both the platform and the lambda runtime.
  */
 import { z } from 'zod';

@@ -526,14 +526,16 @@ The workspace must have an AI credential configured for the chosen model's provi
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | `claude-sonnet-5` (default), `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
-| OpenAI | `gpt-5.6`, `gpt-6-astra`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini` |
+| Anthropic | `claude-sonnet-5` (default), `claude-opus-5-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
+| OpenAI | `gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`, `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini` |
 | Google | `gemini-3.1-pro-preview`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-2.5-pro` |
-| xAI | `grok-4.6`, `grok-4.5`, `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-build-0.1`, `grok-4.3`, `grok-4-fast-reasoning`, `grok-code-fast-1` |
+| xAI | `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-build-0.1`, `grok-4.3`, `grok-4-fast-reasoning`, `grok-code-fast-1` |
 
-Rough price tiers, per million input/output tokens as the platform meters them: `claude-sonnet-5` $2/$10; `claude-opus-5` and `claude-opus-4-8` $5/$25; `claude-fable-5-1` and `gpt-6-astra` $10/$50; `gpt-5.6` $5/$30; `gpt-5.6-luna` $0.20/$1.20; `claude-haiku-4-5` $1/$5; `gemini-3.8-flash` $0.75/$3.75; `grok-4.6` $2/$6 (double above 200K input tokens).
+Rough price tiers, per million input/output tokens as the platform meters them: `claude-sonnet-5` and `gpt-6-sol` $2/$10; `claude-opus-5-5` $4/$20; `claude-opus-5` and `claude-opus-4-8` $5/$25; `claude-fable-5-1` and `gpt-6-astra` $10/$50; `gpt-5.6` $4/$20 (promotional); `gpt-6-luna` $0.10/$0.50; `gpt-5.6-luna` $0.20/$1.20; `claude-haiku-4-5` $1/$5; `gemini-3.8-flash` $0.75/$3.75; `grok-4.7` $2/$6 (double from 200K input tokens).
 
-For complex multi-step tasks, prefer `claude-sonnet-5`, `claude-opus-5` or `claude-fable-5-1`. For simple high-volume agents, `claude-haiku-4-5`, `gpt-5.6-luna` or `gemini-3.5-flash-lite` keep costs down — and set `thinkingLevel: off`, since the default `medium` thinking is billed as output tokens on every turn.
+`grok-4-fast-reasoning` and `grok-code-fast-1` are still accepted for existing actors, but xAI retired them on 2026-05-15 and serves those requests with `grok-4.3` and `grok-build-0.1`; the dated `gpt-5` and `gpt-5-mini` snapshots shut down on 2026-12-11, and since 2026-09-18 Google serves `gemini-2.5-pro` only to projects that already used it.
+
+For complex multi-step tasks, prefer `claude-sonnet-5`, `claude-opus-5-5` or `claude-fable-5-1`. For simple high-volume agents, `claude-haiku-4-5`, `gpt-6-luna` or `gemini-3.5-flash-lite` keep costs down — and set `thinkingLevel: off`, since the default `medium` thinking is billed as output tokens on every turn.
 
 ## Sessions and Continuation
 
@@ -930,7 +932,7 @@ Compose agents hierarchically using CallFlowActor tools to create specialized su
 ## Best Practices
 
 1. **Size the runtime for the workspace** — ≥ 4 GB ephemeral storage for real file work; the workspace cap is 20% of ephemeral storage
-2. **Use agent-grade models** — default `claude-sonnet-5`; step up to `claude-opus-5` or `claude-fable-5-1` for complex multi-step tasks
+2. **Use agent-grade models** — default `claude-sonnet-5`; step up to `claude-opus-5-5` or `claude-fable-5-1` for complex multi-step tasks
 3. **Make bash side effects idempotent** — bash is at-least-once across segment retries; external calls (APIs, emails) may repeat
 4. **Prefer built-in tools for file work** — don't wire file-system tool actors; the agent already has `read`/`write`/`edit`/`bash`
 5. **Define clear tool schemas** — the agent uses tool descriptions and schemas to decide when and how to call wired tools

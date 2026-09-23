@@ -70,7 +70,7 @@ actors:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | gpt-4o-mini | The model reference, in one of three forms: a known model id (see [Available Models](#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model (`openai/gpt-6`); or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) |
+| `model` | string | gpt-6-luna | The model reference, in one of three forms: a known model id (see [Available Models](#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model (`openai/gpt-6`); or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) |
 | `prompt` | string | - | The prompt to send to the AI model |
 | `systemPrompt` | string | - | Background context/instructions for the AI model |
 | `messages` | array | - | Previous conversation messages (for multi-turn) |
@@ -94,7 +94,7 @@ import { z } from 'zod';
 /** The options for the AiActor */
 export const AiActorOptionsSchema = z.object({
   model: AiModelRefSchema.nullish()
-    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-4o-mini if not provided'),
+    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided'),
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(1).nullish()
@@ -159,27 +159,28 @@ export const AiActorResultSchema = z.object({
 
 ## Available Models
 
-**Default:** Always start with `claude-haiku-4-5` unless the task requires more advanced reasoning capabilities. Set `model` explicitly — when it is omitted the platform falls back to `gpt-4o-mini`.
+**Default:** Always start with `claude-haiku-4-5` unless the task requires more advanced reasoning capabilities. Set `model` explicitly — when it is omitted the platform falls back to `gpt-6-luna`.
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | claude-sonnet-5, claude-opus-5, claude-fable-5-1, claude-fable-5, claude-opus-4-8, claude-opus-4-7, claude-opus-4-6, claude-sonnet-4-6, claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 |
-| Google | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, gemini-3.1-flash-lite, gemini-3-pro-preview, gemini-3-flash-preview, gemini-2.5-pro, gemini-2.5-flash |
-| OpenAI | gpt-6-astra, gpt-5.6, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5.4-pro, gpt-5.2, gpt-5.2-pro, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o3-mini, o3-pro, o4-mini |
-| xAI | grok-4.6, grok-4.5, grok-4.3, grok-4.20-0309-reasoning, grok-4.20-0309-non-reasoning, grok-4.20-multi-agent-0309, grok-build-0.1, grok-4, grok-4-fast-reasoning, grok-4-fast-non-reasoning, grok-code-fast-1 |
+| Anthropic | claude-sonnet-5, claude-opus-5-5, claude-opus-5, claude-fable-5-1, claude-fable-5, claude-opus-4-8, claude-opus-4-7, claude-opus-4-6, claude-sonnet-4-6, claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 |
+| Google | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, gemini-3.1-flash-lite, gemini-3-flash-preview, gemini-2.5-pro, gemini-2.5-flash |
+| OpenAI | gpt-6-sol, gpt-6-astra, gpt-6-luna, gpt-5.6, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5.4-pro, gpt-5.2, gpt-5.2-pro, gpt-5.1, gpt-4.1, gpt-4.1-mini |
+| xAI | grok-4.7, grok-4.6, grok-4.5, grok-4.3, grok-4.20-0309-reasoning, grok-4.20-0309-non-reasoning, grok-4.20-multi-agent-0309, grok-build-0.1 |
 
-Every value of the provider enums (including dated snapshots such as `claude-sonnet-4-6-20260217`) is accepted; the full lists with prices live in [typescript/common-types.md](typescript/common-types.md#aiindex).
+Every value of the provider enums (including dated snapshots such as `gpt-5.4-2026-03-05`) is accepted; the full lists with prices live in [typescript/common-types.md](typescript/common-types.md#aiindex). The enums also keep ids the providers have retired or scheduled for shutdown — Claude 3.x, Opus 4, Sonnet 4 and Opus 4.1, `o1`, `o3`, `o3-mini`, `o4-mini`, `gpt-4.1-nano`, the dated `gpt-5` snapshots, the Gemini 2.0 family, `gemini-3-pro-preview`, `grok-4-0709`, `grok-4-fast-*`, `grok-code-fast-1` — so existing actors still load, but calls to them fail or are redirected by the provider. Pick a model from the table above for anything new. Since 2026-09-18, Google serves the Gemini 2.5 models only to projects that already used them.
 
 **Custom providers.** Any OpenAI-compatible provider, gateway or self-hosted server the workspace has added (Fireworks, Groq, Together, DeepInfra, OpenRouter, LiteLLM, Ollama, vLLM, …) is referenced as `<slug>/<model-id>`, e.g. `fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct` or `openrouter/moonshotai/kimi-k2`. A built-in provider's unlisted model is `<provider>/<model-id>` (`openai/gpt-6`). Bare unknown ids are rejected. A slug the workspace does not have only produces a warning in the editor and in `borgiq canvases validate`; the actor fails at run time. See [custom-ai-providers.md](custom-ai-providers.md) for setup, the catalog fields and pricing; `borgiq ai-providers models` lists every reference usable in the workspace.
 
 **Model tiers** (per million input/output tokens, as the platform meters them):
 - **claude-haiku-4-5** — $1/$5. The recommended starting point for classification, extraction and short generation.
 - **claude-sonnet-5** — $2/$10, 128K output. The step up when Haiku is not enough.
-- **claude-opus-5** — $5/$25 for hard reasoning; **claude-fable-5-1** ($10/$50) is the top Anthropic tier.
-- **gpt-5.6** — $5/$30 flagship (an alias of `gpt-5.6-sol`); **gpt-5.6-terra** $2/$12 mid-tier; **gpt-5.6-luna** $0.20/$1.20 budget; **gpt-6-astra** $10/$50 top tier.
+- **claude-opus-5-5** — $4/$20 for hard reasoning; **claude-fable-5-1** ($10/$50) is the top Anthropic tier.
+- **gpt-6-sol** — $2/$10, OpenAI's balanced tier; **gpt-6-luna** $0.10/$0.50 budget (the fallback when `model` is omitted); **gpt-6-astra** $10/$50 top tier. OpenAI bills a prompt over 272K input tokens at 2x input and 1.5x output for the whole request.
+- **gpt-5.6** — $4/$20 (OpenAI's promotional rate through at least 2026-11-21; an alias of `gpt-5.6-sol`); **gpt-5.6-terra** $2/$12; **gpt-5.6-luna** $0.20/$1.20.
 - **gemini-3.8-flash** — $0.75/$3.75 (promotional rate through 2026-12-31); **gemini-3.5-flash-lite** $0.30/$2.50 for simple classification/extraction.
-- **grok-4.6** — $2/$6 for prompts up to 200K input tokens; larger prompts bill the whole request at double (all Grok 4.3+ models price this way).
-- **o3/o3-pro/o4-mini, gpt-5.4-pro** — Older reasoning tiers; prefer the current generation above.
+- **grok-4.7** — $2/$6 for prompts under 200K input tokens; from 200K the whole request bills at double (all Grok 4.3+ models price this way).
+- **gpt-5.5-pro, gpt-5.4-pro** — $30/$180 pro tiers for research-grade tasks; the o-series reasoning models are being retired.
 
 ## Results Object
 
@@ -495,7 +496,7 @@ options:
 
 ## Best Practices
 
-1. **Use appropriate models** - Choose smaller models (gpt-4o-mini) for simple tasks, larger models for complex reasoning
+1. **Use appropriate models** - Choose smaller models (claude-haiku-4-5, gpt-6-luna) for simple tasks, larger models for complex reasoning
 2. **Set temperature intentionally** - Lower for factual tasks, higher for creative tasks
 3. **Use structured output** - Use `outputSchema` when you need predictable response formats
 4. **Provide clear system prompts** - Give the AI clear context about its role and task
