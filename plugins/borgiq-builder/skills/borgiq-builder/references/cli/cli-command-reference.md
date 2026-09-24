@@ -1011,7 +1011,7 @@ Browse or search recipes for the current workspace. Searches name, description a
 ```bash
 borgiq recipes list --json
 borgiq recipes list --search slack --json
-borgiq recipes list --kind FLOW --kind SEGMENT --json      # repeatable: ACTOR, FLOW, SEGMENT
+borgiq recipes list --kind FLOW --kind SEGMENT --json      # repeatable: TASK, TRIGGER, FLOW, SEGMENT
 borgiq recipes list --app-id TAPP01... --json
 ```
 
@@ -1048,8 +1048,8 @@ borgiq recipes add RCPE01... --canvas <slug-or-id> [--x <n> --y <n>] \
 |---|---|
 | `--canvas` | required; the canvas to add to |
 | `--x` / `--y` | where the entry actor lands (flow coordinates); default: below the canvas's lowest actor |
-| `--after` | wire that actor's source port (default `SPRTdefault`) to the recipe's entry |
-| `--into-edge` | splice into an edge: its source feeds the entry, the exit feeds the edge's old target |
+| `--after` | wire that actor's source port (default `SPRTdefault`) to the recipe's entry (`TASK` and `SEGMENT` recipes only) |
+| `--into-edge` | splice into an edge: its source feeds the entry, the exit feeds the edge's old target (`TASK` and `SEGMENT` recipes only) |
 | `--settings` | JSON/YAML object of values, keyed as `recipes get` shows the groups (see below); `-` reads stdin |
 
 ```yaml
@@ -1065,7 +1065,7 @@ inputs:
   model: gpt-4o
 ```
 
-Response: `{ actorIds, entryActorId, exitActorId, edgeIds }`. Errors: `400` with `details` when a settings key names no connection/secret in the workspace, a group is not part of the recipe, or `--after`/`--into-edge` names something not on the canvas; `404` for an unknown recipe or canvas.
+Response: `{ actorIds, entryActorId, exitActorId, edgeIds }`. Errors: `400` with `details` when a settings key names no connection/secret in the workspace, a group is not part of the recipe, `--after`/`--into-edge` names something not on the canvas, or `--after`/`--into-edge` is given for a `FLOW` or `TRIGGER` recipe (it starts a flow — add it unwired); `404` for an unknown recipe or canvas.
 
 ## Resource Commands
 

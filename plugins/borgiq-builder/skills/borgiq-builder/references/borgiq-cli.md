@@ -184,12 +184,12 @@ See [cli-command-reference.md#template-commands](cli/cli-command-reference.md#te
 
 ### Start from a recipe (a multi-actor starting point)
 
-A **recipe** is a saved starting point BorgIQ publishes: a single actor (e.g. an AI agent with its tools already attached), a whole flow (trigger → steps), or a flow segment (a trigger-less chain). Unlike a template it is **not versioned and not linked back** — once added, the actors are the user's and nothing updates them (a step inside that came from a template keeps its own `template` stamp). Prefer a recipe over hand-building when the user's ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"); prefer a template for one integration step you want to keep updatable.
+A **recipe** is a saved starting point BorgIQ publishes: a single task actor (`TASK`, e.g. an AI agent with its tools already attached), a single trigger (`TRIGGER`), a whole flow (`FLOW`, trigger → steps), or a flow segment (`SEGMENT`, a trigger-less chain). Unlike a template it is **not versioned and not linked back** — once added, the actors are the user's and nothing updates them (a step inside that came from a template keeps its own `template` stamp). Prefer a recipe over hand-building when the user's ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"); prefer a template for one integration step you want to keep updatable.
 
-Every recipe declares an **entry** actor (what an incoming edge attaches to) and an **exit** actor and port (what an outgoing edge leaves from), so it can be wired in after an actor or spliced into an edge — the whole recipe always lands. Its **settings** — connection groups (by connection type), credential groups (by key/type/source) and declared inputs — are the values the user is expected to set.
+Every recipe declares an **entry** actor (what an incoming edge attaches to) and an **exit** actor and port (what an outgoing edge leaves from), so a `TASK` or `SEGMENT` recipe can be wired in after an actor or spliced into an edge — the whole recipe always lands. `FLOW` and `TRIGGER` recipes start a flow, so they are added unwired; `--after` and `--into-edge` are refused for them. Its **settings** — connection groups (by connection type), credential groups (by key/type/source) and declared inputs — are the values the user is expected to set.
 
 ```bash
-# 1. Browse — by kind (ACTOR | FLOW | SEGMENT), app, or search
+# 1. Browse — by kind (TASK | TRIGGER | FLOW | SEGMENT), app, or search
 borgiq recipes list --kind SEGMENT --json
 borgiq recipes apps --json                                   # the apps that hold recipes
 borgiq recipes list --app-id TAPP01... --json
