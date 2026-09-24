@@ -1055,14 +1055,14 @@ borgiq recipes add RCPE01... --canvas <slug-or-id> [--x <n> --y <n>] \
 ```yaml
 # settings.yaml
 connections:
-  openai-bearer: openai-main               # one key for the whole group
-  slack-bearer|slack-oauth2:                # or per recipe-local actor id
-    ACTR01...: team-slack
+  slack-bearer|slack-oauth2: team-slack    # one key for the whole group
+  # slack-bearer|slack-oauth2:             # or per recipe-local actor id
+  #   ACTR01...: team-slack
 credentials:
-  apiKey|openai|secret: my-openai-key
+  apiKey|openai|secret: my-openai-key      # a recipe whose actors use configuration.credentials
 inputs:
   channel: '#triage'
-  model: gpt-4o
+  model: claude-haiku-4-5
 ```
 
 Response: `{ actorIds, entryActorId, exitActorId, edgeIds }`. Errors: `400` with `details` when a settings key names no connection/secret in the workspace, a group is not part of the recipe, `--after`/`--into-edge` names something not on the canvas, or `--after`/`--into-edge` is given for a `FLOW` or `TRIGGER` recipe (it starts a flow — add it unwired); `404` for an unknown recipe or canvas.
