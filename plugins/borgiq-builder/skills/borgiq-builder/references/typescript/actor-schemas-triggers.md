@@ -887,7 +887,7 @@ export type ScheduleConfig = z.infer<typeof ScheduleConfigSchema>;
  * and `schemas/runtime.ts` need it, and this module is downstream of neither — importing it from
  * `schemas/trigger.ts` would make those two modules circular and TDZ-crash at module init.
  */
-export const LIFECYCLE_TRIGGER_EVENTS = ['canvas-enabled', 'canvas-disabled'] as const;
+export const LIFECYCLE_TRIGGER_EVENTS = ['canvas-enabled', 'canvas-disabled', 'on-delete'] as const;
 
 export type LifecycleTriggerEvent = typeof LIFECYCLE_TRIGGER_EVENTS[number];
 
@@ -900,7 +900,24 @@ export type LifecycleTriggerEvent = typeof LIFECYCLE_TRIGGER_EVENTS[number];
 export const LIFECYCLE_TRIGGER_EVENT_META: Record<LifecycleTriggerEvent, { label: string; description: string }> = {
   'canvas-enabled': { label: 'Canvas enabled', description: 'Fired when the canvas is deployed.' },
   'canvas-disabled': { label: 'Canvas disabled', description: 'Fired when the canvas is undeployed.' },
+  'on-delete': {
+    label: 'On delete',
+    description: 'For unregistering anything you registered externally when this actor goes away. Not delivered automatically yet: run it by hand from the editor in a development workspace to test your handler. Delivery when a deployed canvas, its workspace or its organization is deleted is coming. It can arrive more than once, so make the handler idempotent.',
+  },
 };
+
+/**
+ * Which level an `on-delete` lifecycle event is about: the actor itself, or the canvas / workspace / org
+ * it lived in. One event with a scope, rather than an event per level, so an author subscribes once and
+ * branches. The event's shape is `FlowrunLifecycleTriggerDataSchema` in `schemas/runtime.ts`.
+ *
+ * TODO: only `'actor'` is sent today, by a hand-run test fire (`manual: true`) in a
+ * development workspace. `'canvas'`, `'workspace'` and `'org'` are reserved for automatic delivery on a
+ * deployed workspace, which arrives with the deploy flow.
+ */
+export const LIFECYCLE_DELETE_SCOPES = ['actor', 'canvas', 'workspace', 'org'] as const;
+
+export type LifecycleDeleteScope = typeof LIFECYCLE_DELETE_SCOPES[number];
 
 /**
  * STATIC lifecycle config — lives at `configuration.lifecycle`. Like schedule, lifecycle
