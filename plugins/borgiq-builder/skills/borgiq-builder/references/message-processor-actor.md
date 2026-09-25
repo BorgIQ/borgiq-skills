@@ -380,7 +380,7 @@ Waits for and joins results from multiple parallel paths. Requires `enableSTM: t
 |--------|------|----------|-------------|
 | `action` | `"forkJoin"` | Yes | Must be `forkJoin` |
 | `forkId` | string | Yes | The `forkId` from upstream fork actor |
-| `size` | number | Yes | Number of parallel paths to wait for |
+| `size` | number | Yes | Number of distinct upstream actors to wait for. The editor fills in `${{ ctx.actor.upstreamActorCount }}`; YAML must set it explicitly |
 
 **Example:**
 ```yaml
@@ -388,8 +388,10 @@ configuration:
   options:
     action: forkJoin
     forkId: ${{ msg.fork_point.forkId }}
-    size: 3
+    size: ${{ ctx.actor.upstreamActorCount }}
 ```
+
+**Choosing `size`:** `forkJoin` emits once `size` distinct actors have sent it a message with the same `forkId`, so `size` must be the number of connected actors that will actually send one. `ctx.actor.upstreamActorCount` is the number of distinct actors with an edge into the `forkJoin` actor: an actor with several edges into it counts once, and disabled actors don't count. That is right for the basic shape `fork` → N parallel actors → `forkJoin`. Set a number instead when some connected actor won't send a message for that `forkId`, such as a path that can filter its message out or route it to another port, or an actor wired into the join from outside the fork. A `size` larger than the number of actors that send one means the join never emits.
 
 **Emitted Message:** Object with keys for each source actor's `msgVar`, containing their outputs.
 
@@ -478,7 +480,7 @@ ACTR01join:
     options:
       action: forkJoin
       forkId: ${{ msg.fork_requests.forkId }}
-      size: 2
+      size: ${{ ctx.actor.upstreamActorCount }}  # 2: bundle_path_a and bundle_path_b
 
 # Now you can access all bundled data
 ACTR01downstream:
@@ -528,7 +530,7 @@ ACTR01join:
     options:
       action: forkJoin
       forkId: ${{ msg.fork_requests.forkId }}
-      size: 2
+      size: ${{ ctx.actor.upstreamActorCount }}  # 2: actor_a and actor_b
 
 # Downstream actor accessing joined results
 ACTR01downstream:
