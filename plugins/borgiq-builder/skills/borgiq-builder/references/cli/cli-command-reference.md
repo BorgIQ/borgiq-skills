@@ -1002,7 +1002,7 @@ borgiq templates apps --category-id TCAT01kd6gqghj04j8765nnqyp09a --json
 
 ## Recipe Commands
 
-Recipes are saved, unversioned starting points (an actor, a flow, a segment) that the API adds to a canvas whole. See [borgiq-cli.md — Start from a recipe](../borgiq-cli.md#start-from-a-recipe-a-multi-actor-starting-point) for when to use one. Requires `@borgiq/cli` >= 0.12.0.
+Recipes are saved, unversioned starting points (a task actor, a trigger, a flow or a flow segment) that the API adds to a canvas whole. See [borgiq-cli.md — Start from a recipe](../borgiq-cli.md#start-from-a-recipe-a-multi-actor-starting-point) for when to use one. Requires `@borgiq/cli` >= 0.13.0.
 
 ### `borgiq recipes list`
 
@@ -1011,11 +1011,12 @@ Browse or search recipes for the current workspace. Searches name, description a
 ```bash
 borgiq recipes list --json
 borgiq recipes list --search slack --json
-borgiq recipes list --kind FLOW --kind SEGMENT --json      # repeatable: TASK, TRIGGER, FLOW, SEGMENT
+borgiq recipes list --kind FLOW --kind SEGMENT --json      # repeatable, any case: TASK, TRIGGER, FLOW, SEGMENT
 borgiq recipes list --app-id TAPP01... --json
+borgiq recipes list --has-entry --has-exit --json           # --no-has-entry / --no-has-exit for the opposite
 ```
 
-Envelope `{ total, data }`; each item is metadata only — `id`, `kind`, `name`, `description`, `actorCount`, `apps` (a recipe can list under several), `settingsCount` (`connections`, `credentials`, `inputs`) and tags. Paginates with `--page` / `--page-size`.
+Envelope `{ total, data }`; each item is metadata only — `id`, `kind`, `name`, `description`, `actorCount`, `apps` (a recipe can list under several), `settingsCount` (`connections`, `credentials`, `inputs`), `entry` and `exit` (each `null` when the recipe has none) and tags; the table shows them as a WIRING column (`in→out`, `in`, `out`, `—`). The kinds are checked by the API, which answers an unknown one with a `400`. Paginates with `--page` / `--page-size`.
 
 ### `borgiq recipes get`
 
@@ -1025,7 +1026,7 @@ The full recipe: `data.actors` (the `ExportedCanvasData` map), `entry`, `exit`, 
 borgiq recipes get RCPE01... --json | jq '{entry, exit, settings}'
 ```
 
-`settings.connections[]` is `{ type, label?, actorIds }`, `settings.credentials[]` is `{ key, type?, source, label?, actorIds }`, `settings.inputs[]` is `{ key, label, type, required?, default?, targets }`. The `actorIds` are recipe-local — use them in a per-actor settings map.
+`settings.connections[]` is `{ type, label?, actorIds, groupKey }`, `settings.credentials[]` is `{ key, type?, source, label?, actorIds, groupKey }`, `settings.inputs[]` is `{ key, label, type, required?, default?, targets }`. `groupKey` is the group's key in the `--settings` file; the `actorIds` are recipe-local — use them in a per-actor settings map. `entry` / `exit` are `null` when the recipe has none. On a terminal without `--json`, a short summary of those keys follows on stderr.
 
 ### `borgiq recipes apps`
 
@@ -1047,10 +1048,10 @@ borgiq recipes add RCPE01... --canvas <slug-or-id> [--x <n> --y <n>] \
 | Flag | Meaning |
 |---|---|
 | `--canvas` | required; the canvas to add to |
-| `--x` / `--y` | where the entry actor lands (flow coordinates); default: below the canvas's lowest actor |
-| `--after` | wire that actor's source port (default `SPRTdefault`) to the recipe's entry (`TASK` and `SEGMENT` recipes only) |
-| `--into-edge` | splice into an edge: its source feeds the entry, the exit feeds the edge's old target (`TASK` and `SEGMENT` recipes only) |
-| `--settings` | JSON/YAML object of values, keyed as `recipes get` shows the groups (see below); `-` reads stdin |
+| `--x` / `--y` | where the entry actor (or, with no entry, the top-left actor) lands, in flow coordinates; default: the whole recipe below the canvas's lowest actor |
+| `--after` | wire that actor's source port — its first unless `:portId` names one — to the recipe's entry (a `TASK` or `SEGMENT` with an entry) |
+| `--into-edge` | splice into an edge: its source feeds the entry, the exit feeds the edge's old target (a `TASK` or `SEGMENT` with an entry and an exit) |
+| `--settings` | JSON/YAML object of values: groups by the `groupKey` `recipes get` prints, inputs by key (see below); `-` reads stdin |
 
 ```yaml
 # settings.yaml
@@ -1059,13 +1060,13 @@ connections:
   # slack-bearer|slack-oauth2:             # or per recipe-local actor id
   #   ACTR01...: team-slack
 credentials:
-  apiKey|openai|secret: my-openai-key      # a recipe whose actors use configuration.credentials
+  apiKey||secret: my-api-key               # a recipe whose actors use configuration.credentials
 inputs:
   channel: '#triage'
   model: claude-haiku-4-5
 ```
 
-Response: `{ actorIds, entryActorId, exitActorId, edgeIds }`. Errors: `400` with `details` when a settings key names no connection/secret in the workspace, a group is not part of the recipe, `--after`/`--into-edge` names something not on the canvas, or `--after`/`--into-edge` is given for a `FLOW` or `TRIGGER` recipe (it starts a flow — add it unwired); `404` for an unknown recipe or canvas.
+Response: `{ actorIds, entryActorId, exitActorId, edgeIds }` (the two ids `null` when the recipe has no entry or exit). Nothing is added unless every check passes. Errors: `400` with `details` when a settings key names no connection/secret in the workspace or a connection of the wrong type, a group or input is not part of the recipe, a per-actor map names an actor outside its group, a value does not read as its input's type, a required input has neither a value nor a default, `--after`/`--into-edge` names something not on the canvas, or the recipe cannot be wired that way (a `FLOW` or `TRIGGER` starts a flow; a recipe without an entry takes neither flag; `--into-edge` also needs an exit); `403` when the recipe holds an actor type the organization is not allowed (e.g. `PythonActor` outside a privileged organization); `409` when the actor it is wired to changed or was removed while it was being added — nothing was added, re-read and retry; `404` for an unknown recipe or canvas.
 
 ## Resource Commands
 
