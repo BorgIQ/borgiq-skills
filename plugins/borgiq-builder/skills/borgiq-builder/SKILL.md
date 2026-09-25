@@ -183,6 +183,8 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 > ```
 >
 > In a bundle, write the `templates get` actor payload (already ExportedCanvasActor object shape) as `actor.yaml`, apply the [template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation) (fresh actor ID and trigger keys, keep `template` provenance), and complete the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). `scaffold actor-from-template` produces the YAML-string CanvasActor mutation shape for the direct/batch fallback and performs those fixups automatically. Full flow: [Deploying and Testing with the CLI](#deploying-and-testing-with-the-cli).
+>
+> **Multi-actor patterns have recipes.** When the ask is a whole flow or a chain of steps ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"), check `borgiq recipes list --json` before composing actors by hand: `borgiq recipes add <id> --canvas <canvas> [--after <actorId>] --settings <file>` lands the whole recipe with fresh ids, wired in, with the user's connections and inputs applied. Recipes are not versioned and not linked back — the actors are ordinary canvas actors afterwards. See [Start from a recipe](references/borgiq-cli.md#start-from-a-recipe-a-multi-actor-starting-point).
 
 ### Choosing a Task Actor Type
 
@@ -832,6 +834,8 @@ borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cl
    borgiq templates list --search slack --type TASK --json
    borgiq templates apps --search slack --json                     # discover app ids
    borgiq templates list --app-id TAPP01... --page 2 --json        # filter + paginate
+   borgiq recipes list --kind FLOW --json                          # multi-actor starting points (recipes)
+   borgiq recipes get RCPE01... --json                             # what a recipe asks for (settings), entry/exit
    borgiq templates get TMPL01... --json                           # fetch full actor payload
    ```
    The template's `actor` payload is in ExportedCanvasActor object shape. In a bundle, write it as `actor.yaml` with fresh IDs/trigger keys and the `template` provenance block per [the template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation), then follow the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). For the direct fallback (`canvas-actors create` / `batch`), convert it to the CanvasActor YAML-string shape with `borgiq scaffold actor-from-template` (which performs those fixups automatically):

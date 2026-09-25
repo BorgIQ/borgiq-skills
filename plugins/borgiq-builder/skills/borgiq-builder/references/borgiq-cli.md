@@ -182,6 +182,35 @@ For batch mode: pipe the converter through `--batch` to emit the operations enve
 
 See [cli-command-reference.md#template-commands](cli/cli-command-reference.md#template-commands) for the full flag list and example outputs.
 
+### Start from a recipe (a multi-actor starting point)
+
+A **recipe** is a saved starting point BorgIQ publishes: a single task actor (`TASK`, e.g. an AI agent with its tools already attached), a single trigger (`TRIGGER`), a whole flow (`FLOW`, trigger → steps), or a flow segment (`SEGMENT`, a trigger-less chain). Unlike a template it is **not versioned and not linked back** — once added, the actors are the user's and nothing updates them (a step inside that came from a template keeps its own `template` stamp). Prefer a recipe over hand-building when the user's ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"); prefer a template for one integration step you want to keep updatable.
+
+A recipe's **entry** is the actor an incoming edge attaches to, its **exit** the actor and port an outgoing edge leaves from; either is `null` when the recipe has none. `FLOW` and `SEGMENT` recipes always have both; a `TASK` or `TRIGGER` has only what its actor has — a trigger never has an entry, a webhook trigger has an exit, an MCP server (a `TRIGGER` with its tools) has neither. That decides the wiring: `--after` takes a `TASK` or `SEGMENT` with an entry, `--into-edge` one that also has an exit, and a `FLOW` or `TRIGGER` is always added unwired (the API refuses the rest with a `400`). The whole recipe always lands. Its **settings** — connection groups (by connection type), credential groups (by key/type/source) and declared inputs — are the values the user is expected to set.
+
+```bash
+# 1. Browse — by kind (TASK | TRIGGER | FLOW | SEGMENT), app, wiring, or search
+borgiq recipes list --kind SEGMENT --json
+borgiq recipes list --kind TASK --has-entry --json          # what can be wired in after an actor
+borgiq recipes apps --json                                   # the apps that hold recipes
+borgiq recipes list --app-id TAPP01... --json
+
+# 2. Read what it asks for: settings.connections / credentials (each with its groupKey) / inputs, plus entry and exit
+borgiq recipes get RCPE01... --json | jq '{name, kind, entry, exit, settings}'
+
+# 3. Add it — the API instantiates it (fresh ids, settings applied, webhook keys minted, wired in)
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --after ACTR01... --settings settings.yaml --json   # from its first output port
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --after ACTR01...:SPRTdone000 --json                # or from the one you name
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --into-edge EDGE01... --json
+borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --x 0 --y 800 --json   # unwired, at a position
+```
+
+The `--settings` file keys each connection and credential group by the `groupKey` that `recipes get` prints on it (e.g. `slack-bearer|slack-oauth2`, `apiKey||secret`), and inputs by their `key`. A group takes one workspace key for every actor in it, or `{ <recipe actor id>: <key> }` to choose per actor (only actors of that group). The API checks everything before adding anything: keys must exist in the workspace (`borgiq connections list`, `borgiq secrets list`) and a connection must be of its group's type; a value must read as its input's type (`abc` is not a number, `yes` is not a boolean, JSON must parse); an input left out takes its default, and a required input without one must be given. Groups left out stay unset — set them with `canvas-actors update` afterwards. `add` returns `{ actorIds, entryActorId, exitActorId, edgeIds }` (the two ids are `null` for a recipe without an entry or exit); the new actors are ordinary canvas actors from then on.
+
+Do **not** reimplement instantiation from `recipes get` + `canvas-actors batch`: id rewriting inside code and configuration, message-variable collision handling and webhook key minting are the API's job (the thin-client rule).
+
+See [cli-command-reference.md#recipe-commands](cli/cli-command-reference.md#recipe-commands) for the flags.
+
 ---
 
 ## Step 3: Discover Workspace Resources
