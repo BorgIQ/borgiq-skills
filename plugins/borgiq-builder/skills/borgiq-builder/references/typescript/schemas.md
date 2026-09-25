@@ -2549,7 +2549,7 @@ import { z } from 'zod';
 
 import { BIQRuntimeInvocationType } from '../runtime.js';
 
-import { WebhookConfigSchema, ScheduleConfigSchema, LifecycleConfigSchema, LIFECYCLE_TRIGGER_EVENTS } from '../actorSchemas/trigger/triggerConfig.js';
+import { WebhookConfigSchema, ScheduleConfigSchema, LifecycleConfigSchema, LIFECYCLE_TRIGGER_EVENTS, LIFECYCLE_DELETE_SCOPES } from '../actorSchemas/trigger/triggerConfig.js';
 import { CodeDirSchema } from '../actorSchemas/codeDir.js';
 
 import { BIQFileSchema } from './file.js';
@@ -2682,13 +2682,29 @@ export type FlowrunInterfaceTriggerData = z.infer<typeof FlowrunInterfaceTrigger
  * Information about a lifecycle trigger request. Byte-identical to the
  * `lifecycle` TriggerEvent variant delivered to user code — the explicit `type` discriminator is
  * what lets the payload-sniffing mirrors recognise it before falling through to `manual`.
+ *
+ * `on-delete` always says what was deleted: `scope` is the level (the actor itself, or the canvas /
+ * workspace / org it lived in) and `subject.id` that resource's id. `manual` marks a fire made by hand
+ * in a development workspace, where nothing was actually deleted. The other events carry nothing more.
  */
-export const FlowrunLifecycleTriggerDataSchema = z.object({
-  type: z.literal('lifecycle'),
-  event: z.enum(LIFECYCLE_TRIGGER_EVENTS),
-});
+export const FlowrunLifecycleTriggerDataSchema = z.discriminatedUnion('event', [
+  z.object({
+    type: z.literal('lifecycle'),
+    event: z.enum(LIFECYCLE_TRIGGER_EVENTS).exclude(['on-delete']),
+  }),
+  z.object({
+    type: z.literal('lifecycle'),
+    event: z.literal('on-delete'),
+    scope: z.enum(LIFECYCLE_DELETE_SCOPES),
+    subject: z.object({ id: z.string() }),
+    manual: z.literal(true).optional(),
+  }),
+]);
 
 export type FlowrunLifecycleTriggerData = z.infer<typeof FlowrunLifecycleTriggerDataSchema>;
+
+/** The `on-delete` member of {@link FlowrunLifecycleTriggerData}. */
+export type FlowrunLifecycleDeleteTriggerData = Extract<FlowrunLifecycleTriggerData, { event: 'on-delete' }>;
 
 /** Information about the manual trigger request. */
 export const FlowrunManualTriggerDataSchema = z.object({
@@ -3456,9 +3472,7 @@ export type RuntimeSignal = z.infer<typeof RuntimeSignalSchema>;
 ```typescript
 import { z } from 'zod';
 
-import { LIFECYCLE_TRIGGER_EVENTS } from '../actorSchemas/trigger/triggerConfig.js';
-
-import { FlowrunWebhookTriggerRequestSchema } from './runtime.js';
+import { FlowrunLifecycleTriggerDataSchema, FlowrunWebhookTriggerRequestSchema } from './runtime.js';
 
 const TriggerUserSchema = z.object({
   id: z.string(),
@@ -3494,8 +3508,9 @@ const TriggerUserSchema = z.object({
  * - 'manual'    — the user clicked Invoke in the canvas
  * - 'lifecycle' — a canvas or actor lifecycle transition; `event` names the transition. Delivered only to
  *                 UniversalTriggerActors that listed it in `configuration.lifecycle.events`.
- *                 The vocabulary grows by extending {@link LIFECYCLE_TRIGGER_EVENTS}, never by
- *                 adding union members, so runtime dispatch branches once on `type`.
+ *                 The vocabulary grows by extending `LIFECYCLE_TRIGGER_EVENTS`, never by
+ *                 adding union members, so runtime dispatch branches once on `type`. `on-delete`
+ *                 also carries `scope`, `subject` and (on a hand-run test fire) `manual`.
  */
 export const TriggerEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('webhook'), user: TriggerUserSchema.optional(), request: FlowrunWebhookTriggerRequestSchema }),
@@ -3515,7 +3530,7 @@ export const TriggerEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('button') }),
   z.object({ type: z.literal('mcpServer') }),
   z.object({ type: z.literal('manual') }),
-  z.object({ type: z.literal('lifecycle'), event: z.enum(LIFECYCLE_TRIGGER_EVENTS) }),
+  FlowrunLifecycleTriggerDataSchema,
 ]);
 
 export type TriggerEvent = z.infer<typeof TriggerEventSchema>;

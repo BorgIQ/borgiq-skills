@@ -14,6 +14,7 @@ The UniversalTriggerActor is a programmable trigger: user-supplied TypeScript ru
 - [Code Template](#code-template)
 - [Emitted Message](#emitted-message)
 - [Responding to Webhook Firings](#responding-to-webhook-firings)
+- [Cleaning Up on Delete](#cleaning-up-on-delete)
 - [Memory](#memory)
 - [Common Mistakes](#common-mistakes)
 - [Quick Example](#quick-example)
@@ -26,7 +27,7 @@ A single UniversalTriggerActor can fire four ways:
 |---|---|---|
 | **Webhook** | `configuration.webhook.enabled: true` | `{ type: 'webhook', user?, request }` — `request` is the parsed inbound HTTP request (`meta`, `method`, `headers`, `body`, `queryParams`, `rawBody?`); `user` is the authenticated caller (`{ id, name?, email }`) when the call carried an app token (e.g. a React app calling one of its declared endpoints) or an API key (the key's owner; `request.meta.auth = { type: 'apiToken', keyId, keyName }` names the key). The same user is on `request.meta.user` |
 | **Schedule** | `configuration.schedule.enabled: true` | `{ type: 'schedule', triggeredAt, lastTriggeredAt? }` |
-| **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }` — `event` is the lifecycle transition: `'canvas-enabled'` or `'canvas-disabled'` |
+| **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }` — `event` is the lifecycle transition: `'on-delete'` (today fired only by hand — see [Cleaning Up on Delete](#cleaning-up-on-delete)), or `'canvas-enabled'` / `'canvas-disabled'` (reserved, not delivered yet). An `'on-delete'` always also carries `scope` and `subject`, plus `manual: true` on a hand-run test fire |
 | **Manual** | Always available (canvas Invoke) | `{ type: 'manual' }` |
 
 When `webhook.enabled` is false the webhook URL returns 404 and no flowruns are created; when `schedule.enabled` is false no cron job is registered; an actor receives a lifecycle event only when that event is listed in `lifecycle.events` — an absent section, an absent `events`, and an empty `events` all mean unsubscribed.
@@ -76,8 +77,9 @@ actors:
       # STATIC lifecycle source config — admission-consumed, never interpolated
       lifecycle:
         events:
-          - canvas-enabled
-          - canvas-disabled
+          - canvas-enabled    # reserved, not delivered yet
+          - canvas-disabled   # reserved, not delivered yet
+          - on-delete         # fired by hand only, for now (see Cleaning Up on Delete)
       options:
         # --- Deno runtime options (root) — identical to DenoActor ---
         allowNet: true
@@ -143,7 +145,7 @@ borgiq generate id webhooktriggerkey
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `events` | string[] | `[]` | The lifecycle events this actor is subscribed to — any of `'canvas-enabled'`, `'canvas-disabled'`. The actor receives `{ type: 'lifecycle', event }` only for events in this list; an empty or absent list means it receives none. |
+| `events` | string[] | `[]` | The lifecycle events this actor is subscribed to — any of `'on-delete'` (unregister what the actor registered externally when it goes away; today fired only by hand — see [Cleaning Up on Delete](#cleaning-up-on-delete)), `'canvas-enabled'`, `'canvas-disabled'` (both reserved: accepted in the list, but not delivered yet). The actor receives `{ type: 'lifecycle', event }` only for events in this list; an empty or absent list means it receives none. |
 
 Subscription is per event rather than a single on/off flag because the event vocabulary grows over time — a flag would silently opt an existing trigger into events its code was never written to handle.
 
@@ -227,7 +229,8 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
   //             req.trigger.user is the authenticated caller when the call carried an app token or an API key
   //             (req.trigger.request.meta.auth names the key on API-key calls)
   // - schedule: req.trigger.triggeredAt is this fire; req.trigger.lastTriggeredAt is the previous fire (if tracked)
-  // - lifecycle: req.trigger.event is the lifecycle transition ('canvas-enabled' | 'canvas-disabled')
+  // - lifecycle: req.trigger.event is the lifecycle transition ('canvas-enabled' | 'canvas-disabled' | 'on-delete');
+  //             an 'on-delete' also carries req.trigger.scope, req.trigger.subject and (on a hand-run test fire) req.trigger.manual
   // - manual:   no extra fields
   switch (req.trigger.type) {
     case "webhook":
@@ -246,7 +249,15 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
       };
     }
     case "lifecycle":
-      // req.trigger.event is 'canvas-enabled' | 'canvas-disabled'
+      // req.trigger.event is 'canvas-enabled' | 'canvas-disabled' | 'on-delete'. Only 'on-delete' is
+      // delivered today, and only as a hand-run test fire; the other two are reserved. On 'on-delete',
+      // unregister anything this trigger registered externally — idempotently, since delivery will be
+      // at-least-once — and treat a test fire (req.trigger.manual) as a dry run.
+      // See "Cleaning Up on Delete" below.
+      if (req.trigger.event === "on-delete") {
+        const { scope, subject, manual } = req.trigger;
+        return { results: { source: "lifecycle", event: req.trigger.event, scope, subject, dryRun: manual === true }, memory: req.memory };
+      }
       return { results: { source: "lifecycle", event: req.trigger.event }, memory: req.memory };
     case "manual":
       return { results: { source: "manual" }, memory: req.memory };
@@ -293,6 +304,106 @@ return {
 
 Guard signal use by firing type — `Signal.webhookRespond` only makes sense when `req.trigger.type === 'webhook'`.
 
+## Cleaning Up on Delete
+
+Subscribe to `on-delete` when the trigger registers something **outside** BorgIQ — a webhook at a third-party API, a push subscription, a watch channel. The event is the actor's chance to unregister it when the actor goes away, so the external service is not left calling a URL that no longer exists.
+
+> **Automatic delivery is not available yet.** Today `on-delete` is delivered only when you fire it by hand from the editor to test the handler. Deleting a canvas, a workspace or an organization, or deploying a canvas without the actor, does **not** fire it yet; that comes with a later platform release. Write the handler now so it is ready, but until then remove external registrations yourself before deleting a canvas that created them.
+
+```yaml
+configuration:
+  lifecycle:
+    events:
+      - on-delete
+```
+
+The event arrives as `{ type: 'lifecycle', event: 'on-delete', scope, subject, manual? }`:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `scope` | `'actor'` \| `'canvas'` \| `'workspace'` \| `'org'` | Which level was deleted. Always present. Only `'actor'` is sent today; the others are reserved for automatic delivery |
+| `subject` | `{ id }` | The deleted resource: the id of the actor, canvas, workspace or organization that `scope` names. Always present |
+| `manual` | `true` | Set only on a test fire run by hand in a development workspace, where nothing was actually deleted — treat it as a dry run. Absent on automatic deliveries |
+
+**When it is delivered:**
+
+| When | Available | `scope` / `subject` | `manual` |
+|---|---|---|---|
+| By hand — **Run onDelete** on the trigger's node in the canvas editor, in a development workspace | **Now** — the only delivery today | `'actor'` / `{ id: <this actor's id> }` | `true` |
+| A deployed canvas, its workspace or its organization is deleted | Not yet — coming in a later platform release | `'canvas'`, `'workspace'` or `'org'` / that resource | absent |
+| A deploy removes the actor from its canvas | Not yet — coming in a later platform release | `'actor'` / the removed actor | absent |
+
+Only an **active** Universal Trigger that lists `on-delete` in `configuration.lifecycle.events` can be fired by hand. A deployed workspace refuses the hand fire: it would run the production handler for a delete that never happened.
+
+**Writing the handler:**
+
+- **Make it idempotent.** Delivery will be at-least-once, so the same event can arrive more than once — and a hand run can be repeated. Record what the handler has released, and treat "already gone" (e.g. a `404` from the remote API) as success.
+- **Treat `manual: true` as a dry run, and decide that from `manual`, never from `scope`.** A hand-run test fire deleted nothing, so report what the handler would release and change nothing. `scope: 'actor'` does not mean "hand run": a deploy that removes the actor will send it too, without `manual`, and that removal is real.
+- **Keep it short, and not the only safeguard.** Prefer external registrations that expire on their own where the API offers that.
+- **It runs like any other fire.** Configuration, connections, secrets and long-term memory are available, so ids saved in LTM at registration time and the credentials for the remote API are there to use.
+
+**Idempotent handler** — the registration id was saved to LTM when the webhook was created (requires `enableLTM: true`). A hand-run test fire only reports what it would release, so testing never unregisters a hook the development canvas still uses:
+
+```typescript
+import type { TriggerRequest, Response } from "@borgiq/actors";
+
+export default async function receive(req: TriggerRequest): Promise<Response> {
+  if (req.trigger.type !== "lifecycle" || req.trigger.event !== "on-delete") {
+    return { results: undefined, memory: req.memory };
+  }
+
+  const { scope, subject } = req.trigger;
+  const hookId = (req.memory.ltm.hookId as string) ?? null;
+
+  // A hand-run test fire ("Run onDelete") deleted nothing — a dry run: report what WOULD be released and keep it.
+  // Check `manual`, not `scope`: a deploy that removes the actor also sends scope 'actor'.
+  if (req.trigger.manual) {
+    return { results: { dryRun: true, scope, subject, wouldRelease: hookId }, memory: req.memory };
+  }
+
+  // Already released by an earlier delivery — nothing to do.
+  if (!hookId) {
+    return { results: { released: null, scope, subject }, memory: req.memory };
+  }
+
+  const res = await fetch(`https://api.example.com/hooks/${hookId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${req.credentials.accessToken}` },
+  });
+  // 404 means an earlier delivery (or someone else) already removed it — success, not an error.
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Failed to remove hook ${hookId}: ${res.status}`);
+  }
+
+  return {
+    results: { released: hookId, scope, subject },
+    memory: { stm: req.memory.stm, ltm: { ...req.memory.ltm, hookId: null } },
+  };
+}
+```
+
+Once automatic delivery arrives, `scope` says which level was deleted. Branch on it only when the cleanup differs by level — for example, removing a single webhook when the actor or its canvas goes away but revoking an account-wide subscription when the whole organization is deleted. Handle `manual` first, and give the `switch` a `default:` that fails the run, so a scope added in a later release is never silently skipped:
+
+```typescript
+if (req.trigger.manual) {
+  // hand-run test fire — nothing was deleted
+  return { results: { dryRun: true, wouldRelease: hookId }, memory: req.memory };
+}
+switch (req.trigger.scope) {
+  case "actor": // a deploy removed this actor from its canvas
+  case "canvas":
+  case "workspace":
+    await removeWebhook(hookId);
+    break;
+  case "org":
+    await revokeAllSubscriptions();
+    break;
+  default:
+    // a scope this code predates: fail loudly rather than skip the cleanup
+    throw new Error(`Unhandled on-delete scope: ${req.trigger.scope}`);
+}
+```
+
 ## Memory
 
 Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on the user's behalf. Notably, `lastTriggeredAt` is **not** tracked automatically: persist it yourself via `req.memory.ltm` → `Response.memory` (as in the [Code Template](#code-template)) after enabling LTM in advanced settings. The value-in/value-out rules are the DenoActor's (see [deno-actor.md → Memory Types](deno-actor.md#memory-types)): the returned `memory` **replaces** the stored value, so spread the previous object to avoid dropping keys.
@@ -305,6 +416,9 @@ Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on
 4. **Typing the entry point as `Request`** — use `TriggerRequest`, otherwise `req.trigger` is not typed.
 5. **Missing `triggerKey` with `webhook.enabled: true`** — the webhook URL will not work without it.
 6. **Returning partial `memory`** — `Response.memory` replaces the stored value; spread `req.memory.stm` / `req.memory.ltm` to keep existing keys.
+7. **A non-idempotent `on-delete` handler** — delivery will be at-least-once, and a hand run can be repeated. Treat "already removed" on the remote side as success and clear the saved id from LTM once released.
+8. **Relying on `on-delete` to clean up today** — nothing fires it automatically yet, in any workspace: deleting a canvas, a workspace or an organization, or deploying a canvas without the actor, does not run it (that comes with a later platform release). Test the handler by hand with **Run onDelete** in a development workspace — the run carries `manual: true` and `scope: 'actor'`, and nothing is deleted — and remove external registrations yourself before deleting until then.
+9. **Treating `scope: 'actor'` as a hand run** — check `manual`. A deploy that removes the actor will also send `scope: 'actor'`, without `manual`, and that removal is real.
 
 ## Quick Example
 
