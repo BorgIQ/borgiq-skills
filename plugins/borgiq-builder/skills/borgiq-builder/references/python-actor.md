@@ -392,7 +392,7 @@ def receive(req: Request) -> Response:
     # req.inputs                       — interpolated inputs for this invocation
     # req.ctx                          — RuntimeContext (org / workspace / canvas / flowrun / actor)
     # req.connection                   — the single connection's resolved config (read-only)
-    # req.credentials['XXXX']          — resolved secret values (read-only)
+    # req.credentials['XXXX']          — secret values; placeholders when Server-side (read-only)
     # req.memory['stm'] / req.memory['ltm']  — short / long term memory (value-in)
     # biq_api(path, **kwargs)          — request wrapper for the BIQ Runtime API
     # mount_file(file) / stash_file(file, filename=None, mime_type=None)
@@ -438,7 +438,7 @@ class Request:
     inputs: Dict[str, Any]          # interpolated inputs for this invocation (read-only)
     ctx: RuntimeContext             # org / workspace / canvas / flowrun / actor metadata
     connection: Dict[str, Any]      # the single connection's resolved config (read-only)
-    credentials: Dict[str, str]     # resolved secret values, keyed by name (read-only)
+    credentials: Dict[str, str]     # secret values keyed by name; placeholders when Server-side (read-only)
     memory: Dict[str, Any]          # {"stm": {...}, "ltm": {...}} (value-in)
 
 class Response:
@@ -654,8 +654,8 @@ def receive(req: Request) -> Response:
 | `/assets` | POST | Create a new asset |
 | `/assets/{key}` | PUT | Update an asset |
 | `/assets/{key}` | DELETE | Delete an asset |
-| `/secrets` | GET | Get decrypted secrets |
-| `/connections/{key}` | GET | Get decrypted connection credentials |
+| `/secrets` | GET | Get secrets — decrypted when Sent to runtime, a proxy placeholder when Server-side |
+| `/connections/{key}` | GET | Get connection credentials — sensitive fields are proxy placeholders when Server-side |
 | `/publicKey` | GET | Get workspace public key (for encrypting sensitive data) |
 | `/sendEmail` | POST | Send an email |
 | `/interfaces/status` | PUT | Update interface status display |
@@ -781,7 +781,9 @@ return Response(error={'message': 'Upstream service unavailable', 'retryable': T
 **Key rule:** An actor can have **only ONE connection**, but **multiple secrets (credentials)**. Use `req.connection` for the single app/auth source; use `req.credentials` for individual secret values.
 
 - `req.connection` — the single connection's resolved config (e.g. OAuth tokens at `req.connection['auth']['values']['token']`).
-- `req.credentials` — a map of secret name → resolved string value (`req.credentials['MY_SECRET']`).
+- `req.credentials` — a map of secret name → string value (`req.credentials['MY_SECRET']`).
+
+For a **Server-side** secret or connection (the default), those values are proxy placeholders, not the real credentials — see [Server-side vs Sent to runtime](#server-side-vs-sent-to-runtime).
 
 ### Accessing Connection Auth
 
@@ -798,12 +800,12 @@ response = requests.get(
 
 ### Accessing Credentials (Secrets)
 
-Credentials are resolved secret values, keyed by name:
+Credentials are keyed by name:
 
 ```python
-api_key = req.credentials.get('OPENAI_API_KEY')
-mongo_user = req.credentials.get('MONGO_USERNAME')
-mongo_pass = req.credentials.get('MONGO_PASSWORD')
+api_key = req.credentials.get('OPENAI_API_KEY')     # Server-side: a placeholder, fine in an HTTPS header
+mongo_user = req.credentials.get('MONGO_USERNAME')  # Sent to runtime: a database driver
+mongo_pass = req.credentials.get('MONGO_PASSWORD')  # needs the real value
 ```
 
 Reference them in the actor configuration with `${{ credentials.NAME }}`:
@@ -813,6 +815,19 @@ configuration:
   inputs:
     apiKey: ${{ credentials.OPENAI_API_KEY }}
 ```
+
+### Server-side vs Sent to runtime
+
+Every secret and connection has an **exposure mode**. The UI names it one way and the API and CLI another:
+
+| UI label | `exposureMode` (API / CLI) | What the code receives |
+|---|---|---|
+| **Server-side** (recommended, the default) | `httpOnly` | A placeholder such as `BORGIQ_CREDENTIAL_OPENAI_API_KEY_<hash>`, never the real value |
+| **Sent to runtime** | `exposed` | The decrypted value |
+
+A Server-side placeholder works only inside an outbound **HTTPS** request: the BorgIQ proxy swaps in the real value where the placeholder appears in the URL, a header or a text body. It is not substituted in a plain `http://` request or a binary body, and anything else the code does with it — hashing, signing, a database driver, a non-HTTP SDK — gets the placeholder string. The same holds for a connection's sensitive fields under `req.connection['auth']['values']`. A Server-side credential can also be limited to a list of URLs (`allowedUrls`); the proxy refuses a request that uses it anywhere else.
+
+Choose **Sent to runtime** only when the code needs the raw value (signing or encrypting with a key, a database password, a non-HTTP protocol). Set it in the *Exposure mode* field in the UI, or with `--exposure-mode exposed` on `borgiq secrets create` / `borgiq connections create`.
 
 ## Signals
 
