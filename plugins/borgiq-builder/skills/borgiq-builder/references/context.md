@@ -145,7 +145,7 @@ The trigger event for the current firing — a discriminated union keyed by `tri
 | `schedule` | `triggeredAt` (this fire, ISO timestamp), `lastTriggeredAt?` (previous fire, if tracked) |
 | `interface` | `user?` `{ id, name?, email }`; `submission?` `{ interfaceId, body }` — present on form post, absent on initial render |
 | `app` | `user?` `{ id, name?, email }` |
-| `lifecycle` | `event` — the lifecycle transition: `'canvas-enabled'` or `'canvas-disabled'` |
+| `lifecycle` | `event` — the lifecycle transition: `'on-delete'`, or `'canvas-enabled'` / `'canvas-disabled'` (reserved, not delivered yet). An `'on-delete'` also always carries `scope` (`'actor'` \| `'canvas'` \| `'workspace'` \| `'org'` — which level was deleted; only `'actor'` is sent today, by a hand-run test fire, and the others are reserved for automatic delivery, which is not available yet) and `subject` `{ id }` (that resource), plus `manual: true` on a test fire run by hand in a development workspace (nothing was deleted — treat it as a dry run) — see [universal-trigger-actor.md → Cleaning Up on Delete](universal-trigger-actor.md#cleaning-up-on-delete) |
 | `callable`, `email`, `button`, `mcpServer`, `manual` | none |
 
 > **Migration:** the old top-level `request` variable was removed. Rewrite `${{ request.body }}` → `${{ trigger.request.body }}`, `${{ request.headers[...] }}` → `${{ trigger.request.headers[...] }}`, `${{ request.queryParams }}` → `${{ trigger.request.queryParams }}`.
