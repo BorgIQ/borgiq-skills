@@ -116,13 +116,10 @@ ACTR01yyyyyyyyyyyyyyyyyyyyy:
   sourcePorts:
     - id: SPRTdefault
   configuration:
-    inputs:
-      forkId: ${{ msg.fork_to_data_sources.forkId }}
-      forkSize: ${{ msg.fork_to_data_sources.forkSize }}
     options:
       action: forkJoin
-      forkId: ${{ inputs.forkId }}
-      forkSize: ${{ inputs.forkSize }}
+      forkId: ${{ msg.fork_to_data_sources.forkId }}
+      size: ${{ ctx.actor.upstreamActorCount }}  # 3: the three data source actors wired into this join
   schemas: {}
   id: ACTR01yyyyyyyyyyyyyyyyyyyyy
   position:

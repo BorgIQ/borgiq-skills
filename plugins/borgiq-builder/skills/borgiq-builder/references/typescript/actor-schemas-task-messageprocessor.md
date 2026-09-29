@@ -601,7 +601,7 @@ export const MessageProcessorActorForkJoinOptionsSchema = z.object({
   forkId: z.string()
     .describe('The forkId emitted by the upstream MessageProcessorActor with the fork action. Messages with the same forkId will be collected in the same message'),
   size: z.number().int().gt(0)
-    .describe('The number of unique actor messages it should collect, it CAN NOT be greater than the number of connected actors'),
+    .describe('The number of unique upstream actors whose messages it should collect before emitting. Defaults to ctx.actor.upstreamActorCount (the number of active actors with an edge into this one), which it CAN NOT exceed'),
 });
 
 export type MessageProcessorActorForkJoinOptions = z.infer<typeof MessageProcessorActorForkJoinOptionsSchema>;
@@ -622,7 +622,8 @@ export const MessageProcessorActorForkJoinOptionsJsonSchema: BIQJsonSchema = {
       type: BIQJsonSchemaType.Integer,
       exclusiveMinimum: 0,
       title: 'Size',
-      description: 'The number of unique actor messages it should collect, it CAN NOT be greater than the number of connected actors',
+      description: 'The number of unique upstream actors whose messages it should collect before emitting. Defaults to ctx.actor.upstreamActorCount (the number of active actors with an edge into this one), which it CAN NOT exceed',
+      default: '${{ctx.actor.upstreamActorCount}}',
     },
   },
   required: ['action', 'forkId', 'size'],

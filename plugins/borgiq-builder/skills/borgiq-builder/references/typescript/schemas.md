@@ -779,6 +779,8 @@ export type AgentToolsInfo = z.infer<typeof AgentToolsInfoSchema>;
 /** information about the runtime actor being invoked. */
 export const CurrentRuntimeActorInfoSchema = RuntimeActorInfoSchema.extend({
   tools: AgentToolsInfoSchema.optional(),
+  /** the number of distinct active actors with an edge into this actor (an actor with several edges into it counts once) */
+  upstreamActorCount: z.number().int().nonnegative(),
 });
 
 export type CurrentRuntimeActorInfo = z.infer<typeof CurrentRuntimeActorInfoSchema>;

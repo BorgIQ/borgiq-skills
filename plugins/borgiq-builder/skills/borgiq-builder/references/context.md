@@ -103,7 +103,8 @@ Runtime context with information about the current execution environment.
     "type": "HttpRequestActor",
     "name": "Current Actor Name",
     "msgVar": "current_actor_msgvar",
-    "isActive": true
+    "isActive": true,
+    "upstreamActorCount": 2
   },
   "sourceActor": {
     "id": "ACTR01...",
@@ -117,6 +118,8 @@ Runtime context with information about the current execution environment.
 ```
 
 **Note on `sourceMsgId`:** This ID is unique per message and can be used as an idempotency key for downstream systems when you need to ensure an operation is only performed once.
+
+**Note on `actor.upstreamActorCount`:** The number of distinct actors with an edge into the current actor. An actor with several edges into it counts once, disabled actors don't count, and a trigger's count is `0`. It is the default `size` of a MessageProcessorActor `forkJoin`, so a join placed after N parallel actors waits for all N (see [message-processor-actor.md](message-processor-actor.md#forkjoin)).
 
 **Common uses:**
 ```yaml
