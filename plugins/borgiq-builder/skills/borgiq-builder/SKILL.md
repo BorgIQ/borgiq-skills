@@ -121,7 +121,7 @@ This skill is the **hub** of the `borgiq-builder` plugin. It covers actor wiring
 
 | Spoke | Load when the user is doing… | What it owns |
 |---|---|---|
-| **`borgiq-form-builder`** | Interface pages, forms, signups, surveys, approval forms, data-entry UIs, web-viewer embeds | InterfaceTriggerActor + InterfaceActor + form components + themes + webViewer styling |
+| **`borgiq-form-builder`** | Interface pages, forms, signups, surveys, approval forms, data-entry UIs, web-viewer embeds — signed-in workspace members only | InterfaceTriggerActor + InterfaceActor + form components + themes + webViewer styling |
 | **`borgiq-react-app-builder`** | Custom app UIs — dashboards, data explorers, SPAs, any component-based or multi-file frontend, npm UI libraries, `useEndpoint`, `useGetSession` (who is viewing the app), `useStreamTail` (follow a workspace stream live); also owns maintaining legacy raw-HTML AppTriggerActor apps | ReactAppTriggerActor + server-side Vite build + `codeDir`/`options.files` model + `@borgiq/actors` SDK + webhook endpoints + declared stream tails + viewer session + the app theme library |
 | **`borgiq-agent-builder`** | Autonomous AI behavior — AiAgentActor (serverless coding agent with filesystem/bash + tools), AgentHarnessActor (sandboxed Claude Code), McpServerActor (expose tools to external agents) | AiActor when-not-to-use + AiAgentActor + AgentHarnessActor + McpServerActor |
 | **`borgiq-json-schema-builder`** | Non-trivial JSON schemas — AiActor `outputSchema`, agent tool input schemas, Collection item schemas, Callable response schemas | All schema-design decisions, anti-patterns, and the BorgIQ `type: any` convention |
@@ -165,7 +165,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | **WebhookResponseActor** | Sends custom HTTP responses back to WebhookTriggerActor callers | [webhook-response-actor.md](references/webhook-response-actor.md) |
 | **CallableResponseActor** | Returns data from sub-flows back to parent flows (CallFlowActor). **Only valid in flows triggered by CallableTriggerActor.** | [callable-response-actor.md](references/callable-response-actor.md) |
 | **CallFlowActor** | Invokes sub-flows by calling a CallableTriggerActor in another canvas/workspace | [call-flow-actor.md](references/call-flow-actor.md) |
-| **InterfaceActor** | Renders a web form/page mid-workflow with two output ports: Meta (URL info on render) and Event (form submission data) | [interface-actor.md](references/interface-actor.md) |
+| **InterfaceActor** | Renders a web form/page mid-workflow with two output ports: Meta (URL info on render) and Event (form submission data). Only signed-in workspace members can open it; `timeoutInMinutes` bounds the wait | [interface-actor.md](references/interface-actor.md) |
 | **SendEmailActor** | Sends text/HTML emails with optional attachments | [send-email-actor.md](references/send-email-actor.md) |
 | **CollectionActor** | Persistent structured storage organized into named collections with labels, TTL, queries, batch operations, and transactions. Recommended for all new storage needs. **One collection per app** — model all entity types with key prefixes ([single-collection design](references/collection-api.md#single-collection-design)). | [collection-actor.md](references/collection-actor.md) |
 | **StreamActor** | Append-only, ordered, cursor-addressed record logs — event ingestion, audit trails, activity feeds, and incremental processing that resumes from a persisted cursor. Reads return **one bounded page**, never the stream. **Streams must be created before use** and **expire one hour after the last append** unless created `persistent: true` or with an explicit `idleTtlSeconds`. Use for "what happened, in order"; use CollectionActor for "the current value of X" ([Collections vs Streams](references/stream-api.md#collections-vs-streams)). | [stream-actor.md](references/stream-actor.md) |
@@ -273,7 +273,7 @@ Trigger actors start workflows (flowruns). Each workflow must have exactly one t
 | **ButtonTriggerActor** | Manual trigger via button click in the UI | [button-trigger-actor.md](references/button-trigger-actor.md) |
 | **WebhookTriggerActor** | Receives HTTP requests at a unique webhook URL | [webhook-trigger-actor.md](references/webhook-trigger-actor.md) |
 | **EmailTriggerActor** | Receives emails at a unique email address | [email-trigger-actor.md](references/email-trigger-actor.md) |
-| **InterfaceTriggerActor** | Displays a web form and triggers on submission | [interface-trigger-actor.md](references/interface-trigger-actor.md) |
+| **InterfaceTriggerActor** | Displays a web form to signed-in workspace members and triggers on submission | [interface-trigger-actor.md](references/interface-trigger-actor.md) |
 | **AppTriggerActor** | Hosts a web application (HTML/CSS/JS) with no form semantics. Does not emit messages. | [app-trigger-actor.md](references/app-trigger-actor.md) |
 | **ScheduledTriggerActor** | Runs on a cron-based schedule | [scheduled-trigger-actor.md](references/scheduled-trigger-actor.md) |
 | **UniversalTriggerActor** | Code-first trigger that fires on webhook requests, a cron schedule, or manual Invoke — user TypeScript (`receive(req: TriggerRequest)`) runs on every fire and branches on `req.trigger.type` | [universal-trigger-actor.md](references/universal-trigger-actor.md) |
@@ -287,7 +287,7 @@ Trigger actors start workflows (flowruns). Each workflow must have exactly one t
 | External service notifications (GitHub, Stripe, Slack) | WebhookTriggerActor |
 | Build an API endpoint | WebhookTriggerActor |
 | Process incoming emails | EmailTriggerActor |
-| User-facing forms and data collection | InterfaceTriggerActor |
+| Forms and data collection for signed-in workspace members | InterfaceTriggerActor |
 | Web applications (SPA, dashboards, interactive tools) | AppTriggerActor |
 | Periodic/scheduled tasks (hourly, daily, weekly) | ScheduledTriggerActor |
 | One workflow fired by webhook **and** schedule (and manual testing) | UniversalTriggerActor |
@@ -749,7 +749,7 @@ Key patterns:
 
 ### Web apps and forms — handed off to spokes
 
-Building a custom app UI (dashboards, data explorers, SPAs — ReactAppTriggerActor, compiled server-side and served in a sandboxed iframe) is covered by the **`borgiq-react-app-builder`** spoke, which also owns maintaining legacy raw-HTML AppTriggerActor apps (configuration in [app-trigger-actor.md](references/app-trigger-actor.md)). Building forms, interface pages, signup flows, and surveys (InterfaceTriggerActor / InterfaceActor with form components) is covered by the **`borgiq-form-builder`** spoke. All auto-load when their domain appears in the user's request — see [Routing to Specialized Skills](#routing-to-specialized-skills) above.
+Building a custom app UI (dashboards, data explorers, SPAs — ReactAppTriggerActor, compiled server-side and served in a sandboxed iframe) is covered by the **`borgiq-react-app-builder`** spoke, which also owns maintaining legacy raw-HTML AppTriggerActor apps (configuration in [app-trigger-actor.md](references/app-trigger-actor.md)). Building forms, interface pages, signup flows, and surveys for signed-in workspace members (InterfaceTriggerActor / InterfaceActor with form components) is covered by the **`borgiq-form-builder`** spoke. All auto-load when their domain appears in the user's request — see [Routing to Specialized Skills](#routing-to-specialized-skills) above.
 
 Key wiring facts this hub still owns: **App and Webhook triggers connect via URL reference, not via edges.** For an AppTriggerActor, use `${{ ctx.canvas.webhookTriggers.<msgVar>.url }}` in its inputs. A ReactAppTriggerActor instead declares named **endpoints** targeting webhook-capable triggers and calls them with `useEndpoint('<name>')` — but the hub still builds the same `WebhookTrigger → task actors → WebhookResponse` backend chain. A webhook-enabled **UniversalTriggerActor** can also serve as an endpoint: its URL lives under `${{ ctx.canvas.universalTriggers.<msgVar>.url }}` (a separate map from `webhookTriggers`), and a self-contained route can respond from its own code via `Signal.webhookRespond` with no downstream chain — see [Universal Trigger vs Webhook Trigger](#universal-trigger-vs-webhook-trigger-http-endpoints).
 

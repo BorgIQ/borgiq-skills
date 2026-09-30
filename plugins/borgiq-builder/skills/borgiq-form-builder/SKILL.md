@@ -13,18 +13,20 @@ Interface pages are the **form surface** of BorgIQ. Two actors share one page-co
 
 | Actor | When it fires | Use it for |
 |---|---|---|
-| **InterfaceTriggerActor** | Page submission **starts** the flow | Public-facing forms: signups, feedback, intake, surveys |
+| **InterfaceTriggerActor** | Page submission **starts** the flow | Forms for people signed in to the workspace: requests, intake, feedback, surveys |
 | **InterfaceActor** | Renders **mid-flow** with two output ports — `meta` (URL on render) and `event` (on submission) | Approvals, async review, "send a form via email" patterns |
+
+**Viewers must sign in; there is no anonymous access.** Opening or submitting a page requires a Viewer, Member or Admin role in the workspace, or an App user grant for that InterfaceTriggerActor (workspace settings cannot grant App users an InterfaceActor), so send approval links only to workspace members. For public sign-ups, post from a page hosted outside BorgIQ to a WebhookTriggerActor with `configuration.webhook.authorizationLevel: public` ([`references/webhook-trigger-actor.md`](../borgiq-builder/references/webhook-trigger-actor.md)).
 
 **Interfaces are forms, not standalone apps.** Using an interface with no form fields (just display + webViewer) is no longer recommended — for interactive dashboards, SPAs, or bespoke layouts, build an app instead (see the `borgiq-react-app-builder` skill). The `webViewer` component embeds an external page or custom HTML *inside* a form, but it does not replace forms.
 
 ## Key decisions
 
-1. **InterfaceTrigger vs InterfaceActor.** Does the form *start* the flow (Trigger) or sit *inside* it (Actor)? An InterfaceActor's `meta` port emits a URL that you can route to email/Slack and `event` fires when the user submits — this is the canonical async-approval pattern.
-2. **Form width.** `formWidth: full` for data-dense layouts; `half` for focused single forms; `third` for very simple inputs (a single email field, a yes/no).
+1. **InterfaceTrigger vs InterfaceActor.** Does the form *start* the flow (Trigger) or sit *inside* it (Actor)? An InterfaceActor's `meta` port emits a URL that you can route to email/Slack and `event` fires when the user submits — this is the canonical async-approval pattern. Set its `timeoutInMinutes` to bound the wait (no timeout by default; on timeout the actor fails with `TimeoutError`).
+2. **Form width.** `formWidth` is `full` (data-dense layouts), `half` (default; a centered half-width column) or `adjustable` (a centered column the viewer can resize).
 3. **Single page vs multi-step.** Group within one page using `section` and `collapse`. Reach for a wizard (chained InterfaceActors or `onSubmit: nextInterface`) only when steps depend on prior answers or the form is long enough that users would abandon a single page.
-4. **Validation strategy.** `required: true` for mandatory, `readOnly: true` for display-only context, conditional fields for branching logic. Validation is client-side at submission.
-5. **Theme.** Native page chrome is themed by the page config (`themeColor`, `backgroundColor`) — pick from `themes.md` (10 pre-built — Modern Minimalist, Ocean Depths, etc.). Custom HTML inside a `webViewer` is themed differently: use the app theme library (`react-app-themes.md`, default `hearth`) — it's plain CSS, no React required.
+4. **Validation strategy.** `required: true` for mandatory, `readOnly: true` for display-only context, conditional fields for branching logic. The browser validates, and the server re-validates the submitted body against the page (400 with per-field errors).
+5. **Theme.** Native page chrome takes `themeColor` (primary color: hex `#RRGGBB` or a Mantine color name such as `blue`) and `backgroundColor` (a CSS color or Mantine color name); there is no font setting. `themes.md` palettes (10 pre-built — Modern Minimalist, Ocean Depths, etc.) can supply the colors. Custom HTML inside a `webViewer` is themed differently: use the app theme library (`react-app-themes.md`, default `hearth`) — it's plain CSS, no React required.
 6. **webViewer scope.** Use it to embed external pages or hand-written HTML/CSS *within* the form (e.g., a help panel, a third-party widget). Don't try to rebuild the form itself in webViewer — use the native components.
 
 ## Workhorse components
@@ -42,9 +44,9 @@ Reach for these first; they cover ~80% of forms.
 | `section` | Group related fields; set `extendParentObject: true` to flatten into the parent payload |
 | `header` | Title/divider text — establishes visual hierarchy |
 | `markdown` | Rich instructional content (formatted help, intros) |
-| `formButton` / `button` | Submit or action — required to trigger the workflow |
+| `formButton` | Submit button (label in `text`) — required to trigger the workflow |
 
-See [`references/interface-pages.md`](../borgiq-builder/references/interface-pages.md) for the full 40+ component catalog, including selection (`multiSelect`, `chips`), date/time, arrays, dynamic defaults, and conditional fields.
+See [`references/interface-pages.md`](../borgiq-builder/references/interface-pages.md) for the full 40+ component catalog, including selection (`multiSelect`, `multiCheckbox`, `buttonGroup`), date/time, arrays, dynamic defaults, and conditional fields.
 
 ## Anti-patterns
 
@@ -58,7 +60,7 @@ See [`references/interface-pages.md`](../borgiq-builder/references/interface-pag
 
 Two surfaces, two mechanisms:
 
-- **Native page + form components** are themed by the page config (`themeColor`, `backgroundColor`); pick a palette from [`references/themes.md`](../borgiq-builder/references/themes.md). Dark mode is supported via `data-theme="dark"`.
+- **Native page + form components** are themed by the page config (`themeColor`, `backgroundColor`); take the colors from a palette in [`references/themes.md`](../borgiq-builder/references/themes.md). The page follows the viewer's light/dark scheme.
 - **Custom HTML inside a `webViewer`** uses the app theme library — [`references/react-app-themes.md`](../borgiq-builder/references/react-app-themes.md). It's framework-agnostic CSS (custom properties + class recipes), so it works in the webViewer's raw HTML+CSS with no React and no CDN: paste the Base Contract + one theme block (default `hearth`, or the theme closest to the page's palette) into the webViewer's styles, build markup on the recipe classes, and use Tabler icons as inline SVG with `stroke="currentColor"`. Never hard-code colors — tokens only, and dark mode comes wired in.
 
 ## Wiring to downstream actors

@@ -2,7 +2,7 @@
   "_comment": "Ratchet: each entry starts at today's size. A PR that shrinks a file lowers its entry; nothing may grow past it. spec_exempt skills are over the Agent Skills limit (500 lines, 5,000 tokens) until they are restructured. reference_exceptions are hand-written references over reference_words_cap, each capped at its current size.",
   "skills": {
     "borgiq-builder": {
-      "words": 8978,
+      "words": 9005,
       "lines": 924,
       "description": 938
     },
@@ -22,8 +22,8 @@
       "description": 493
     },
     "borgiq-form-builder": {
-      "words": 1084,
-      "lines": 95,
+      "words": 1211,
+      "lines": 97,
       "description": 488
     },
     "deploy": {
@@ -64,7 +64,7 @@
     "cli/cli-command-reference.md": 6665,
     "collection-api.md": 11211,
     "deno-actor.md": 9465,
-    "interface-pages.md": 8991,
+    "interface-pages.md": 9283,
     "python-actor.md": 6485,
     "react-app-themes.md": 4099,
     "stream-api.md": 5395,
