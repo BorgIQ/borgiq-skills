@@ -242,16 +242,15 @@ Embeds a web page (`src`) or custom HTML (`html`) in an iframe inside the form. 
 | `height` | number \| string | `500px` | Viewer height |
 | `fullScreen` | boolean | false | Fill the viewport and hide the other components |
 | `allowedScriptDomains` | URL[] | — | Origins added to the CSP `script-src` |
-| `allowedStyleDomains` | URL[] | — | Origins added to the CSP `style-src` (`https://cdn.tailwindcss.com` is always allowed) |
+| `allowedStyleDomains` | URL[] | — | Origins added to the CSP `style-src` (stylesheets only) |
 | `allowInlineScripts` | boolean | false | Adds `'unsafe-inline'` to `script-src`, allowing any inline script and inline event handlers (`onclick=`). Reduces security |
 | `allowInlineStyling` | boolean | false | Adds `'unsafe-inline'` to `style-src`, allowing `style="…"` attributes. Reduces security |
 | `allowedPermissions` | string[] | — | Permissions-Policy directives to enable, such as `clipboard-write`, `fullscreen`, `camera`, `microphone`, `geolocation` ([all directives](typescript/actorSchemas/trigger/permissionsPolicy.md)) |
 
-Rules for `html` (the full CSP model is in [app-trigger-actor.md](app-trigger-actor.md#content-security-policy)):
+Rules for `html`:
 
-- `<script>` and `<style>` blocks run: the CSP allows them by hash. Inline event handlers, `style="…"` attributes, `javascript:` URLs and `eval()` are blocked. Attach handlers with `addEventListener()` and style with CSS classes (setting `element.style` from a script works), or set `allowInlineScripts` / `allowInlineStyling`. Libraries that need `eval` or `new Function` (such as Alpine.js's standard build) do not run.
-- List every external origin you load scripts or styles from as a full `https://` origin; Google Fonts CSS needs `https://fonts.googleapis.com` in `allowedStyleDomains`. Prefer `https://cdnjs.cloudflare.com` for scripts: files on `cdn.jsdelivr.net` reference source maps the CSP refuses, which logs console warnings.
-- `fetch` reaches only the BorgIQ API (`connect-src`); images load from any `https:` URL. A `fetch` to a webhook URL (`<api>/msg/…`) of the same canvas gets an `X-App-Actor-Token` header automatically; set that trigger's `authorizationLevel` to `apps` ([webhook-trigger-actor.md](webhook-trigger-actor.md)).
+- It runs under the app Content Security Policy: `<script>` and `<style>` blocks run, while inline event handlers, `style="…"` attributes and `eval` are blocked, external hosts need the allowlists above, and `fetch` reaches only the BorgIQ API. Modes, fixes and a CDN table: [app-trigger-actor.md](app-trigger-actor.md#content-security-policy).
+- A `fetch` to a webhook URL (`<api>/msg/…`) of the same canvas gets an `X-App-Actor-Token` header automatically; set that trigger's `authorizationLevel` to `apps` ([webhook-trigger-actor.md](webhook-trigger-actor.md)).
 - Style the HTML with the app theme library, [react-app-themes.md](react-app-themes.md). It is plain CSS (custom properties + component recipes), so it works in raw HTML with no React and no CDN: paste the Base Contract + one theme block (default `hearth`) into a `<style>` block and use Tabler icons as inline SVG with `stroke="currentColor"`.
 
 ```yaml
