@@ -92,7 +92,7 @@ export type CodeFile = z.infer<typeof CodeFileSchema>;
  * **This is the single source of truth for those filenames.** The per-type `codeDir` schemas below,
  * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
  * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
- * in this module rather than a sweep across `borgiq-platform` and `borgiq-lambda-runtime`. Kept as
+ * in this module rather than a sweep across the platform and the lambda runtime. Kept as
  * four separate constants rather than one shared value because the name is a property of each
  * type's runtime: they coincide today, and nothing should assume they always will.
  *
@@ -346,8 +346,8 @@ export type RuntimeEnvironment = z.infer<typeof RuntimeEnvironmentSchema>;
 ```typescript
 /**
  * NOTE:
- * Shared between borgiq-platform (orchestrator builds the invoke event) and
- * borgiq-lambda-runtime (the segment host consumes it). This file is mirrored into the
+ * Shared between the platform (orchestrator builds the invoke event) and
+ * the lambda runtime (the segment host consumes it). This file is mirrored into the
  * lambda runtime via `npm run copy-runtime-types`.
  *
  * An agent lambda segment runs one time-boxed slice of a pi coding-agent session inside the
@@ -915,7 +915,7 @@ import { BIQJsonSchema, BIQJsonSchemaType } from './jsonSchema.js';
 
 /**
  * Shared runtime error names. The orchestrator keys off `error.name` on a runtime error response, so
- * these strings are a wire contract between `borgiq-lambda-runtime` and `packages/orchestrator` and
+ * these strings are a wire contract between the lambda runtime and `packages/orchestrator` and
  * live here rather than in either side's own module.
  */
 
@@ -1169,7 +1169,7 @@ export type RuntimeError = z.infer<typeof RuntimeErrorSchema>;
  * RuntimeError.name emitted by the lambda runtime when a warm container cannot host the next actor
  * (memory or ephemeral-disk exhaustion after evicting idle workers) — always retryable. The
  * orchestrator keys its logging off this name and the runtime's resource-monitor produces it, so
- * both sides must use this constant rather than the string literal. See BORG-572.
+ * both sides must use this constant rather than the string literal.
  */
 export const RESOURCE_EXHAUSTED_ERROR_NAME = 'ResourceExhausted';
 
@@ -2392,7 +2392,7 @@ export const PlaceholderConnectionEntrySchema = z.object({
   fieldPath: z.union([z.string(), z.array(z.string())]),
   /** per-credential URL allowlist (Feature A) — normalized entries, present only when non-empty.
    * The proxy 403s a request that uses this placeholder against a non-matching target. Optional so
-   * maps already in Redis and the schema copy in borgiq-lambda-runtime keep parsing unchanged. */
+   * maps already in Redis and the schema copy in the lambda runtime keep parsing unchanged. */
   allowedUrls: z.array(z.string()).optional(),
 });
 

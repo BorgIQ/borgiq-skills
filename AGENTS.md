@@ -63,7 +63,6 @@ The `scripts/` directory contains developer tooling for working on this repo (th
 - `init_skill.py` — initialize a new skill from template
 - `package_skill.py` — *(legacy)* package a skill as a `.skill` zip for Claude API users
 - `install_skills.py` — *(legacy)* install a `.skill` zip into `~/.claude/skills/`
-- `sync_typescript_refs.py` — refresh `references/typescript/*.md` from the platform's prompt type files
 
 The `package_skill.py` workflow is retained for Claude API customers who can't use marketplace install yet. `install_skills.py` is now used both for legacy `.skill` install AND as the file-copy installer for Codex / opencode / Pi from a git clone.
 
@@ -91,17 +90,11 @@ python3 scripts/init_skill.py my-new-spoke --plugin borgiq-builder
 python3 scripts/init_skill.py custom-skill --path /custom/location
 ```
 
-### sync_typescript_refs.py
+### Generated type references
 
-The `references/typescript/*.md` files mirror `borgiq-platform`'s `packages/core/src/prompts/typeFiles/runtime-types/src/<path>.txt`, one section per file: a `## <path>` heading, `**Source:** \`<path>.ts\``, and one fenced `typescript` block holding the `.txt` contents (trailing blank lines trimmed). The script reads the section list from the existing `**Source:**` lines and refreshes only the fenced bodies — it never adds or drops a section. A section whose `.txt` no longer exists (or whose heading does not match its source) is an error, and nothing is written until it is resolved by hand.
+`references/typescript/*.md` mirror the platform's runtime type definitions. BorgIQ maintainers generate them from the platform source and scrub them before they land here. **Never hand-edit them**: the next generation overwrites the edit. Report a wrong or missing type as an issue instead.
 
-```bash
-python3 scripts/sync_typescript_refs.py                                 # rewrite drifted sections
-python3 scripts/sync_typescript_refs.py --check                         # list drifted sections, exit 1 if any; writes nothing
-python3 scripts/sync_typescript_refs.py --platform ~/code/borgiq-platform  # default: $BORGIQ_PLATFORM_PATH, else ../borgiq-platform
-```
-
-Run it after the platform regenerates its type files (`import-prompt-files` in `packages/core`), then read the diff: a changed type (a renamed option, a new model, a new status field) usually means prose in the other references needs the same change.
+When a generated file changes (a renamed option, a new model, a new status field), prose in the other references may need the same change. Review the diff for that.
 
 ## Distribution channels
 
