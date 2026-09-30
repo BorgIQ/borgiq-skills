@@ -27,28 +27,28 @@
       "description": 443
     },
     "deploy": {
-      "words": 1301,
-      "lines": 135,
-      "description": 208
-    },
-    "debug-flow": {
-      "words": 1215,
-      "lines": 105,
+      "words": 799,
+      "lines": 100,
       "description": 205
     },
+    "debug-flow": {
+      "words": 699,
+      "lines": 84,
+      "description": 194
+    },
     "new-actor": {
-      "words": 1051,
-      "lines": 114,
+      "words": 644,
+      "lines": 98,
       "description": 153
     },
     "test": {
-      "words": 705,
-      "lines": 96,
-      "description": 145
+      "words": 436,
+      "lines": 58,
+      "description": 143
     },
     "validate": {
-      "words": 491,
-      "lines": 64,
+      "words": 342,
+      "lines": 49,
       "description": 195
     }
   },
@@ -57,7 +57,5 @@
   ],
   "reference_words_cap": 4000,
   "reference_exceptions": {},
-  "arguments_in_shell_allowed": [
-    "new-actor/SKILL.md"
-  ]
+  "arguments_in_shell_allowed": []
 }

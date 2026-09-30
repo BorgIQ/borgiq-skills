@@ -1,64 +1,49 @@
 ---
 name: validate
 description: Validate a BorgIQ canvas bundle directory or workflow YAML against bundle structure, actor schemas, IDs, and edges. Run before deploy to catch local violations with artifact-specific diagnostics.
+compatibility: Requires the borgiq-builder skill, a shell and the borgiq CLI (npm install -g @borgiq/cli). Offline; no login needed.
 disable-model-invocation: true
 argument-hint: "[path/to/bundle-or-workflow.yaml] [--strict]"
 allowed-tools: Bash(borgiq*) Bash(ls*) Bash(test*)
 ---
 
-# /validate — BorgIQ workflow validator
+# Validate a BorgIQ bundle or workflow
 
-Run the correct offline validator for a canvas bundle or direct workflow document. Report structure/schema errors, missing IDs, and dangling edges *before* deployment.
+Requires the `borgiq-builder` skill: the links below go into its `references/` folder.
 
-## Prerequisite
+CLI version (Claude Code fills this in; otherwise run it yourself): !`borgiq --version 2>&1 || echo "CLI_MISSING"`
 
-Both validators ship in `@borgiq/cli`. Confirm the CLI is installed (no dependency install needed):
-
-!`if command -v borgiq >/dev/null 2>&1; then echo "borgiq CLI found: $(borgiq --version)"; else echo "borgiq CLI not found. Install it with: npm install -g @borgiq/cli"; fi`
+If it printed `CLI_MISSING` or no version, ask the user to install it: `npm install -g @borgiq/cli`.
 
 ## Pick the artifact
 
-Classify the explicit path first: a directory containing `canvas.yaml` is a bundle; a `.yaml`/`.yml` path is a direct document. Otherwise look for a bare `./canvas.yaml`, `*.borgiq-canvas/` directories, and workflow YAMLs in the current directory and `./outputs/`.
+Use the path the user gave, if any: a directory containing `canvas.yaml` is a bundle; a `.yaml`/`.yml` file is a
+direct document. Otherwise look for candidates (Claude Code fills this in; otherwise run it yourself):
 
-!`test -f canvas.yaml && echo "BUNDLE:."; ls -d *.borgiq-canvas 2>/dev/null; ls outputs/*.yaml outputs/*.yml *.yaml *.yml 2>/dev/null | head -20`
+!`find . -maxdepth 2 \( -name canvas.yaml -o -name '*.borgiq-canvas' -o -name '*.yaml' -o -name '*.yml' \) -not -path '*/.*' | head -20`
 
-If several candidates exist, ask which one to validate. Prefer the bundle when it is the maintained local copy of the canvas.
+If there are several, ask which. Prefer a bundle that is the canvas's maintained local copy.
 
 ## Validate
 
-For a bundle directory, verify the capability and run bundle validation:
+**Bundle.** `borgiq help bundle` must succeed (otherwise upgrade the CLI), then:
 
 ```bash
-borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
-borgiq bundle validate <dir>
-# Add --strict when requested or before deployment to make warnings fatal.
+borgiq bundle validate <dir> --strict   # --strict makes warnings fatal: use it before deploying
 ```
 
-Bundle validation is offline and reports errors/warnings against bundle-relative paths such as `canvas.yaml`, `actors/.../actor.yaml`, or `actors/.../code/main.ts`. Fix the named file and rerun. Consult `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/canvas-bundles.md` for the three-edit and `codeDir` contracts.
+Each finding names a bundle file (`canvas.yaml`, an `actor.yaml`, a `code/` file): fix it and rerun. Fixes, `code/`
+errors included: [canvas-bundles.md → Troubleshooting](../borgiq-builder/references/cli/canvas-bundles.md#troubleshooting).
 
-Code actors (Deno, Deno Test, Universal Trigger, Python) hold a project tree under `code/`, so validation additionally reports a missing entrypoint (`code/main.ts`, or `code/main.py` for Python), a filename reserved by the BorgIQ runtime, and an actor that carries both inline `configuration.code` and `code/` files. [Canvas Bundles → Code actor `code/` errors](../borgiq-builder/references/cli/canvas-bundles.md#code-actor-code-errors) lists each message with its fix; a bundle pulled before multi-file support needs its `code/mod.ts` renamed to `code/main.ts`.
-
-For a direct YAML/YML document:
-
-```bash
-borgiq validate <file>
-```
-
-If direct validation emits errors:
-
-1. Read each error literally — they reference actor IDs, field paths, and line numbers.
-2. For schema errors, cross-reference the relevant actor doc in `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/<kebab-case-actor-type>.md` (e.g. `http-request-actor.md` for `HttpRequestActor`).
-3. For ID/edge errors, see `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/edges-and-positioning.md`.
-4. Fix the YAML directly. Re-run validate.
-
-Once validation passes, optionally normalize the document:
-
-```bash
-borgiq validate <file> --post-process --in-place
-```
-
-`--post-process` does not validate and never renames a msgVar or regenerates an ID. It adds a missing `schemas: {}` to each actor and removes `label` from edges, skipping RouterActor and AiRouterActor; when it changes anything, it rewrites the whole file in the CLI's YAML formatting.
+**Direct document** (`metadata` + `actors`): `borgiq validate <file>`. Errors name an actor ID, field path or line.
+Schema errors: the actor type's reference, `<kebab-case-actor-type>.md` (`HttpRequestActor` →
+[http-request-actor.md](../borgiq-builder/references/http-request-actor.md)); ID and edge errors:
+[edges-and-positioning.md](../borgiq-builder/references/edges-and-positioning.md). Fix the YAML and rerun.
+`borgiq validate <file> --post-process --in-place` is optional cleanup after a pass: it validates nothing and renames
+no msgVar or ID ([what it changes](../borgiq-builder/references/validation.md#validators-per-mode)).
 
 ## After validation passes
 
-Neither offline validator catches missing workspace connections/assets or invalid cross-canvas references. For those, use `/borgiq-builder:deploy` (which runs `borgiq canvases validate` server-side after deployment) or run `borgiq canvases validate <canvasSlugOrId> --json` against an existing canvas.
+Neither validator checks workspace connections, assets or cross-canvas references: use the `deploy` skill
+(`/borgiq-builder:deploy` in Claude Code), which validates on the server after pushing, or run
+`borgiq canvases validate <canvas> --json` on an existing canvas.

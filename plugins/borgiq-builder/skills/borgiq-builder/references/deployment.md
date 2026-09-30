@@ -112,11 +112,11 @@ available": the deploy is not real yet.
 | `outdated: true` | the canvas changed since its running build | build again: every run still executes the old build |
 | `No built runtime available for canvas …` | deployed, and the canvas has no fully successful build | `borgiq canvases runtime-build <canvas>`, and make every actor build |
 | An actor with `guard: rejected` | it imports a file outside its own files | move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
-| An actor with `warm: failed` | it installed, but its code threw at start-up | fix the start-up error and build again |
+| An actor with `warm: failed` | it installed, but its code threw at start-up | fix the start-up error (a test run of the actor shows it) and build again |
 | A run executed old code after a push | the push was not followed by a build | `borgiq canvases runtime-build <canvas>` |
 | "Build the canvas instead" (`409`) from the editor's Build app | the workspace is deployed; the canvas build owns the app | `borgiq canvases runtime-build <canvas>` |
 | A served app is missing or stale after deploying | the canvas was not built since the app changed | build the canvas; the app serves from the active build |
-| Occasional "runtime build could not be used" in logs | transient; the run was retried without the build | nothing: it corrects itself |
+| Occasional "runtime build could not be used" in logs, or "could not be started from its workspace's runtime build" | transient; the run was retried without the build | nothing: it corrects itself. If it persists, build the canvas again |
 
 ## Writing code actors for a deployed workspace
 
