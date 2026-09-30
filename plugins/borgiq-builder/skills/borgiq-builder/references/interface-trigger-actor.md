@@ -1,346 +1,14 @@
 # Interface Trigger Actor Reference
 
-The InterfaceTriggerActor starts a workflow when a user submits a form on its hosted web page.
+The InterfaceTriggerActor starts a workflow when a user submits the form on its hosted web page. Use it for forms that start a flow: internal requests, intake, feedback, surveys and data entry. For web applications (SPAs, dashboards, interactive tools) use a ReactAppTriggerActor (the `borgiq-react-app-builder` skill) instead. The `page` schema is in [interface-pages.md](interface-pages.md).
 
-## Table of Contents
+## Rules
 
-- [Overview](#overview)
-- [Configuration Structure](#configuration-structure)
-- [Options Reference](#options-reference)
-- [Page Configuration](#page-configuration)
-- [TypeScript Schema Definition](#typescript-schema-definition)
-- [Emitted Message](#emitted-message)
-- [UI Component Examples](#ui-component-examples)
-- [Accessing Form Data in Downstream Actors](#accessing-form-data-in-downstream-actors)
-- [Dynamic Interface Response](#dynamic-interface-response)
-- [Interface URL](#interface-url)
-- [Use Cases](#use-cases)
-- [Quick Example](#quick-example)
+- The page is open only to people signed in to BorgIQ with a workspace role, or App users granted this actor; there is no anonymous or public access ([interface-pages.md](interface-pages.md#access)). For public sign-ups, post from a page hosted outside BorgIQ to a public WebhookTriggerActor.
+- The trigger has no upstream `msg`, so a `default` cannot read one: prefill with `default`, `defaultValues` or URL query params ([interface-pages.md](interface-pages.md#prefill)).
+- To show a result the flow computes, set `onSubmit.type: nextInterface` and render an InterfaceActor downstream. Code actors cannot render a page: the Deno and Python SDKs build only the `webhookRespond`, `callableResponse` and `delayUntil` signals ([interface-examples.md](interface-examples.md#multi-step-form)).
 
-## Overview
-
-Interface triggers provide a hosted web page with customizable form elements. When users submit the form, the workflow is triggered with the form data. Use interface triggers for:
-
-- Building user-facing forms and interfaces
-- Collecting structured input from users
-- Internal tools requiring form-based data entry
-
-The page is open only to people signed in to BorgIQ as members of the workspace; there is no anonymous or public access (see [Interface URL](#interface-url)).
-
-**Note:** For web applications (SPAs, dashboards, interactive tools), use a ReactAppTriggerActor (the `borgiq-react-app-builder` skill) instead. InterfaceTriggerActor is designed for form-based workflows where user submission triggers downstream processing.
-
-## Configuration Structure
-
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01xxxxx:
-    type: InterfaceTriggerActor
-    version: 1
-    name: Interface Trigger
-    msgVar: interface_trigger
-    description: Display a form and trigger workflow on submission
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      options:
-        page:
-          children:
-            - key: header
-              type: header
-              value: Form Title
-            - key: submit
-              type: formButton
-        onSubmit:
-          type: successMessage
-    schemas: {}
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
-
-## Options Reference
-
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `page` | object | Yes | Page layout configuration. See [interface-pages.md](interface-pages.md) for complete reference. |
-| `page.children` | array | Yes | Array of UI components to render |
-| `onSubmit` | object | Yes | Action to perform after form submission |
-| `defaultValues` | object | No | Initial form values keyed by component `key`. Query params in the page URL (`?<key>=<value>`) also prefill fields and take precedence |
-| `autoSubmitAfterSeconds` | integer | No | Auto-submit the form after specified seconds |
-| `showProgressStatus` | boolean | No | Show the flow's progress on the waiting page after submission. Requires `onSubmit.type: nextInterface` |
-
-## Page Configuration
-
-The `page` configuration defines the form layout and components. For the complete reference including all component types, properties, and examples, see **[interface-pages.md](interface-pages.md)**.
-
-## TypeScript Schema Definition
-
-The complete TypeScript schema for InterfaceTriggerActor options and results:
-
-```typescript
-import { z } from 'zod';
-
-/** The options schema for the InterfaceTriggerActor */
-export const InterfaceTriggerActorOptionsSchema = z.object({
-  /** The page to render for the interface trigger */
-  page: BIQInterfacePageDataSchema
-    .describe('The page data to render for the interface trigger'),
-  /** The default values to inject into the url as query params */
-  defaultValues: z.record(z.string(), z.any()).nullish()
-    .describe('The default values to pass to the interface trigger form to build the form'),
-  /** Auto submit the form after it has been opened after a certain number of seconds */
-  autoSubmitAfterSeconds: z.number().int().min(0).nullish()
-    .describe('Auto submit the form after it has been opened after a certain number of seconds'),
-  /** What page to redirect to when the interface trigger form is submitted */
-  onSubmit: z.discriminatedUnion('type', [
-    z.object({
-      /** When submitted, redirect to the next interface rendered in the flow */
-      type: z.literal('nextInterface')
-        .describe('When submitted, redirect to the next interface rendered in the flow'),
-      /** The message to show while the next interface is loading */
-      loadingMessage: z.string().nullish()
-        .describe('The message to show while the next interface is loading'),
-    }),
-    z.object({
-      /** When submitted, show a success message */
-      type: z.literal('successMessage')
-        .describe('When submitted, show a success message'),
-      /** The message to show when successfully submitted */
-      successMessage: z.string().nullish()
-        .describe('The message to show when successfully submitted'),
-    }),
-    z.object({
-      /** When submitted, redirect to a URL */
-      type: z.literal('urlRedirect')
-        .describe('When submitted, redirect to a URL'),
-      /** The URL to redirect to */
-      url: z.url()
-        .describe('The URL to redirect to when successfully submitted'),
-    })
-  ]),
-});
-
-export type InterfaceTriggerActorOptions = z.infer<typeof InterfaceTriggerActorOptionsSchema>;
-
-/** The result schema for the InterfaceTriggerActor */
-export const InterfaceTriggerActorResultSchema = z.object({
-  meta: z.object({
-    submissionInterfaceId: z.string()
-      .describe('The interface id used for rendering the next page'),
-    user: z.object({
-      id: z.string()
-        .describe('The user ID of the submitter'),
-      name: z.string()
-        .describe('The display name of the submitter'),
-      email: z.string()
-        .describe('The email address of the submitter'),
-    }).describe('Information about the user who submitted the form'),
-  }),
-  body: z.record(z.string(), z.any())
-    .describe('The body of the interface submission'),
-});
-
-export type InterfaceTriggerActorResult = z.infer<typeof InterfaceTriggerActorResultSchema>;
-```
-
-### onSubmit Types
-
-| Type | Description |
-|------|-------------|
-| `nextInterface` | Redirect to the next interface rendered in the workflow |
-| `successMessage` | Display a success message after submission |
-| `urlRedirect` | Redirect to an external URL |
-
-### Page Children (UI Components)
-
-For the complete list of component types and their properties, see **[interface-pages.md](interface-pages.md)**.
-
-Common component types include:
-
-| Type | Description |
-|------|-------------|
-| `header` | Header/title text |
-| `text` | Single-line text input |
-| `textarea` | Multi-line text input |
-| `number` | Numeric input |
-| `select` | Dropdown selection |
-| `checkbox` | Boolean checkbox |
-| `radio` | Radio button group |
-| `formButton` | Form submit button |
-
-## Emitted Message
-
-The interface trigger emits a message containing the form submission data:
-
-```json
-{
-  "meta": {
-    "submissionInterfaceId": "d85670632dd795c2d6dd02a500a61943",
-    "user": {
-      "id": "USER01abc123def456ghi789jkl0mn",
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
-    "ipAddress": "203.0.113.7"
-  },
-  "body": {
-    "fieldKey1": "user input value",
-    "fieldKey2": 42,
-    "fieldKey3": true
-  }
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `meta.submissionInterfaceId` | string | The interface ID used for rendering the next page |
-| `meta.user.id` | string | The user ID of the submitter |
-| `meta.user.name` | string | The display name of the submitter |
-| `meta.user.email` | string | The email address of the submitter |
-| `meta.ipAddress` | string | IP address of the submitter |
-| `body` | object | Object containing all form field values (keyed by component `key`) |
-
-## UI Component Examples
-
-For detailed component examples and all available component types, see **[interface-pages.md](interface-pages.md)**.
-
-## Accessing Form Data in Downstream Actors
-
-```yaml
-# HttpRequestActor configuration - mapping individual fields
-configuration:
-  inputs:
-    name: ${{ msg.interface_trigger.body.name }}
-    email: ${{ msg.interface_trigger.body.email }}
-    message: ${{ msg.interface_trigger.body.message }}
-  options:
-    url: https://api.example.com/contacts
-    method: POST
-    body:
-      name: ${{ inputs.name }}
-      email: ${{ inputs.email }}
-      message: ${{ inputs.message }}
-```
-
-```yaml
-# HttpRequestActor configuration - mapping the entire trigger output
-configuration:
-  inputs: ${{ msg.interface_trigger }}
-  options:
-    url: https://api.example.com/contacts
-    method: POST
-    body:
-      name: ${{ inputs.body.name }}
-      email: ${{ inputs.body.email }}
-      message: ${{ inputs.body.message }}
-      submittedBy: ${{ inputs.meta.user.email }}
-```
-
-```yaml
-# DenoActor configuration
-configuration:
-  inputs: ${{ msg.interface_trigger }}
-  options:
-    allowNet: true
-  codeDir:
-    - path: main.ts
-      content: |
-        // code goes here...
-```
-
-```typescript
-// In DenoActor
-import type { Request, Response } from "@borgiq/actors";
-
-export default async function receive(req: Request): Promise<Response> {
-  const formData = req.inputs.body;
-
-  // Access form fields
-  const name = formData.name;
-  const email = formData.email;
-  const category = formData.category;
-
-  // Access metadata
-  const submissionInterfaceId = req.inputs.meta.submissionInterfaceId;
-  const submittedBy = req.inputs.meta.user;
-
-  // Process form data
-  return {
-    results: {
-      processed: true,
-      submissionInterfaceId,
-      submittedBy: submittedBy.email,
-      contact: { name, email, category },
-    },
-  };
-}
-```
-
-## Dynamic Interface Response
-
-Code actors cannot render a page: the Deno and Python SDKs build only the `webhookRespond`, `callableResponse` and `delayUntil` signals. To show a result page computed by the flow, set `onSubmit.type: nextInterface` on the trigger and place an InterfaceActor downstream. After submitting, the user sees a waiting page (with the flow's progress when `showProgressStatus: true`), and the first InterfaceActor that renders downstream in the same flow run replaces it:
-
-```yaml
-# InterfaceTriggerActor options
-onSubmit:
-  type: nextInterface
-  loadingMessage: Processing your request...
-showProgressStatus: true
-```
-
-```yaml
-# Downstream InterfaceActor options (the result page)
-page:
-  children:
-    - key: header
-      type: header
-      value: Submission Received!
-    - key: reference
-      type: textDisplay
-      value: Your reference number is ${{ msg.process_submission.id }}
-      copyable: true
-onSubmit:
-  type: successMessage
-```
-
-## Interface URL
-
-Each InterfaceTriggerActor is served at:
-
-```
-https://<borgiq-app-host>/org/<org-slug>/w/<workspace-slug>/c/<canvas-slug-or-id>/interfaces/<actor-id>
-```
-
-Share this URL only with people who can open it: the viewer must be signed in to BorgIQ and be a member of the workspace, with the Viewer, Member or Admin role, or the App user role with a grant for this actor. Anyone else is refused; there is no anonymous or public access. For public sign-ups or anonymous intake, post from a page hosted outside BorgIQ to a WebhookTriggerActor with `authorizationLevel: public` ([webhook-trigger-actor.md](webhook-trigger-actor.md)).
-
-## Use Cases
-
-### Feedback Form
-
-Collect user feedback with ratings and comments.
-
-### Internal Request Form
-
-Allow employees to submit requests (IT tickets, time off, expenses).
-
-### Simple Survey
-
-Create multi-question surveys with various input types.
-
-### Data Entry Interface
-
-Build interfaces for manual data entry into automated workflows.
-
-## Quick Example
+## Actor document
 
 ```yaml
 metadata:
@@ -369,17 +37,13 @@ actors:
             - key: rating
               type: select
               label: How would you rate your experience?
-              options:
+              options:             # option values are strings
                 - label: Excellent
                   value: '5'
                 - label: Good
                   value: '4'
-                - label: Average
-                  value: '3'
                 - label: Poor
                   value: '2'
-                - label: Very Poor
-                  value: '1'
             - key: comments
               type: textarea
               label: Additional Comments
@@ -397,3 +61,69 @@ actors:
       'y': 0
     edges: {}
 ```
+
+## Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `page` | object | Yes | Page options and components ([interface-pages.md](interface-pages.md#page-options)) |
+| `onSubmit` | object | Yes | `successMessage`, `urlRedirect` or `nextInterface` ([interface-pages.md](interface-pages.md#onsubmit)) |
+| `defaultValues` | object | No | Initial form values keyed by component `key`. Query params in the page URL (`?<key>=<value>`) also prefill fields and take precedence |
+| `autoSubmitAfterSeconds` | integer | No | Auto-submit the form after specified seconds |
+| `showProgressStatus` | boolean | No | Show the flow's progress on the waiting page after submission. Requires `onSubmit.type: nextInterface` |
+
+Exact types: [typescript/actorSchemas/trigger/interface.md](typescript/actorSchemas/trigger/interface.md).
+
+## Emitted message
+
+```json
+{
+  "meta": {
+    "submissionInterfaceId": "d85670632dd795c2d6dd02a500a61943",
+    "user": { "id": "USER01abc123def456ghi789jkl0mn", "name": "John Smith", "email": "john@example.com" },
+    "ipAddress": "203.0.113.7"
+  },
+  "body": { "rating": "5", "comments": "Great service" }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `meta.submissionInterfaceId` | string | The interface ID used for rendering the next page |
+| `meta.user.id` | string | The user ID of the submitter |
+| `meta.user.name` | string | The display name of the submitter; may be absent |
+| `meta.user.email` | string | The email address of the submitter |
+| `meta.ipAddress` | string | IP address of the submitter |
+| `body` | object | Object containing all form field values (keyed by component `key`) |
+
+The emitted shape is `FlowrunInterfaceTriggerDataSchema` in [typescript/schemas/runtime.md](typescript/schemas/runtime.md); the result schema in the options module lists `meta.interfaceId` and no `user`, which the runtime does not emit.
+
+## Using the submission downstream
+
+```yaml
+# HttpRequestActor: map form fields into the request
+configuration:
+  inputs:
+    name: ${{ msg.feedback_form.body.name }}
+    email: ${{ msg.feedback_form.body.email }}
+    submittedBy: ${{ msg.feedback_form.meta.user.email }}
+  options:
+    url: https://api.example.com/contacts
+    method: POST
+    body:
+      name: ${{ inputs.name }}
+      email: ${{ inputs.email }}
+      submittedBy: ${{ inputs.submittedBy }}
+```
+
+To hand the whole submission to a code actor, set `inputs: ${{ msg.feedback_form }}`; the code reads `req.inputs.body` and `req.inputs.meta`.
+
+## Interface URL
+
+Each InterfaceTriggerActor is served at:
+
+```
+https://<borgiq-app-host>/org/<org-slug>/w/<workspace-slug>/c/<canvas-slug-or-id>/interfaces/<actor-id>
+```
+
+Share this URL only with people who can open it ([Access](interface-pages.md#access)).

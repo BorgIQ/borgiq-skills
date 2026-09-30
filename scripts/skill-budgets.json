@@ -22,7 +22,7 @@
       "description": 493
     },
     "borgiq-form-builder": {
-      "words": 1211,
+      "words": 1209,
       "lines": 97,
       "description": 488
     },
@@ -65,9 +65,8 @@
     "cli/cli-command-reference.md": 6665,
     "collection-api.md": 11211,
     "deno-actor.md": 9753,
-    "interface-pages.md": 9283,
     "python-actor.md": 6904,
-    "react-app-themes.md": 4129,
+    "react-app-themes.md": 4128,
     "stream-api.md": 5395,
     "web-application-pattern.md": 5514
   },

@@ -313,7 +313,7 @@ Full token sets, base stylesheet, component recipes, and rules live in
 - Light + dark come free: every theme block carries both modes wired to `prefers-color-scheme` with `data-theme` overrides.
 - **Icons: Tabler only** (`@tabler/icons-react`), planned as part of the UI design — nav items, action buttons, empty states — per the reference's Icons section. Icons inherit `currentColor` (never hard-code an icon color); keep one size/stroke per context; icon-only buttons need `aria-label`; no emoji-as-icons and no second icon family.
 - Customer brand colors → start from the closest theme and remap only the accent/ink token group per the reference's brand-override procedure; neutrals, status channels, and shape stay.
-- Do not confuse with [themes.md](../borgiq-builder/references/themes.md) (presentation/marketing palettes) — React apps use the token library above.
+- Do not confuse with [interface page colors](../borgiq-builder/references/interface-pages.md#page-colors) — React apps use the token library above.
 
 ## Constraints
 
