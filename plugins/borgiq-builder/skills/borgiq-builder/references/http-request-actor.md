@@ -91,7 +91,7 @@ actors:
 | `body` | any | No | Request body (for POST/PUT/PATCH) |
 | `auth` | expression | No | Authentication object from connection |
 | `contentType` | string | No | Body content type: json, xml, text, buffer, or valid HTTP Content-Type |
-| `responseType` | string | No | Expected response type: arraybuffer, document, json, text, stream |
+| `responseType` | string | No | Expected response type: arraybuffer, blob, document, json, text, stream |
 | `multiPartFormFiles` | object | No | Form file uploads as multipart form |
 | `emitRequest` | boolean | No | Include request details in output (default: false) |
 | `emitBodyAsFile` | boolean | No | Return response body as a file (default: false) |
@@ -254,7 +254,7 @@ error:
 |-------|-------------|
 | `if` | Condition that determines if this is an error |
 | `retryIf` | Condition for automatic retry (rate limits, server errors) |
-| `includeResult` | Include full response in error message |
+| `includeResult` | Attach the actor's result to the error object as `metadata.results` |
 | `message` | Custom error message |
 
 ## Authentication
@@ -377,7 +377,7 @@ Use conditional expressions to omit fields when undefined:
 ```yaml
 body:
   required_field: ${{ inputs.required }}
-  optional_field: ${{ inputs.optional?.length > 0 ? inputs.optional : undefined }}
+  optional_field: "${{ inputs.optional?.length > 0 ? inputs.optional : undefined }}"   # quoted: contains ': '
 ```
 
 ### URL Path Parameters

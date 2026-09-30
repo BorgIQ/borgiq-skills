@@ -191,8 +191,8 @@ configuration:
   inputs:
     success: ${{ msg.api_call.statusCode >= 200 && msg.api_call.statusCode < 300 }}
   options:
-    statusCode: ${{ inputs.success ? 200 : 500 }}
-    body: ${{ inputs.success ? msg.api_call.body : { error: 'Processing failed' } }}
+    statusCode: "${{ inputs.success ? 200 : 500 }}"   # quoted: a plain YAML value cannot contain ': '
+    body: "${{ inputs.success ? msg.api_call.body : { error: 'Processing failed' } }}"
     headers:
       content-type: application/json
 ```
@@ -218,11 +218,14 @@ ACTR01trigger:
   type: WebhookTriggerActor
   msgVar: webhook_trigger
   configuration:
-    options:
+    webhook:                     # static, literals only
+      triggerKey: 01KD298E3VRBDAZN9X5ETV4R6G   # borgiq generate id webhooktriggerkey
       allowedMethods:
         - post
-      respondImmediately: false  # Wait for WebhookResponseActor
-      emitRawBody: false
+    options:
+      webhook:                   # interpolatable response behavior
+        respondImmediately: false  # Wait for WebhookResponseActor
+        emitRawBody: false
 
 # ... processing actors ...
 

@@ -192,7 +192,7 @@ configuration:
 ### Extract Data from Email
 
 ```typescript
-// In DenoActor
+// In DenoActor, with configuration.inputs: ${{ msg.email_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
@@ -228,35 +228,30 @@ function determinePriority(subject: string, body: string): string {
 
 ### Process Attachments
 
-```typescript
-// In DenoActor
-import type { Request, Response } from "@borgiq/actors";
+`attachments` holds BIQFile references (`fileName`, `mimeType`, `sizeInBytes`, …), not file content. Split them and fetch each file's content with a MessageProcessorActor `downloadFileAsBase64` (or a short-lived URL with `downloadFileUrl`):
 
-export default async function receive(req: Request): Promise<Response> {
-  const email = req.inputs;
-  const processedAttachments = [];
+```yaml
+# 1. One message per attachment
+ACTR01splitAttachments:
+  type: MessageProcessorActor
+  msgVar: split_attachments
+  configuration:
+    options:
+      action: split
+      valueToSplit: ${{ msg.email_trigger.attachments ?? [] }}
+      emitKey: attachment
 
-  for (const attachment of email.attachments || []) {
-    // Decode base64 content
-    const content = atob(attachment.content);
+# 2. Content of each file: emits { file, base64 }
+ACTR01downloadAttachment:
+  type: MessageProcessorActor
+  msgVar: download_attachment
+  configuration:
+    options:
+      action: downloadFileAsBase64
+      file: ${{ msg.split_attachments.attachment }}
 
-    // Process based on content type
-    if (attachment.contentType === 'application/json') {
-      const data = JSON.parse(content);
-      processedAttachments.push({
-        filename: attachment.filename,
-        data,
-      });
-    }
-  }
-
-  return {
-    results: {
-      subject: email.subject,
-      attachments: processedAttachments,
-    },
-  };
-}
+# 3. Downstream: ${{ msg.download_attachment.file.fileName }}, ${{ msg.download_attachment.file.mimeType }},
+#    and Q.fromBase64AsText(msg.download_attachment.base64) for a text file
 ```
 
 ### Forward to AI for Processing
@@ -272,7 +267,7 @@ configuration:
   options:
     systemPrompt: |
       You are an email classifier. Analyze the email and categorize it.
-    userPrompt: |
+    prompt: |
       Subject: ${{ inputs.emailSubject }}
 
       Body: ${{ inputs.emailBody }}

@@ -1,6 +1,6 @@
 ---
 name: borgiq-builder
-description: Build Actors, Triggers, AI Agents, and web apps for BorgIQ. Supports HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor (serverless coding agent with filesystem/bash, sessions, and BorgIQ tools), AgentHarnessActor (sandboxed Claude Code with session persistence), CollectionActor, StreamActor, AppTriggerActor, InterfaceTriggerActor, WebhookTriggerActor. Use for workflow automations, REST API integrations, custom Deno/Python actors, AI-powered tasks, autonomous AI agents with tools, agent harness sandboxed execution, triggers (scheduled, webhook, email, button, interface, app, callable), or web apps with actor-backed APIs. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
+description: Build Actors, Triggers, AI Agents, and web apps for BorgIQ. Supports HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor (serverless coding agent with filesystem/bash, sessions, and BorgIQ tools), AgentHarnessActor (sandboxed Claude Code with session persistence), CollectionActor, StreamActor, ReactAppTriggerActor, InterfaceTriggerActor, WebhookTriggerActor. Use for workflow automations, REST API integrations, custom Deno/Python actors, AI-powered tasks, autonomous AI agents with tools, agent harness sandboxed execution, triggers (scheduled, webhook, email, button, interface, app, callable), or web apps with actor-backed APIs. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
 ---
 
 # BorgIQ Builder
@@ -106,14 +106,14 @@ Only use the `fork` and `forkJoin` MessageProcessorActor actions when you need t
 | Scenario | Use Fork/ForkJoin? |
 |----------|-------------------|
 | Run B and C in parallel, D processes each separately | **No** - just connect A→B→D and A→C→D |
-| Run B and C in parallel, D needs combined results from both | **Yes** - use `fork` before split, `forkJoin` to recombine |
+| Run B and C in parallel, D needs combined results from both | **Yes** - use `fork` before the branches, `forkJoin` to recombine |
 | Fire-and-forget parallel notifications (email + Slack) | **No** - just connect to both actors |
 | Parallel API calls where you need all results together | **Yes** - use `fork`/`forkJoin` pattern |
 
 **Critical rules:**
 - `forkJoin` requires `enableSTM: true`
 - MessageProcessorActor always uses only `SPRTdefault` (fork uses multiple edges, not multiple sourcePorts)
-- Only RouterActor, AiRouterActor, InterfaceActor, AiAgentActor, and AgentHarnessActor use multiple sourcePorts
+- Only RouterActor, AiRouterActor, InterfaceActor, AiAgentActor, and AgentHarnessActor use multiple sourcePorts ([port IDs](references/edges-and-positioning.md#port-ids))
 
 ## Routing to Specialized Skills
 
@@ -190,7 +190,7 @@ Use **DenoActor** (or PythonActor) ONLY when you need:
 
 If the task can be done with `${{ }}` expressions and Q-lib functions, use MessageProcessorActor.
 
-**Important: Avoid overusing DenoActor for data transformation.** Any actor's `vars` and `outputs` configuration sections support `${{ }}` expressions. Use `vars` for intermediate computations and `outputs` for formatting the final result. Only reach for DenoActor when you need fetch, I/O, or imperative logic.
+**Important: Avoid overusing DenoActor for data transformation.** Every non-code actor's `vars` and `outputs` sections support `${{ }}` expressions (code actors skip both). Use `vars` for intermediate computations and `outputs` for formatting the final result. Only reach for DenoActor when you need fetch, I/O, or imperative logic.
 
 | Scenario | Use |
 |----------|-----|
@@ -262,7 +262,8 @@ Trigger actors start workflows (flowruns). Each workflow must have exactly one t
 | **WebhookTriggerActor** | Receives HTTP requests at a unique webhook URL | [webhook-trigger-actor.md](references/webhook-trigger-actor.md) |
 | **EmailTriggerActor** | Receives emails at a unique email address | [email-trigger-actor.md](references/email-trigger-actor.md) |
 | **InterfaceTriggerActor** | Displays a web form to signed-in workspace members and triggers on submission | [interface-trigger-actor.md](references/interface-trigger-actor.md) |
-| **AppTriggerActor** | Hosts a web application (HTML/CSS/JS) with no form semantics. Does not emit messages. | [app-trigger-actor.md](references/app-trigger-actor.md) |
+| **ReactAppTriggerActor** | The standard app surface: a React app compiled server-side, served in a sandboxed iframe, calling flows through named webhook endpoints. Does not emit messages. | [`borgiq-react-app-builder` spoke](../borgiq-react-app-builder/SKILL.md) |
+| **AppTriggerActor** | Legacy raw HTML/CSS/JS app; maintain existing ones only. Does not emit messages. | [app-trigger-actor.md](references/app-trigger-actor.md) |
 | **ScheduledTriggerActor** | Runs on a cron-based schedule | [scheduled-trigger-actor.md](references/scheduled-trigger-actor.md) |
 | **UniversalTriggerActor** | Code-first trigger that fires on webhook requests, a cron schedule, or manual Invoke — user TypeScript (`receive(req: TriggerRequest)`) runs on every fire and branches on `req.trigger.type` | [universal-trigger-actor.md](references/universal-trigger-actor.md) |
 | **CallableTriggerActor** | Invoked by parent flows (sub-flow entry point) | [callable-trigger-actor.md](references/callable-trigger-actor.md) |
@@ -276,7 +277,7 @@ Trigger actors start workflows (flowruns). Each workflow must have exactly one t
 | Build an API endpoint | WebhookTriggerActor |
 | Process incoming emails | EmailTriggerActor |
 | Forms and data collection for signed-in workspace members | InterfaceTriggerActor |
-| Web applications (SPA, dashboards, interactive tools) | AppTriggerActor |
+| Web applications (SPA, dashboards, interactive tools) | ReactAppTriggerActor |
 | Periodic/scheduled tasks (hourly, daily, weekly) | ScheduledTriggerActor |
 | One workflow fired by webhook **and** schedule (and manual testing) | UniversalTriggerActor |
 | Custom code at trigger time (normalize, filter, dedupe, respond before emitting) | UniversalTriggerActor |
@@ -310,7 +311,7 @@ All triggers emit a message accessible to downstream actors via `msg.<trigger_ms
 - **WebhookTriggerActor**: Emits `{ meta, method, headers, body, queryParams, rawBody?, response? }`
 - **EmailTriggerActor**: Emits `{ messageId, from, to, subject, date, hasAttachments, textBody, htmlBody, attachments, headers }`
 - **InterfaceTriggerActor**: Emits `{ meta: { submissionInterfaceId, user }, body: { ...field values... } }`
-- **AppTriggerActor**: Does **not** emit messages (no downstream workflow). Hosts a web application only.
+- **ReactAppTriggerActor** and **AppTriggerActor**: Do **not** emit messages (no downstream workflow). They host a web application only.
 - **ScheduledTriggerActor**: Emits `{ triggeredAt, lastTriggeredAt }`
 - **UniversalTriggerActor**: Emits whatever `results` the user code returns (free-form; `results: undefined` emits nothing)
 - **CallableTriggerActor**: Emits the payload passed by the parent flow
@@ -406,7 +407,7 @@ BorgIQ actors are designed to be **templatized and reusable**. Configuration sec
 
 5. **error** — Error handling. Has access to `results`. Determines if the actor failed and whether to retry.
 
-6. **outputs** — Output transformation. Only evaluated if no error. Transforms `results` for downstream actors.
+6. **outputs** — Output transformation. Only evaluated if no error. Transforms `results` for downstream actors. Code actors (Deno, Python, UniversalTrigger) skip steps 2 and 6: the code's return value is the message.
 
 ### inputs vs vars — the rule
 
@@ -457,7 +458,7 @@ configuration:
 
 ## BorgIQ Expressions
 
-Use `${{ <javascript-expression> }}` for Deno-compatible JavaScript expressions. Only YAML values can contain expressions.
+Use `${{ <javascript-expression> }}` for Deno-compatible JavaScript expressions. Only YAML values can contain expressions. Plain YAML rejects `: ` in a value, so double-quote an expression containing one (a ternary, an object literal): `a: "${{ x ? 1 : 2 }}"`.
 
 **Available:** `Q.*` utility functions (see [q-lib.md](references/q-lib.md)), all JavaScript web standard globals (`btoa`, `JSON.parse`, `Math.*`, array/string methods, etc.)
 
@@ -479,9 +480,10 @@ See [references/context.md](references/context.md) for full documentation.
 | `inputs` | Actor input parameters |
 | `msg` | Upstream actor messages (`msg.ActorName`) |
 | `ctx` | Runtime context (org, workspace, canvas, flowrun, actor info) |
+| `trigger` | The firing event (trigger actors only) |
 | `credentials` | Mapped credentials from workspace |
-| `connection` | Single connection for authentication |
-| `connections` | Multiple connections (access via `connections.auth`) |
+| `connection` | The actor's one connection (`connection.auth`) |
+| `assets` | Workspace assets by key |
 | `results` | Response after actor invocation |
 | `vars` | Computed variables |
 | `err` | Error information from upstream actors |
@@ -660,25 +662,25 @@ borgiq validate file.yaml --post-process -i # Post-process
 
 ## Generation Instructions
 
-1. Return ONLY YAML, no explanations
+1. With shell access, write the actors into bundle files ([Deploying](#deploying-and-testing-with-the-cli)); without it, return only YAML, no explanations
 2. Return ONE actor per request (unless building a complete flow)
-3. Generate actor ID using the script before building
+3. Generate each actor ID with `borgiq generate id actor` before building
 4. Use URL concatenation: `https://api.example.com/${{ inputs.id }}`
 5. Only use `outputs` section if user requests custom output formatting
 6. Use `|` for multiline strings with special characters, properly indented
 7. Generate appropriate input schemas; keep them simple
-8. Define input keys with empty values in the `inputs` section
+8. Map each input from upstream (`${{ msg.<msgVar>.<field> }}`); leave one empty only when nothing upstream supplies it ([inputs vs vars](#inputs-vs-vars--the-rule))
 9. Use 2-space indentation consistently
-10. Always use `connection` for authentication
+10. Use `connection` for auth; a second source goes in `credentials` with `source: connection`
 11. Never ask for secrets via `inputs`
 12. For object schemas without defined properties, use `type: any`. For example `type: object\ntitle: UserInfo\ndescription: User information` should be `type: any` thus it would be written as `type: any\ntitle: UserInfo\ndescription: User information`
 13. Actors are single-purpose; suggest variants for different options
 14. Assume inputs may be missing; use `?.` operator for optional access
 15. Expressions can be `undefined` `${{ inputs?.field }}` will be `undefined` if `inputs` or `inputs.field` is `undefined`
-16. Handle empty arrays gracefully: `${{ inputs.field?.length > 0 ? inputs.field : undefined }}`
+16. Handle empty arrays gracefully: `field: "${{ inputs.field?.length > 0 ? inputs.field : undefined }}"`
 17. **For parallel workflows**, see [Concurrent Execution Model](#concurrent-execution-model) - use fork/forkJoin only when combining results, not for fire-and-forget
 18. **Always validate generated YAML** using `borgiq validate` before presenting to the user
-19. **Always include a CommentActor** at the top of every workflow with setup instructions, prerequisites, and a brief spec. Position it above all other actors (negative `y` value). Use markdown in the `description` field. See [comment-actor.md](references/comment-actor.md) for details.
+19. Put setup instructions, prerequisites, and a brief spec in the canvas `README.md`; add a CommentActor (negative `y`) only for an in-canvas note or, without a bundle, for those notes ([comment-actor.md](references/comment-actor.md))
 
 ## Workflow Composition
 
@@ -715,7 +717,7 @@ For detailed documentation on edges, ports, positioning, and router configuratio
 - Edges connect actors via `sourcePortId` → `targetPortId` (always `TPRTdefault`)
 - Generate edge IDs: `borgiq generate id edge`
 - Position actors top-to-bottom: increment `y` by 200 (600 after Interface actors)
-- RouterActor uses custom source ports (`SPRTxxxxxxx`) for conditional routing
+- RouterActor and AiRouterActor use custom source ports (`SPRT` + 7 characters); other ports: [Port IDs](references/edges-and-positioning.md#port-ids)
 
 ## Workflow Examples
 
@@ -782,7 +784,7 @@ For detailed guidance on editing workflows, see [editing-workflows.md](reference
 For teams migrating automations from n8n, Zapier, or Make, see [migration-from-automation-platforms.md](references/migration-from-automation-platforms.md).
 
 **Key principles:**
-- **Most integrations → HttpRequestActor** — any SaaS with a REST API maps to a single HttpRequestActor with the appropriate Connection for auth
+- **Integrations → templates first**, then a single HttpRequestActor with the appropriate Connection when no template fits
 - **Data transformations → MessageProcessorActor** — use `inject` action with `${{ }}` expressions instead of platform-specific formatters or code nodes
 - **Parallel execution is automatic** — no need to configure; all downstream actors run concurrently
 - The reference includes concept mapping tables, expression migration guides, and per-platform examples

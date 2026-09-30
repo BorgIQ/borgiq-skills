@@ -43,7 +43,7 @@ actors:
     description: Trigger the workflow on a schedule
     isActive: true
     continueOnError: false
-    enableLTM: false
+    enableLTM: true
     enableSTM: false
     sourcePorts:
       - id: SPRTdefault
@@ -68,6 +68,7 @@ Schedule config is fully **static** — it has no interpolatable fields. It live
 | `cron` | `configuration.schedule` | string | Yes | Cron expression defining when to run (renamed from `schedule`) |
 | `timezone` | `configuration.schedule` | string | No | Timezone for the schedule (default: America/New_York) |
 | `enabled` | `configuration.schedule` | boolean | No | UniversalTriggerActor only — when false no cron job is registered |
+| `preventOverlappingFlowruns` | `configuration.schedule` | boolean | No | ScheduledTriggerActor only (default `false`) — when true, a tick emits nothing while the flowrun started by the previous tick is still running. The trigger tracks that flowrun in its LTM, so keep `enableLTM: true` (the default for this trigger) |
 
 ## TypeScript Schema Definition
 
@@ -90,6 +91,8 @@ export const ScheduleConfigSchema = z.object({
     .describe('The timezone used to evaluate the cron expression.'),
   enabled: z.boolean().optional()
     .describe('UniversalTriggerActor only: when false no cron job is registered.'),
+  preventOverlappingFlowruns: z.boolean().optional()
+    .describe('ScheduledTriggerActor only: when true, a scheduled flowrun is skipped if the previous flowrun is still in progress.'),
 });
 
 /** The ScheduledTriggerActor options are empty — all schedule config is static. */
@@ -110,9 +113,9 @@ export type ScheduledTriggerActorResult = z.infer<typeof ScheduledTriggerActorRe
 
 ### Validation Rules
 
-- `schedule` must be a valid cron expression matching the pattern
+- `cron` must be a valid cron expression matching the pattern
 - `timezone` must be a valid IANA timezone (from `Intl.supportedValuesOf('timeZone')`)
-- `schedule` does **not** support interpolated values (`${{ }}` expressions)
+- `cron` does **not** support interpolated values (`${{ }}` expressions)
 
 ### Special Cron Shortcuts
 
@@ -130,7 +133,7 @@ The cron pattern also supports these shortcuts:
 
 ### Schedule (Cron Expression)
 
-The `schedule` option uses standard cron syntax:
+The `cron` field uses standard cron syntax:
 
 ```
 ┌───────────── minute (0-59)
@@ -271,7 +274,7 @@ configuration:
 ```
 
 ```typescript
-// In DenoActor
+// In DenoActor, with configuration.inputs: ${{ msg.scheduled_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
@@ -294,7 +297,7 @@ export default async function receive(req: Request): Promise<Response> {
 
 ## Using LTM for Incremental Processing
 
-Combine scheduled triggers with LTM to track state between runs:
+Combine scheduled triggers with LTM to track state between runs. The DenoActor below needs `enableLTM: true` and `configuration.inputs: ${{ msg.scheduled_trigger }}`:
 
 ```typescript
 import type { Request, Response } from "@borgiq/actors";
@@ -312,15 +315,14 @@ export default async function receive(req: Request): Promise<Response> {
     await processItem(item);
   }
 
-  // Update last run timestamp in LTM (optional, since trigger provides lastTriggeredAt)
-  _.set(req.memory.ltm, "lastRunAt", req.inputs.triggeredAt);
-
   return {
     results: {
       processedCount: items.length,
       lastRunAt: req.inputs.triggeredAt,
     },
-    memory: req.memory,
+    // Update last run timestamp in LTM (optional, since trigger provides lastTriggeredAt).
+    // A returned top-level key replaces the stored one; other LTM keys are kept.
+    memory: { ltm: { lastRunAt: req.inputs.triggeredAt } },
   };
 }
 ```
@@ -387,7 +389,7 @@ actors:
     description: Trigger data synchronization every hour
     isActive: true
     continueOnError: false
-    enableLTM: false
+    enableLTM: true
     enableSTM: false
     sourcePorts:
       - id: SPRTdefault

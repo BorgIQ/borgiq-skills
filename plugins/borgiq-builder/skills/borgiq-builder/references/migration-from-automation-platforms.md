@@ -52,7 +52,7 @@ This guide maps concepts from n8n, Zapier, and Make to their BorgIQ equivalents,
 
 ### Why HttpRequestActor Over Native Connectors
 
-In n8n, Zapier, and Make, each SaaS integration has a dedicated connector (e.g., "Slack Node", "Gmail Action", "Google Sheets Module"). In BorgIQ, **most integrations map to HttpRequestActor** — a universal REST client.
+In n8n, Zapier, and Make, each SaaS integration has a dedicated connector (e.g., "Slack Node", "Gmail Action", "Google Sheets Module"). In BorgIQ, **search the template catalog first** (`borgiq templates apps --search "<vendor>"`, and, with `@borgiq/cli` 0.13.0 or later, `borgiq recipes list` for a multi-actor flow): a template is a vetted, preconfigured actor, usually an HttpRequestActor. Hand-build an **HttpRequestActor** — a universal REST client — only when no template fits.
 
 **Advantages:**
 - Works with any API that has REST endpoints (which is virtually all of them)
@@ -83,6 +83,8 @@ BorgIQ Connections map directly to platform credentials. HttpRequestActor access
 
 ### Migration Examples by Platform
 
+The examples below are actor fragments (`type`, `name`, `msgVar`, `configuration`); see [Common Actor Structure](../SKILL.md#common-actor-structure) for the full actor.
+
 #### n8n: Slack "Send Message" Node → BorgIQ
 
 **n8n configuration:**
@@ -95,10 +97,10 @@ Authentication: OAuth2
 
 **BorgIQ equivalent:**
 ```yaml
-slack_send_message:
-  type: HttpRequestActor
-  label: Send Slack Message
-  connection: slack-oauth          # OAuth2 connection
+type: HttpRequestActor
+name: Send Slack message
+msgVar: send_slack_message
+configuration:
   options:
     url: https://slack.com/api/chat.postMessage
     method: POST
@@ -107,6 +109,9 @@ slack_send_message:
     body:
       channel: general
       text: Hello from BorgIQ!
+  connection:
+    key: my-slack              # the workspace connection's key
+    type: slack-oauth2         # a registered connection type
   error:
     if: ${{ !Q.isHTTPStatusInRange(results.statusCode, ["200-299"]) }}
     retryIf: ${{ Q.isHTTPStatusInRange(results.statusCode, ["429", "500-599"]) }}
@@ -126,10 +131,15 @@ Fields: Name, Email, Amount
 
 **BorgIQ equivalent:**
 ```yaml
-sheets_add_row:
-  type: HttpRequestActor
-  label: Add Google Sheets Row
-  connection: google-oauth
+type: HttpRequestActor
+name: Add Google Sheets row
+msgVar: add_google_sheets_row
+configuration:
+  inputs:
+    spreadsheetId: ${{ msg.trigger.body.spreadsheetId }}
+    name: ${{ msg.trigger.body.name }}
+    email: ${{ msg.trigger.body.email }}
+    amount: ${{ msg.trigger.body.amount }}
   options:
     url: https://sheets.googleapis.com/v4/spreadsheets/${{ inputs.spreadsheetId }}/values/Sheet1!A1:append
     method: POST
@@ -139,9 +149,12 @@ sheets_add_row:
       valueInputOption: USER_ENTERED
     body:
       values:
-        - - ${{ msg.trigger.name }}
-          - ${{ msg.trigger.email }}
-          - ${{ msg.trigger.amount }}
+        - - ${{ inputs.name }}
+          - ${{ inputs.email }}
+          - ${{ inputs.amount }}
+  connection:
+    key: my-google-sheets
+    type: google-sheets
 ```
 
 #### Make: Airtable "Create Record" → BorgIQ
@@ -156,10 +169,14 @@ Fields: Name, Company, Status
 
 **BorgIQ equivalent:**
 ```yaml
-airtable_create_record:
-  type: HttpRequestActor
-  label: Create Airtable Record
-  connection: airtable-pat
+type: HttpRequestActor
+name: Create Airtable record
+msgVar: create_airtable_record
+configuration:
+  inputs:
+    baseId: ${{ msg.trigger.body.baseId }}
+    name: ${{ msg.trigger.body.name }}
+    company: ${{ msg.trigger.body.company }}
   options:
     url: https://api.airtable.com/v0/${{ inputs.baseId }}/Contacts
     method: POST
@@ -167,9 +184,11 @@ airtable_create_record:
     contentType: json
     body:
       fields:
-        Name: ${{ msg.trigger.name }}
-        Company: ${{ msg.trigger.company }}
+        Name: ${{ inputs.name }}
+        Company: ${{ inputs.company }}
         Status: New
+  connection:
+    key: my-airtable-token     # a bearer connection; omit `type` to accept any connection
 ```
 
 ---
@@ -193,9 +212,10 @@ In other platforms, data transformation happens through platform-specific expres
 #### Reshape API response (n8n "Set" / Zapier "Formatter" / Make "Set Variable")
 
 ```yaml
-transform_response:
-  type: MessageProcessorActor
-  label: Transform Response
+type: MessageProcessorActor
+name: Transform response
+msgVar: transform_response
+configuration:
   options:
     action: inject
     payload:
@@ -209,61 +229,71 @@ transform_response:
 
 ```yaml
 # Split array into individual items
-split_items:
-  type: MessageProcessorActor
-  label: Split Items
-  options:
-    action: split
-    valueToSplit: ${{ msg.api_call.body.records }}
-    emitKey: record
-    limit: 100
+- type: MessageProcessorActor
+  name: Split items
+  msgVar: split_items
+  configuration:
+    options:
+      action: split
+      valueToSplit: ${{ msg.api_call.body.records }}
+      emitKey: record
+      limit: 100
 
 # Process each item (e.g., call an API per item)
-process_item:
-  type: HttpRequestActor
-  label: Process Each Item
-  options:
-    url: https://api.example.com/items/${{ msg.split_items.record.id }}
-    method: PUT
-    body:
-      status: processed
+- type: HttpRequestActor
+  name: Process each item
+  msgVar: process_item
+  continueOnError: true        # or collect waits forever for a failed item
+  configuration:
+    options:
+      url: https://api.example.com/items/${{ msg.split_items.record.id }}
+      method: PUT
+      body:
+        status: processed
 
 # Recombine results
-collect_results:
-  type: MessageProcessorActor
-  label: Collect Results
+- type: MessageProcessorActor
+  name: Collect results
+  msgVar: collect_results
   enableSTM: true
-  options:
-    action: collect
-    splitId: ${{ msg.split_items.splitId }}
-    size: ${{ msg.split_items.size }}
-    captureValue: ${{ msg.process_item }}
-    emitKey: processedItems
+  configuration:
+    options:
+      action: collect
+      splitId: ${{ msg.split_items.splitId }}
+      size: ${{ msg.split_items.size }}
+      captureValue: ${{ msg.process_item ?? err.process_item }}
+      emitKey: processedItems
 ```
 
 #### Conditional filtering (n8n "IF" / Zapier "Filter" / Make "Filter")
 
 ```yaml
 # Simple filter — stops message if condition is false
-filter_active:
-  type: MessageProcessorActor
-  label: Filter Active Only
-  options:
-    action: filter
-    condition: ${{ msg.api_call.body.status === 'active' }}
+- type: MessageProcessorActor
+  name: Filter active only
+  msgVar: filter_active
+  configuration:
+    options:
+      action: filter
+      filter: ${{ msg.api_call.body.status === 'active' }}
 
 # Multi-branch routing — use RouterActor instead
-route_by_status:
-  type: RouterActor
-  label: Route by Status
-  options:
-    routes:
-      - name: active
-        condition: ${{ msg.api_call.body.status === 'active' }}
-      - name: inactive
-        condition: ${{ msg.api_call.body.status === 'inactive' }}
-      - name: pending
-        condition: true  # default/catch-all
+- type: RouterActor
+  name: Route by status
+  msgVar: route_by_status
+  sourcePorts:                 # one port per route; conditions are keyed by port name
+    - id: SPRTactive0          # borgiq generate id sourceport
+      name: Active
+    - id: SPRTinactiv
+      name: Inactive
+    - id: SPRTdefault          # fallback: takes no condition
+      name: Pending
+  configuration:
+    options:
+      emitType: singleRoute
+      conditions:
+        Active: ${{ msg.api_call.body.status === 'active' }}
+        Inactive: ${{ msg.api_call.body.status === 'inactive' }}
 ```
 
 ---
@@ -277,7 +307,7 @@ route_by_status:
 | Email received | **EmailTriggerActor** — fires on inbound email to workspace address |
 | Manual / Button | **ButtonTriggerActor** — manual trigger from BorgIQ UI |
 | Form submission | **InterfaceTriggerActor** — renders a form, triggers on submit |
-| Web app interaction | **AppTriggerActor** — custom HTML/CSS/JS app as trigger |
+| Web app interaction | **ReactAppTriggerActor** — React app compiled and hosted on the canvas (AppTriggerActor for legacy raw-HTML apps) |
 | Sub-workflow call | **CallableTriggerActor** — invoked by CallFlowActor from another workflow |
 
 **Zapier-specific note:** Zapier's polling triggers (which check APIs on intervals) map to **ScheduledTriggerActor → HttpRequestActor** in BorgIQ. Set up a scheduled trigger and make the API call explicitly.
@@ -310,23 +340,25 @@ BorgIQ executes all downstream actors concurrently by default. No configuration 
 
 | Platform | How | BorgIQ |
 |----------|-----|--------|
-| n8n | Error Trigger, try/catch node | **`error` block** on any actor — `if`, `retryIf`, `retryCount`, `retryDelayMs` |
+| n8n | Error Trigger, try/catch node | **`error` block** on any actor — `if`, `retryIf`, `message`, `includeResult` — plus `continueOnError: true` to route the failure to `err.<msgVar>` |
 | Zapier | Auto-replay | **`error.retryIf`** with status code checks |
 | Make | Error handler route, Break/Resume | **`error` block** + **RouterActor** for conditional error handling |
 
 ```yaml
 # Standard error handling pattern for API calls
-api_call:
-  type: HttpRequestActor
+type: HttpRequestActor
+name: API call
+msgVar: api_call
+configuration:
   options:
     url: https://api.example.com/data
     method: GET
     auth: ${{ connection.auth }}
+  connection:
+    key: my-api-connection
   error:
     if: ${{ !Q.isHTTPStatusInRange(results.statusCode, ["200-299"]) }}
     retryIf: ${{ Q.isHTTPStatusInRange(results.statusCode, ["429", "500-599"]) }}
-    retryCount: 3
-    retryDelayMs: 2000
     includeResult: true
     message: ${{ Q.toJSON(results) }}
 ```
@@ -351,7 +383,7 @@ Rather than porting every workflow one-to-one, look for steps these capabilities
 | **Autonomous AI agents** | AiAgentActor | AI coding agent with a private workspace (filesystem + bash) that also calls tools (other actors) until the task is done; sessions continue via `sessionId` |
 | **Claude in a Box** | AgentHarnessActor | Runs Claude Code in a sandbox — any business process codified as a skill becomes a workflow node |
 | **Persistent storage** | CollectionActor | Built-in key-value collections with queries, TTL, labels, and transactions |
-| **Custom web apps** | AppTriggerActor | Full HTML/CSS/JS web app as a trigger with CSP controls and browser API permissions |
+| **Custom web apps** | ReactAppTriggerActor | React app compiled server-side and served on the canvas, calling flows through webhook endpoints (AppTriggerActor for legacy raw-HTML apps) |
 | **Rich forms** | InterfaceTriggerActor / InterfaceActor | Configurable form components (text, select, date, file upload, etc.) as triggers or mid-flow |
 | **AI routing** | AiRouterActor | Route messages using LLM classification instead of hardcoded conditions |
 | **Human-in-the-loop** | MessageProcessorActor | `issueCallbackToken` / `waitForCallbackToken` for approval workflows |
@@ -363,7 +395,7 @@ Rather than porting every workflow one-to-one, look for steps these capabilities
 
 1. **Inventory your automations** — list all workflows, their triggers, and integrations used
 2. **Map triggers** — identify the BorgIQ trigger type for each workflow (see [Trigger Migration](#trigger-migration))
-3. **Map integrations to HttpRequestActor** — for each SaaS connector:
+3. **Map integrations** — for each SaaS connector, search templates (and recipes) first; when none fits, build an HttpRequestActor:
    - Find the API documentation for the service
    - Note the endpoint URL, method, and required headers
    - Set up a BorgIQ Connection with the appropriate auth type

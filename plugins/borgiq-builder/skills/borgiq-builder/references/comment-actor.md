@@ -2,9 +2,9 @@
 
 CommentActor is a non-functional actor used for adding visual annotations to workflows. It does not participate in message flow or execution—it's purely for documentation purposes.
 
-## Required: Workflow Setup Comment
+## Workflow Setup Comment
 
-**Every workflow must include a CommentActor at the top** with setup instructions, prerequisites, and a brief spec. This is the first actor in the YAML and is positioned above all other actors (negative `y` value).
+A CommentActor is optional. In a canvas bundle, the canvas's setup instructions, prerequisites, and spec belong in its `README.md` (bundle root). Add a setup CommentActor when the user wants the notes on the canvas itself, or when you return a YAML document without a bundle; make it the first actor in the YAML and position it above all other actors (negative `y` value).
 
 The setup comment should include:
 - **Brief description** of what the workflow does
@@ -56,7 +56,7 @@ Position the CommentActor **above** all other actors by using a negative `y` val
 
 ## Use Cases
 
-- **Workflow setup comment** (required) — setup instructions and spec at the top of every workflow
+- **Workflow setup comment** — setup instructions and spec at the top of a workflow
 - Document workflow sections with explanations
 - Add TODO notes for future improvements
 - Provide setup instructions or prerequisites

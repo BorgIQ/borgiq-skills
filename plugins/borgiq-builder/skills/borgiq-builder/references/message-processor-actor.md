@@ -114,7 +114,7 @@ configuration:
 
 ### renderTemplate
 
-Renders a LiquidJS template using the actor's inputs.
+Renders a LiquidJS template with the actor's `inputs`. Read data through Liquid tags (`{{ inputs.name }}`): a `${{ }}` in the template is interpolated before Liquid runs, where loop variables such as `item` do not exist.
 
 **Options:**
 | Option | Type | Required | Description |
@@ -135,7 +135,7 @@ configuration:
 
       Your order contains:
       {% for item in inputs.items %}
-      - {{ item.name }}: ${{ item.price }}
+      - {{ item.name }}: {{ item.price }}
       {% endfor %}
 ```
 
@@ -203,7 +203,7 @@ configuration:
     filter: ${{ msg.webhook.body.event === 'order.created' }}
 ```
 
-**Emitted Message:** `true` or `false` (only emits if filter evaluates to `true`).
+**Emitted Message:** `true` when `filter` is true; otherwise the actor emits nothing and the branch stops.
 
 ---
 
@@ -217,7 +217,7 @@ Delays message emission by a specified number of seconds.
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `action` | `"delayBySeconds"` | Yes | Must be `delayBySeconds` |
-| `seconds` | number | Yes | Seconds to delay (must be > 0) |
+| `seconds` | number | Yes | Seconds to delay (0 or more) |
 
 **Example:**
 ```yaml
@@ -617,11 +617,10 @@ ACTR01forkjoin:
   configuration:
     inputs:
       forkId: ${{ msg.fork.forkId }}
-      forkSize: ${{ msg.fork.forkSize }}
     options:
       action: forkJoin
       forkId: ${{ inputs.forkId }}
-      forkSize: ${{ inputs.forkSize }}
+      size: ${{ ctx.actor.upstreamActorCount }}  # 3 parallel calls
 ```
 
 ### Visual Comparison
@@ -725,8 +724,8 @@ Issues a callback token for async human-in-the-loop or external system callbacks
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `action` | `"issueCallbackToken"` | Yes | Must be `issueCallbackToken` |
-| `expiresAfterInSeconds` | number | No | Token validity duration |
-| `multipleResponse` | boolean | No | Allow multiple responses (default: `false`) |
+| `expiresAfterInSeconds` | number | No | Token validity duration (default: 604800, 7 days) |
+| `multipleResponse` | boolean | No | Ignored: a token resolves once; the emitted `multipleResponse` is always `false` |
 
 **Example:**
 ```yaml
@@ -740,8 +739,8 @@ configuration:
 **Emitted Message:**
 ```json
 {
-  "token": "cbt_01HQXYZ...",
-  "url": "https://borgiq.com/callback/cbt_01HQXYZ...",
+  "token": "TOKN0_5f3c9a...",
+  "url": "https://<borgiq-api-host>/tkn/TOKN0_5f3c9a...",
   "expiresAt": "2024-01-16T10:30:00.000Z",
   "multipleResponse": false
 }
@@ -769,7 +768,7 @@ configuration:
     timeoutInSeconds: 86400
 ```
 
-**Emitted Message:** When the callback URL is invoked, the actor emits the HTTP request details:
+**Emitted Message:** a `notifyCallbackToken` `payload` as-is or, when the callback `url` is called, the HTTP request details:
 
 ```json
 {
@@ -791,7 +790,7 @@ configuration:
 }
 ```
 
-The `body` contains whatever payload was sent to the callback URL. Access the response data via `msg.wait_actor.body`.
+Read a callback URL's payload as `msg.wait_actor.body` and a notified payload's fields directly (`msg.wait_actor.approved`).
 
 **Timeout Handling:**
 
@@ -829,9 +828,9 @@ ACTR01router:
   type: RouterActor
   msgVar: route_result
   sourcePorts:
-    - id: SPRT001
+    - id: SPRTsuccess
       name: Success
-    - id: SPRT002
+    - id: SPRTtimeout
       name: Timeout
     - id: SPRTdefault
       name: F
@@ -864,10 +863,10 @@ configuration:
     token: ${{ msg.issue_token.token }}
     payload:
       approved: true
-      approvedBy: ${{ ctx.user.email }}
+      approvedBy: ${{ msg.approval_form.body.email }}
 ```
 
-**Emitted Message:** The payload value.
+**Emitted Message:** `true`. The waiting `waitForCallbackToken` actor emits the `payload`. An unknown or expired token fails it with a `SignalError`.
 
 ---
 
@@ -1052,7 +1051,7 @@ ACTR01collect:
 
 ### Accumulating State Pattern
 
-Use a MessageProcessorActor named "State" repeatedly throughout a workflow to build up state incrementally. BorgIQ's `msg.ActorName` returns the message from the **last actor with that name**, enabling progressive state accumulation.
+Build up state with an `inject` step after each stage. A msgVar must be unique in a canvas (validation reports duplicates), so each state step gets its own msgVar and merges the previous step's message.
 
 ```yaml
 metadata:
@@ -1060,9 +1059,9 @@ metadata:
   source: BIQCanvas
 actors:
   ACTR01jhe8hmqvnv9tbesaqt1sej8m:
-    name: State
+    name: State after API call
     type: MessageProcessorActor
-    msgVar: state
+    msgVar: state_after_api
     schemas: {}
     version: 1
     isActive: true
@@ -1073,11 +1072,10 @@ actors:
       - id: SPRTdefault
     configuration:
       inputs:
-        company: ${{ msg.workflow_inputs.company }}
-        company_url: ${{ msg.workflow_inputs.company_url }}
+        apiData: ${{ msg.api_call.body }}
       options:
         action: inject
-        payload: ${{ Object.assign({}, msg.state, inputs) }}
+        payload: ${{ Object.assign({}, msg.state_init, inputs) }}
     continueOnError: false
     id: ACTR01jhe8hmqvnv9tbesaqt1sej8m
     position:
@@ -1087,19 +1085,19 @@ actors:
 ```
 
 **How it works:**
-1. Each "State" actor merges new data into the existing `msg.state` object
-2. `Object.assign({}, msg.state, inputs)` creates a new object combining previous state with new inputs
-3. Downstream actors always access the latest accumulated state via `msg.state`
+1. Each state actor merges its new inputs into the previous state actor's message
+2. `Object.assign({}, msg.state_init, inputs)` creates a new object combining previous state with new inputs
+3. Downstream actors read the latest state through the last state actor's msgVar (`msg.state_final`)
 
 **Usage in a workflow:**
 ```
-Trigger → State (init) → API Call → State (add API data) → Process → State (add result) → Output
+Trigger → state_init → API Call → state_after_api → Process → state_final → Output
 ```
 
-Each "State" actor adds new fields while preserving previous ones:
-- First State: `{ company: "Acme", company_url: "acme.com" }`
-- Second State: `{ company: "Acme", company_url: "acme.com", apiData: {...} }`
-- Third State: `{ company: "Acme", company_url: "acme.com", apiData: {...}, result: {...} }`
+Each state actor adds new fields while preserving previous ones:
+- `state_init`: `{ company: "Acme", company_url: "acme.com" }`
+- `state_after_api`: `{ company: "Acme", company_url: "acme.com", apiData: {...} }`
+- `state_final`: `{ company: "Acme", company_url: "acme.com", apiData: {...}, result: {...} }`
 
 ---
 

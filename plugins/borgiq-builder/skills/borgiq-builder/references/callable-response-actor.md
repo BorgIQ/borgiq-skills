@@ -176,7 +176,7 @@ configuration:
   inputs:
     hasError: ${{ !Q.isNil(err.api_call) }}
   options:
-    payload: ${{ inputs.hasError ? err.api_call : msg.api_call.body }}
+    payload: "${{ inputs.hasError ? err.api_call : msg.api_call.body }}"   # quoted: contains ': '
     throwError: ${{ inputs.hasError }}
 ```
 
@@ -184,15 +184,17 @@ configuration:
 
 The CallableResponseActor works in a parent-child flow relationship:
 
-**Parent Flow (calls the sub-flow):**
+**Parent Flow (calls the sub-flow):** the CallFlowActor must set `waitForResponse: true` to receive the response.
 ```yaml
 ACTR01callFlow:
   type: CallFlowActor
   msgVar: call_result
   configuration:
     options:
-      flowId: sub-flow-id
+      callableTriggerActorId: ACTR01kbgj09tqm83xssss6ys3c4dw   # the sub-flow's CallableTriggerActor
       payload: ${{ msg.trigger.body }}
+      waitForResponse: true
+      timeoutInSeconds: 60
 ```
 
 **Sub-Flow (returns response to parent):**
@@ -243,8 +245,8 @@ Sub-Flow:                                       │
 ## Error Handling
 
 When `throwError: true`:
-- The CallFlowActor in the parent flow will receive an error
-- If the parent's CallFlowActor has `continueOnError: true`, the error is stored in `err.call_result`
+- The CallFlowActor in the parent flow fails with a `CallableResponseError`; the `payload` is in the error's `metadata`
+- If the parent's CallFlowActor has `continueOnError: true`, the error is stored in `err.<callFlowMsgVar>`
 - If `continueOnError: false` (default), the parent flow will fail
 
 ```yaml
@@ -266,5 +268,5 @@ ACTR01callFlow:
 configuration:
   inputs:
     hasError: ${{ !Q.isNil(err.sub_flow_result) }}
-    result: ${{ msg.sub_flow_result ?? err.sub_flow_result?.payload }}
+    result: ${{ msg.sub_flow_result ?? err.sub_flow_result?.metadata }}
 ```

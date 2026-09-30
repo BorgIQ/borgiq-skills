@@ -14,6 +14,7 @@ Authentication types for HttpRequestActor. Use via `connection.auth` or configur
 | Type | Value | Description |
 |------|-------|-------------|
 | AWS | `awsKeyBased` | AWS Signature V4 authentication |
+| AWS role | `awsRoleBased` | Connection type only: BorgIQ assumes the customer's IAM role (role ARN plus a BorgIQ external ID) and `connection.auth` resolves to `awsKeyBased` values with temporary credentials. Never write it as `options.auth.type` |
 | OAuth1 | `oauth1` | OAuth 1.0 authentication |
 | OAuth2 | `oauth2` | OAuth 2.0 authentication |
 | Bearer | `bearer` | Bearer token authentication |
@@ -30,6 +31,7 @@ import { z } from 'zod';
 
 export enum AuthType {
   AWS = 'awsKeyBased',
+  AWS_ROLE = 'awsRoleBased', // connection auth type only; connection.auth resolves to AWS (awsKeyBased)
   OAUTH1 = 'oauth1',
   OAUTH2 = 'oauth2',
   BEARER = 'bearer',
@@ -261,6 +263,8 @@ Notes:
 
 For AWS services authentication.
 
+Request signing works with Server-side credentials (the default exposure mode): when the auth values or the request carry BorgIQ credential placeholders, the BorgIQ egress proxy resolves them and signs the request, for `https://` URLs only (a placeholder-bearing `http://` request is refused, not sent). Literal credentials (Sent to runtime) are signed by the runtime as the request is sent. The same holds for OAuth1 below.
+
 ```yaml
 options:
   auth:
@@ -275,7 +279,7 @@ options:
 
 ### OAuth1
 
-For legacy OAuth 1.0 APIs.
+For legacy OAuth 1.0 APIs. `signatureMethod` is one of `HMAC-SHA1` (default), `HMAC-SHA256`, `HMAC-SHA512`, `RSA-SHA1`, `RSA-SHA256`, `PLAINTEXT`; for the RSA methods `consumerSecret` holds the PEM private key. Server-side credentials are signed by the egress proxy, as for AWS.
 
 ```yaml
 options:

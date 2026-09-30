@@ -150,7 +150,7 @@ metadata:
   schemaVersion: v1.0
   source: BIQCanvas
 actors:
-  ACTR01kd9q5abc123def456gh78ij:
+  ACTR01kd9q5abc123def456gh78jmn:
     type: SendEmailActor
     version: 1
     name: Send Report Email
@@ -201,7 +201,7 @@ actors:
           reportData:
             type: any
             title: Report Data
-    id: ACTR01kd9q5abc123def456gh78ij
+    id: ACTR01kd9q5abc123def456gh78jmn
     position:
       x: 0
       'y': 0

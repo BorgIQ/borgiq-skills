@@ -66,7 +66,7 @@ actors:
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `callableTriggerActorId` | string | Yes | - | The actor ID of the CallableTriggerActor to invoke (must match pattern `ACTR` + 26 alphanumeric chars) |
+| `callableTriggerActorId` | string | Yes | - | The actor ID of the CallableTriggerActor to invoke: `ACTR` + 26 lowercase ULID characters (digits and letters except `i`, `l`, `o`, `u`). Copy it from the sub-flow's trigger |
 | `payload` | any | Yes | - | The data to send to the sub-flow's CallableTriggerActor |
 | `workspaceSlug` | string | No | Current workspace | The workspace slug where the target CallableTriggerActor resides |
 | `canvasSlug` | string | No | Current canvas | The canvas slug where the target CallableTriggerActor resides |
@@ -133,7 +133,7 @@ export const CallFlowActorOptionsJsonSchema: BIQJsonSchema = {
       type: BIQJsonSchemaType.Number,
       title: 'Timeout in Seconds',
       description: 'The timeout in seconds for the sub-flow to return a response, defaults to no timeout',
-      default: 60,
+      default: 900, // editor default (15 minutes); omitted in YAML means no timeout
     },
     payload: {
       type: BIQJsonSchemaType.Any,
@@ -240,7 +240,7 @@ configuration:
 configuration:
   options:
     canvasSlug: send-notification
-    callableTriggerActorId: ACTR01abcdefghijklmnopqrstuvwx
+    callableTriggerActorId: ACTR01km9s346q3d25vt4f5v37e3s3
     payload:
       channel: email
       recipient: ${{ msg.user.email }}
@@ -256,7 +256,7 @@ configuration:
   options:
     workspaceSlug: shared-ws
     canvasSlug: lookup-user
-    callableTriggerActorId: ACTR01xyz123abc456def789ghi012
+    callableTriggerActorId: ACTR01ke28jt97kb6cq643dzvmxxqk
     payload:
       userId: ${{ msg.trigger.body.userId }}
     waitForResponse: true
@@ -271,7 +271,7 @@ configuration:
     userData: ${{ msg.fetch_user.body }}
   options:
     canvasSlug: enrich-data
-    callableTriggerActorId: ACTR01enrichdataactorxxxxxxxx
+    callableTriggerActorId: ACTR01kfbf5kznwj47tan9zt24mnpz
     payload: ${{ inputs.userData }}
     waitForResponse: true
 ```
@@ -305,7 +305,7 @@ Sub-Flow:                                      │
 
 ### Sub-Flow Errors
 
-When the sub-flow's CallableResponseActor sets `throwError: true`:
+When the sub-flow's CallableResponseActor sets `throwError: true`, the CallFlowActor fails with a `CallableResponseError` whose `metadata` holds the response `payload`:
 
 ```yaml
 # CallFlowActor in parent flow
@@ -316,7 +316,7 @@ ACTR01callFlow:
   configuration:
     options:
       canvasSlug: validate-data
-      callableTriggerActorId: ACTR01validateactor
+      callableTriggerActorId: ACTR01kx45hy43kwjrp1xpa7z3dj8f
       payload: ${{ msg.data }}
       waitForResponse: true
 
@@ -325,7 +325,7 @@ ACTR01handleResult:
   configuration:
     inputs:
       hasError: ${{ !Q.isNil(err.sub_flow_result) }}
-      result: ${{ msg.sub_flow_result ?? err.sub_flow_result?.payload }}
+      result: ${{ msg.sub_flow_result ?? err.sub_flow_result?.metadata }}
 ```
 
 ### Timeout Handling
@@ -339,7 +339,7 @@ ACTR01callFlow:
   continueOnError: true
   configuration:
     options:
-      callableTriggerActorId: ACTR01slowprocessor
+      callableTriggerActorId: ACTR01kssz5awsh8vhtpre95b9ee0z
       payload: ${{ msg.data }}
       waitForResponse: true
       timeoutInSeconds: 30  # Fail after 30 seconds
