@@ -1,202 +1,126 @@
 # Complete Workflow Example
 
-This example demonstrates a webhook-based workflow that receives an HTTP request, processes it with a router, and returns different responses based on conditions.
-
-## Table of Contents
-
-- [Workflow Diagram](#workflow-diagram)
-- [Complete YAML](#complete-yaml)
-- [Key Points](#key-points)
-- [Advanced Example](#advanced-example)
-
-## Workflow Diagram
+A webhook endpoint that routes a request by its `action` field and answers with a WebhookResponseActor, written as a
+canvas bundle. Read it as the model for a multi-actor bundle; the format is in [canvas-bundles.md](cli/canvas-bundles.md).
 
 ```
-          ┌──────────────────────┐
-          │   Webhook Trigger    │  y: 0
-          │   (POST /webhook)    │
-          └──────────┬───────────┘
-                     │
-                     ▼
-          ┌──────────────────────┐
-          │       Router         │  y: 200
-          │   (Route by Action)  │
-          └────┬────────────┬────┘
-               │            │
-      Create   │            │  Update
-               ▼            ▼
-   ┌───────────────┐  ┌───────────────┐
-   │Create Response│  │Update Response│  y: 400
-   │ (201 Created) │  │   (200 OK)    │
-   │   x: -300     │  │   x: 300      │
-   └───────────────┘  └───────────────┘
+POST → webhook_trigger → route_by_action ─ Create  → create_response (201)
+                                          ├ Update  → update_response (200)
+                                          └ Unknown → unknown_action  (400, the default port)
 ```
 
-## Complete YAML
+## canvas.yaml
+
+The actor index (each actor lives at its `path`), positions and edges. `bundle init` and `bundle pull` also write the CLI-owned keys; leave those alone.
 
 ```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
+format: borgiq.canvas.bundle
+formatVersion: 1
+canvas:
+  slug: webhook-router
+  name: Webhook Router
 actors:
-  # 1. Webhook Trigger - receives incoming HTTP requests
-  ACTR01kd6gqghj04j8765nnqyp09a3:
-    type: WebhookTriggerActor
-    version: 1
-    name: Webhook Trigger
-    msgVar: webhook_trigger
-    description: Receives incoming webhook requests
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      webhook:                     # static, literals only
-        triggerKey: 01KD6GQGHJ04J8765NNQYP09A4   # borgiq generate id webhooktriggerkey
-        authorizationLevel: public
-        allowedMethods:
-          - post
-      options:
-        webhook:                   # interpolatable response behavior
-          respondImmediately: false  # Wait for WebhookResponseActor
-          emitRawBody: false
-    schemas: {}
-    id: ACTR01kd6gqghj04j8765nnqyp09a3
-    position:
-      x: 0
-      'y': 0
-    edges:
-      EDGE01kd6gqx5k7tvzs86y40w8etms:
-        id: EDGE01kd6gqx5k7tvzs86y40w8etms
-        sourceActorId: ACTR01kd6gqghj04j8765nnqyp09a3
-        sourcePortId: SPRTdefault
-        targetActorId: ACTR01kd6gqx5k7tvzs86y40w8etmr
-        targetPortId: TPRTdefault
-        label: ''
-        type: borgiqEdge
-
-  # 2. Router - routes based on request body content
-  ACTR01kd6gqx5k7tvzs86y40w8etmr:
-    type: RouterActor
-    version: 1
-    name: Route by Action
-    msgVar: route_by_action
-    description: Routes requests based on the action field
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRT5d5gj2s
-        name: Create
-      - id: SPRTg5vsvui
-        name: Update
-      - id: SPRTdefault
-        name: F
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          Create: ${{ msg.webhook_trigger.body?.action === 'create' }}
-          Update: ${{ msg.webhook_trigger.body?.action === 'update' }}
-    schemas: {}
-    id: ACTR01kd6gqx5k7tvzs86y40w8etmr
-    position:
-      x: 0
-      'y': 200
-    edges:
-      EDGE01kd6gr3vjxm2rs0k8s3fjq4nm:
-        id: EDGE01kd6gr3vjxm2rs0k8s3fjq4nm
-        sourceActorId: ACTR01kd6gqx5k7tvzs86y40w8etmr
-        sourcePortId: SPRT5d5gj2s
-        targetActorId: ACTR01kd6gr3vjxm2rs0k8s3fjq4na
-        targetPortId: TPRTdefault
-        label: Create
-        type: borgiqEdge
-      EDGE01kd6gr8m6q9nzp2w4j7h5k6mp:
-        id: EDGE01kd6gr8m6q9nzp2w4j7h5k6mp
-        sourceActorId: ACTR01kd6gqx5k7tvzs86y40w8etmr
-        sourcePortId: SPRTg5vsvui
-        targetActorId: ACTR01kd6gr8m6q9nzp2w4j7h5k6ma
-        targetPortId: TPRTdefault
-        label: Update
-        type: borgiqEdge
-
-  # 3a. Create Response - responds to create actions
-  ACTR01kd6gr3vjxm2rs0k8s3fjq4na:
-    type: WebhookResponseActor
-    version: 1
-    name: Create Response
-    msgVar: create_response
-    description: Returns response for create action
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      options:
-        statusCode: 201
-        body:
-          success: true
-          message: Resource created successfully
-          data: ${{ msg.webhook_trigger.body }}
-        headers:
-          content-type: application/json
-    schemas: {}
-    id: ACTR01kd6gr3vjxm2rs0k8s3fjq4na
-    position:
-      x: -300
-      'y': 400
-    edges: {}
-
-  # 3b. Update Response - responds to update actions
-  ACTR01kd6gr8m6q9nzp2w4j7h5k6ma:
-    type: WebhookResponseActor
-    version: 1
-    name: Update Response
-    msgVar: update_response
-    description: Returns response for update action
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      options:
-        statusCode: 200
-        body:
-          success: true
-          message: Resource updated successfully
-          data: ${{ msg.webhook_trigger.body }}
-        headers:
-          content-type: application/json
-    schemas: {}
-    id: ACTR01kd6gr8m6q9nzp2w4j7h5k6ma
-    position:
-      x: 300
-      'y': 400
-    edges: {}
+  - { id: ACTR01m3snwbtbgxwvsg38jghyy0wb, type: WebhookTriggerActor, path: actors/triggers/webhook/ACTR01m3snwbtbgxwvsg38jghyy0wb }
+  - { id: ACTR01m3snwc33nqnc3dexjga60bsw, type: RouterActor, path: actors/tasks/router/ACTR01m3snwc33nqnc3dexjga60bsw }
+  - { id: ACTR01m3snwcbxnpyyzp68kf90n10s, type: WebhookResponseActor, path: actors/tasks/webhook-response/ACTR01m3snwcbxnpyyzp68kf90n10s }
+  - { id: ACTR01m3snwcmeyekx97tw83v1nxz4, type: WebhookResponseActor, path: actors/tasks/webhook-response/ACTR01m3snwcmeyekx97tw83v1nxz4 }
+  - { id: ACTR01m3snwsmnxk91h1ggc4zxshb8, type: WebhookResponseActor, path: actors/tasks/webhook-response/ACTR01m3snwsmnxk91h1ggc4zxshb8 }
+graph:
+  nodes:
+    - { actorId: ACTR01m3snwbtbgxwvsg38jghyy0wb, position: { x: 0, y: 0 } }
+    - { actorId: ACTR01m3snwc33nqnc3dexjga60bsw, position: { x: 0, y: 200 } }
+    - { actorId: ACTR01m3snwcbxnpyyzp68kf90n10s, position: { x: -300, y: 400 } }
+    - { actorId: ACTR01m3snwcmeyekx97tw83v1nxz4, position: { x: 0, y: 400 } }
+    - { actorId: ACTR01m3snwsmnxk91h1ggc4zxshb8, position: { x: 300, y: 400 } }
+  edges:
+    - { id: EDGE01m3snwcx1tcajm6ze3h5bqng5, sourceActorId: ACTR01m3snwbtbgxwvsg38jghyy0wb, sourcePortId: SPRTdefault, targetActorId: ACTR01m3snwc33nqnc3dexjga60bsw, targetPortId: TPRTdefault, type: borgiqEdge }
+    - { id: EDGE01m3snwd5m0dqfk258brj0f92x, sourceActorId: ACTR01m3snwc33nqnc3dexjga60bsw, sourcePortId: SPRTfqxv4ld, targetActorId: ACTR01m3snwcbxnpyyzp68kf90n10s, targetPortId: TPRTdefault, type: borgiqEdge }
+    - { id: EDGE01m3snwdecny2anqat1fmbf1tq, sourceActorId: ACTR01m3snwc33nqnc3dexjga60bsw, sourcePortId: SPRTgc1tf89, targetActorId: ACTR01m3snwcmeyekx97tw83v1nxz4, targetPortId: TPRTdefault, type: borgiqEdge }
+    - { id: EDGE01m3snwsxeyqa963q46nvxf00v, sourceActorId: ACTR01m3snwc33nqnc3dexjga60bsw, sourcePortId: SPRTdefault, targetActorId: ACTR01m3snwsmnxk91h1ggc4zxshb8, targetPortId: TPRTdefault, type: borgiqEdge }
 ```
 
-## Key Points
+## actor.yaml files
 
-1. **respondImmediately: false** - The WebhookTriggerActor waits for a WebhookResponseActor to send the response. A request whose `action` is neither `create` nor `update` leaves the router on `SPRTdefault` (`F`), which has no edge here, so the caller waits for `responseTimeout` (default 30 s) and then gets a timeout error; wire a response to that port in a real flow
-2. **Multiple source ports** - RouterActor uses custom source ports (`SPRT5d5gj2s`, `SPRTg5vsvui`) for conditional routing
-3. **Edge labels** - Labels like "Create" and "Update" match the router condition names for clarity
-4. **Terminal actors** - WebhookResponseActor has `edges: {}` since it's the end of the workflow path
+```yaml
+# actors/triggers/webhook/ACTR01m3snwbtbgxwvsg38jghyy0wb/actor.yaml
+id: ACTR01m3snwbtbgxwvsg38jghyy0wb
+version: 1
+type: WebhookTriggerActor
+name: Webhook Trigger
+msgVar: webhook_trigger
+description: Receives the request to route.
+isActive: true
+continueOnError: false
+sourcePorts:
+  - id: SPRTdefault
+configuration:
+  webhook:                       # static literals
+    triggerKey: 01M3SNWE8DDSVT1ARR12MFVSRZ   # borgiq generate id webhooktriggerkey
+    authorizationLevel: public
+    allowedMethods: [post]
+    responseTimeout: 30
+  options:
+    webhook:
+      respondImmediately: false  # a WebhookResponseActor answers
+      emitRawBody: false
+schemas: {}
+```
 
-## Advanced Example
+```yaml
+# actors/tasks/router/ACTR01m3snwc33nqnc3dexjga60bsw/actor.yaml
+id: ACTR01m3snwc33nqnc3dexjga60bsw
+version: 1
+type: RouterActor
+name: Route by Action
+msgVar: route_by_action
+description: Routes the request by its action field.
+isActive: true
+continueOnError: false
+sourcePorts:
+  - { id: SPRTfqxv4ld, name: Create, description: action is create }
+  - { id: SPRTgc1tf89, name: Update, description: action is update }
+  - { id: SPRTdefault, name: Unknown, description: any other action }
+configuration:
+  options:
+    emitType: singleRoute
+    conditions:
+      Create: ${{ msg.webhook_trigger.body?.action === 'create' }}
+      Update: ${{ msg.webhook_trigger.body?.action === 'update' }}
+schemas: {}
+```
 
-For a more complex example demonstrating callback tokens, sub-flows, data storage, LTM, and async event handling, see [email-reply-workflow-example.md](email-reply-workflow-example.md). This example shows:
+```yaml
+# actors/tasks/webhook-response/ACTR01m3snwcbxnpyyzp68kf90n10s/actor.yaml
+id: ACTR01m3snwcbxnpyyzp68kf90n10s
+version: 1
+type: WebhookResponseActor
+name: Create Response
+msgVar: create_response
+description: Answers a create request.
+isActive: true
+continueOnError: false
+sourcePorts:
+  - id: SPRTdefault
+configuration:
+  options:
+    statusCode: 201
+    headers:
+      content-type: application/json
+    body:
+      message: Resource created
+      data: ${{ msg.webhook_trigger.body }}
+schemas: {}
+```
 
-- **Callback token pattern** for human-in-the-loop workflows (issueCallbackToken, waitForCallbackToken, notifyCallbackToken)
-- **CallFlowActor and CallableResponseActor** for sub-flow invocation with multiple response points
-- **CollectionActor** for cross-flow state management (storing tokens by thread ID)
-- **DenoActor with LTM** for incremental Gmail polling across flowruns
-- **Error handling with continueOnError** for graceful timeout handling
-- **Multiple RouterActors** for complex branching logic
+`update_response` and `unknown_action` are the same with their own `id`, `name`, `msgVar` and `description`, and
+`statusCode: 200` / `message: Resource updated`, and `statusCode: 400` / `message: Unknown action`.
+
+## Key points
+
+- `respondImmediately: false` makes the caller wait for a WebhookResponseActor. Every router port needs a path to a
+  response: a request that reaches none waits `responseTimeout` seconds (default 30) and then gets a timeout error.
+- The router's custom ports (`SPRT` + 7 characters, from `borgiq generate id sourceport`) are named like its
+  `conditions` keys; the default port catches everything else and takes no condition.
+- WebhookResponseActors end the flow, so no edge leaves them.
+- Mint fresh IDs and a fresh `triggerKey` for a real canvas, then `borgiq bundle validate <dir> --strict` and
+  `borgiq bundle push <dir> --create --auto-layout`.

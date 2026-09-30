@@ -1,160 +1,69 @@
 # Router Actor Reference
 
-The RouterActor routes messages to different outputs based on boolean conditions. Use it for if/else logic, switch statements, and conditional message routing.
+RouterActor sends each message to one or more named source ports by evaluating boolean conditions: if/else, switch and
+error routing. Read it when a flow branches on data. For classification by an LLM, use an
+[AiRouterActor](ai-router-actor.md); for a single gate with no else path, a MessageProcessorActor
+[`filter`](message-processor-actor.md#message-actions).
 
-## Table of Contents
+## Rules
 
-- [When to Use](#when-to-use)
-- [Configuration Structure](#configuration-structure)
-- [Options Reference](#options-reference)
-- [TypeScript Schema Definition](#typescript-schema-definition)
-- [Source Ports](#source-ports)
-- [Conditions](#conditions)
-- [Results Object](#results-object)
-- [Common Patterns](#common-patterns)
-- [Best Practices](#best-practices)
-- [Examples](#examples)
+- Give each route a source port: an `id` (`SPRT` + 7 lowercase letters or digits, from `borgiq generate id sourceport`)
+  and a `name`. Keep `SPRTdefault` as the fallback port.
+- Key `conditions` by port **name**. A key that names no port is rejected, and so is a key equal to the default port's
+  name: that name is reserved for the default route, which takes no condition.
+- Conditions are evaluated in the order of the `conditions` keys. `emitType: singleRoute` (the default) emits on the
+  first true one; `multiRoute` emits on every true one. When none is true, the message goes to `SPRTdefault`.
+- The router's result is the name of the port it emitted on, e.g. `"Yes"`.
+- Keep conditions simple and put the most important first; compute anything complex upstream (a DenoActor or `vars`).
+- Wire each route's port to its downstream actors; edge `label`s are display only
+  ([edges-and-positioning.md](edges-and-positioning.md)).
 
-## When to Use
+## Options
 
-Use RouterActor when:
-- You need if/else branching logic in your workflow
-- You want to route messages based on data conditions
-- You need switch-case style routing with multiple branches
-- You want deterministic routing based on expression evaluation
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `emitType` | `singleRoute` \| `multiRoute` | `singleRoute` | First true condition, or every true condition |
+| `conditions` | map of port name → boolean | required | When each route emits |
 
-**Note:** For AI-powered classification routing, use [AiRouterActor](ai-router-actor.md) instead.
+Exact schema: [router.md](typescript/actorSchemas/task/router.md).
 
-## Configuration Structure
+## Example
 
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01xxxxx:
-    type: RouterActor
-    version: 1
-    name: Actor Name Here
-    msgVar: actor_name_here
-    description: What this actor does
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTudmbfzw
-        name: RouteName
-        description: When to choose this route
-      - id: SPRTdefault
-        name: Default Route
-        description: Fallback route
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          RouteName: ${{ boolean_expression }}
-    schemas: {}
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
-
-## Options Reference
-
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `emitType` | string | No | Routing behavior: `singleRoute` (default) or `multiRoute` |
-| `conditions` | object | Yes | Map of route names to boolean expressions |
-
-## TypeScript Schema Definition
-
-The complete TypeScript schema for RouterActor options:
-
-```typescript
-import { z } from 'zod';
-
-export enum RouterActorEmitType {
-  SingleRoute = 'singleRoute',
-  MultiRoute = 'multiRoute',
-}
-
-/** The options schema builder for the RouterActor since it changes for the sourcePorts configuration */
-export const buildRouterActorOptionsSchema = (sourcePorts: RuntimeActorSourcePort[]) => z.object({
-  emitType: z.enum(['singleRoute', 'multiRoute']).nullish()
-    .describe('How the router actor will function: singleRoute emits on the first true condition, multiRoute emits on all true conditions. Defaults to singleRoute'),
-  conditions: z.record(z.string(), z.any())
-    .describe('The conditions for the routes. Keys are route names from sourcePorts, values are boolean expressions to evaluate'),
-});
-
-export type RouterActorOptions = {
-  emitType?: RouterActorEmitType,
-  conditions: { [portName: string]: boolean },
-};
-
-/** The result schema for the RouterActor */
-export const RouterActionResultSchema = z.string()
-  .describe('The port name that the message was emitted from');
-```
-
-### Emit Types
-
-| Value | Description |
-|-------|-------------|
-| `singleRoute` | Emit to the first route with a true condition (default) |
-| `multiRoute` | Emit to all routes with true conditions |
-
-## Source Ports
-
-Each route requires a corresponding source port:
+As a bundle `actor.yaml` (edges and position live in `canvas.yaml`):
 
 ```yaml
+id: ACTR01kx4b00000000000000000031
+version: 1
+type: RouterActor
+name: Check User Status
+msgVar: check_user_status
+description: Routes by the user's status.
+isActive: true
+continueOnError: false
+enableLTM: false
+enableSTM: false
 sourcePorts:
-  - id: SPRTuvakyzc
-    name: 'Yes'
-    description: Condition is true
-  - id: SPRTfs2bx3k
-    name: 'No'
-    description: Condition is false
+  - id: SPRTz7r3lca
+    name: Active
+    description: User is active
+  - id: SPRTgzuftoe
+    name: Inactive
+    description: User is inactive
   - id: SPRTdefault
-    name: Default
-    description: Fallback route
+    name: Unknown
+    description: Status unknown
+configuration:
+  options:
+    emitType: singleRoute
+    conditions:
+      Active: ${{ msg.user.status === 'active' }}
+      Inactive: ${{ msg.user.status === 'inactive' }}
+schemas: {}
 ```
 
-**Important:** The `name` field in source ports must match the keys in `conditions`; a key that names no port is rejected. The default port (`SPRTdefault`) is used when no conditions match, and it takes no condition: a `conditions` key equal to the default port's name is rejected as reserved for the default route.
+## Condition patterns
 
-## Conditions
-
-Define boolean expressions for each route:
-
-```yaml
-options:
-  conditions:
-    'Yes': ${{ !Q.isNil(msg.upstream_actor.value) }}
-    'No': ${{ Q.isNil(msg.upstream_actor.value) }}
-```
-
-Conditions are evaluated in order. For `singleRoute`, the first true condition wins.
-
-## Results Object
-
-After the router executes, the `results` object contains:
-
-```json
-"Yes"
-```
-
-The result is simply the port name that the message was emitted from.
-
-| Field | Description |
-|-------|-------------|
-| `results` | The port name that was selected |
-
-## Common Patterns
-
-### Simple If/Else
+If/else: the default port is the else branch.
 
 ```yaml
 sourcePorts:
@@ -162,216 +71,21 @@ sourcePorts:
     name: 'Yes'
     description: Value exists
   - id: SPRTdefault
-    name: 'No'
-    description: Value does not exist
+    name: 'No'            # no condition
 configuration:
   options:
-    emitType: singleRoute
     conditions:
       'Yes': ${{ !Q.isNil(msg.fetch_data.value) }}
 ```
 
-### Multiple Conditions (Switch)
+| Route on | Condition |
+|---|---|
+| Priority switch | `High: ${{ msg.ticket.priority === 'high' }}`, `Medium: …`, `Low: …` |
+| HTTP status class | `Success: ${{ Q.isHTTPStatusInRange(msg.api_call.statusCode, ["200-299"]) }}`, `ClientError: …["400-499"]`, `ServerError: …["500-599"]` |
+| Non-empty array | `HasItems: ${{ msg.search_results.items?.length > 0 }}` |
+| Several notifications at once (`multiRoute`) | `SendEmail: ${{ inputs.notifyEmail }}`, `SendSlack: ${{ inputs.notifySlack }}`, `LogToDatabase: ${{ inputs.logEnabled }}` |
+| Upstream success, with `continueOnError: true` upstream (default port: error) | `Success: ${{ Q.isNil(err.fetch_data) && !Q.isNil(msg.fetch_data) }}` |
 
-```yaml
-sourcePorts:
-  - id: SPRTa59ivcy
-    name: High
-    description: Priority is high
-  - id: SPRTitvoild
-    name: Medium
-    description: Priority is medium
-  - id: SPRTwxoof07
-    name: Low
-    description: Priority is low
-  - id: SPRTdefault
-    name: Unknown
-    description: Priority not recognized
-configuration:
-  options:
-    emitType: singleRoute
-    conditions:
-      High: ${{ msg.ticket.priority === 'high' }}
-      Medium: ${{ msg.ticket.priority === 'medium' }}
-      Low: ${{ msg.ticket.priority === 'low' }}
-```
-
-### Status Code Routing
-
-```yaml
-sourcePorts:
-  - id: SPRT4dgwd9g
-    name: Success
-    description: HTTP 2xx response
-  - id: SPRT0zn4l1y
-    name: ClientError
-    description: HTTP 4xx response
-  - id: SPRTibelbm8
-    name: ServerError
-    description: HTTP 5xx response
-  - id: SPRTdefault
-    name: Other
-    description: Other status codes
-configuration:
-  options:
-    emitType: singleRoute
-    conditions:
-      Success: ${{ Q.isHTTPStatusInRange(msg.api_call.statusCode, ["200-299"]) }}
-      ClientError: ${{ Q.isHTTPStatusInRange(msg.api_call.statusCode, ["400-499"]) }}
-      ServerError: ${{ Q.isHTTPStatusInRange(msg.api_call.statusCode, ["500-599"]) }}
-```
-
-### Array Check
-
-```yaml
-sourcePorts:
-  - id: SPRTttvtjc1
-    name: HasItems
-    description: Array has items
-  - id: SPRTdefault
-    name: Empty
-    description: Array is empty
-configuration:
-  options:
-    emitType: singleRoute
-    conditions:
-      HasItems: ${{ msg.search_results.items?.length > 0 }}
-```
-
-### Multi-Route Emit
-
-Use `emitType: multiRoute` to emit to multiple routes when conditions are true:
-
-```yaml
-configuration:
-  options:
-    emitType: multiRoute
-    conditions:
-      SendEmail: ${{ inputs.notifyEmail }}
-      SendSlack: ${{ inputs.notifySlack }}
-      LogToDatabase: ${{ inputs.logEnabled }}
-```
-
-### Error Routing
-
-Route based on whether an upstream actor with `continueOnError: true` succeeded or failed:
-
-```yaml
-sourcePorts:
-  - id: SPRTwcwzp1m
-    name: Success
-    description: Upstream actor succeeded
-  - id: SPRTdefault
-    name: Error
-    description: Upstream actor failed
-configuration:
-  options:
-    emitType: singleRoute
-    conditions:
-      Success: ${{ Q.isNil(err.fetch_data) && !Q.isNil(msg.fetch_data) }}
-```
-
-**Note:** When an upstream actor has `continueOnError: true` and encounters an error:
-- The error output is stored in `err.ActorName` (not `msg.ActorName`)
-- `msg.ActorName` will be `undefined`
-- Use `Q.isNil(err.actor_name)` to check if the actor succeeded
-- Use `!Q.isNil(err.actor_name)` to check if the actor failed
-
-## Best Practices
-
-1. **Use clear condition expressions** - Make conditions readable and self-documenting
-2. **Order conditions by priority** - For `singleRoute`, put most important conditions first
-3. **Always have a default route** - Ensure unmatched cases are handled
-4. **Use Q-lib functions** - Leverage `Q.isNil`, `Q.isHTTPStatusInRange`, etc.
-5. **Keep conditions simple** - Complex logic should be in a DenoActor before the router
-
-## Examples
-
-### Check for Existing Data
-
-Routes based on whether upstream actor returned data.
-
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01k61a7rnc6r27414vqjwade0p:
-    name: Are there Existing Browser?
-    type: RouterActor
-    msgVar: are_there_existing_browser
-    schemas: {}
-    version: 1
-    isActive: true
-    enableLTM: false
-    enableSTM: false
-    description: The router actor will emit messages based on various expressions.
-    runtimeSlug: ''
-    sourcePorts:
-      - id: SPRT5d5gj2s
-        name: 'Yes'
-        description: Existing Browsers Found
-      - id: SPRTdefault
-        name: 'No'
-        description: No Existing Browsers Found
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          'Yes': ${{!Q.isNil(msg.fetch_existing_browser.value)}}
-    continueOnError: false
-    id: ACTR01k61a7rnc6r27414vqjwade0p
-    position:
-      x: -1115.08984375
-      'y': 1404.15625
-    edges: {}
-```
-
-**Key Features:**
-- Two routes: Yes (data exists) and No (default fallback)
-- Uses `Q.isNil()` to check for null/undefined values
-- Uses `singleRoute` emit type for exclusive routing
-- Default route catches the negative case
-
----
-
-## Quick Example
-
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01example:
-    type: RouterActor
-    version: 1
-    name: Check User Status
-    msgVar: check_user_status
-    description: Routes based on user active status
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTz7r3lca
-        name: Active
-        description: User is active
-      - id: SPRTgzuftoe
-        name: Inactive
-        description: User is inactive
-      - id: SPRTdefault
-        name: Unknown
-        description: Status unknown
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          Active: ${{ msg.user.status === 'active' }}
-          Inactive: ${{ msg.user.status === 'inactive' }}
-    schemas: {}
-    id: ACTR01example
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
+A failed upstream actor with `continueOnError: true` leaves `msg.<msgVar>` undefined and sets `err.<msgVar>`
+([error-handling.md](error-handling.md)). Quote port names such as `'Yes'` and `'No'`, which YAML would otherwise read as
+booleans.
