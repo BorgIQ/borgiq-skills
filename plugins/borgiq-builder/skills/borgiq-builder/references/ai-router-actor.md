@@ -54,7 +54,7 @@ actors:
         input: ${{ Q.toJSON(inputs) }}
         emitType: singleRoute
         routeDescriptions:
-          RouteName: When to choose this route
+          Route Name: When to choose this route   # key = the port's name
     schemas:
       inputs:
         type: object

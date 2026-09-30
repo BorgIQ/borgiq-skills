@@ -7,7 +7,7 @@ BorgIQ API tokens provide programmatic access to the API. They work like GitHub 
 ## Token Model
 
 - **User-associated**: a token automatically has access to any org/workspace its user belongs to. If the user loses a membership, the token stops working there — one token can serve pipelines that touch multiple workspaces.
-- **Scopes are the ceiling**: the token can never exceed its configured scopes, even if the user gains broader permissions later. Grant the least privilege the integration needs — a token that only triggers flows doesn't need `DeleteCanvas`.
+- **Scopes are the ceiling**: the token can never exceed its configured scopes, even if the user gains broader permissions later. Grant the least privilege the integration needs — a token that only triggers flows doesn't need `canvas:delete`.
 - **Shown once**: the raw token appears once at creation and cannot be recovered afterwards — only a hash is stored. Lost tokens must be re-created.
 - **Revocation is immediate**: a revoked token is rejected on its next request.
 - **Rate limits are per token**, so separate systems (CI/CD, monitoring, scripts) using their own tokens each get their own budget. Failed authentication attempts are additionally rate-limited per IP.
@@ -99,6 +99,18 @@ Failed authentication attempts are rate-limited per IP address: **20 failures pe
 ### Creating a Token
 
 **Via the UI**: Go to **User Settings > API Tokens > Create Token**. Select a name, scopes, and optional expiration. The raw token is shown **once** — copy it immediately.
+
+**Via the CLI** (`borgiq auth login` first):
+
+```bash
+borgiq tokens create --name "CI/CD Pipeline" \
+  --scopes org:access,workspace:access,canvas:read,Trigger:manual:create \
+  --expires-at 2027-01-01T00:00:00.000Z --json   # --expires-at is optional
+borgiq tokens list --json
+borgiq tokens revoke <token-id> --yes           # the id from tokens list
+```
+
+`--scopes` is a comma-separated list of the scope strings below; on a terminal, a missing `--name` or `--scopes` is prompted for. The `create` output includes `rawToken`, which is never shown again.
 
 **Via the API** (requires existing authentication):
 
@@ -192,7 +204,7 @@ Scopes control what a token can do. A token can only perform actions matching it
 1. When you create a token, you select which scopes it should have.
 2. On every request, the token's scopes are checked against the route's requirements.
 3. The user's org/workspace **membership is also validated** — scopes alone aren't enough. The user must still be a member of the org/workspace being accessed.
-4. Unlike web app sessions (which get all scopes for their role), **API token scopes are never expanded**. The token only ever has the scopes it was created with.
+4. Unlike web app sessions (which get all scopes for their role), **API token scopes are never expanded**. The token only ever has the scopes it was created with, and on each request they are further capped by what the user's current role grants: a viewer's token cannot use `Trigger:manual:create` or any write scope, whatever it was created with.
 
 ### Available Scopes
 
@@ -215,7 +227,9 @@ Scopes control what a token can do. A token can only perform actions matching it
 | | `flowrunJobLog:read` | Read flow run logs |
 | | `flowrunJobResult:read` | Read flow run results |
 | | `flowrunMessage:read` | Read flow run messages |
-| **Triggers** | `Trigger:manual:create` | Create manual triggers |
+| **Triggers** | `Trigger:manual:create` | Create manual triggers (run flows; call MCP Server Actor endpoints) |
+| | `Trigger:lifecycle:create` | Fire a lifecycle event (`on-delete`) by hand on a development workspace |
+| **Apps** | `app:use` | Open and run published app and interface triggers; list the workspace's apps |
 | **Secrets** | `secret:read` | Read secrets |
 | | `secret:write` | Create/update secrets |
 | | `secret:delete` | Delete secrets |
@@ -239,6 +253,13 @@ Scopes control what a token can do. A token can only perform actions matching it
 | **User** | `user.info:read` | Read authenticated user info |
 | | `user.workspaces:read` | Read user's workspaces |
 | **Actors** | `borgiqActor:read` | Read actor definitions |
+| **Billing** | `billing:read` | Read billing |
+| | `billing:write` | Change billing |
+| **Members** | `member:read` | Read org and workspace members |
+| | `member:write` | Update member roles, remove members |
+| | `invitation:read` | Read invitations |
+| | `invitation:write` | Send and manage invitations |
+| **Audit** | `auditLog:read` | Read audit logs |
 
 ### Common Scope Combinations
 
@@ -250,6 +271,11 @@ Scopes control what a token can do. A token can only perform actions matching it
 **CI/CD pipeline** (trigger flows and read results):
 ```json
 ["org:access", "workspace:access", "canvas:read", "Trigger:manual:create", "flowrunJob:read", "flowrunJobResult:read"]
+```
+
+**MCP Server Actor client** (Claude Desktop, Cursor, … calling an MCP endpoint — see [mcp-server-actor.md](mcp-server-actor.md)):
+```json
+["org:access", "workspace:access", "canvas:read", "Trigger:manual:create"]
 ```
 
 **Full workspace management**:

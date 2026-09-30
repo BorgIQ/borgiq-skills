@@ -13,7 +13,7 @@ The **MCP Server Actor** (`McpServerActor`) exposes its child tool actors as an 
 | Property | Value |
 |---|---|
 | Type | `McpServerActor` |
-| Category | `task` |
+| Category | `trigger` |
 | Source ports | Single **Status** port (`SPRTdefault`) — all messages emit here |
 | Receives messages | No (`canReceiveMessage: false`) — it is driven by external MCP clients, not upstream actors |
 | Emits messages | Yes — real-time status of MCP requests and tool calls |
@@ -45,13 +45,13 @@ Every MCP request is recorded as a flowrun for full observability. The actor emi
 
 | Message type | When |
 |---|---|
-| `mcp-initialize` | A legacy-era `initialize` request is processed |
+| `mcp-initialize` | A legacy-era `initialize` or a modern `server/discover` request is processed |
 | `mcp-tool-list` | A `tools/list` request is processed |
 | `mcp-tool-call` | A tool invocation is dispatched to the tool actor |
-| `mcp-tool-result` | The tool result comes back |
+| `mcp-tool-result` | The tool result comes back (`isError: true` when the tool failed) |
 | Errors | On any error |
 
-`initialize` and `tools/list` are answered immediately and recorded fire-and-forget; `tools/call` is synchronous — the HTTP response waits for the tool result (up to `responseTimeoutSeconds`).
+`initialize` and `tools/list` are answered immediately and recorded fire-and-forget; `tools/call` is synchronous — the HTTP response waits for the tool's result or error, up to `responseTimeoutSeconds` (see [6.2](#62-tool-execution-timeout)).
 
 ---
 
@@ -91,24 +91,20 @@ MCP-Protocol-Version: 2025-11-25
 ```
 
 - Token format: `biq_<40 hex chars>`; sent as `Authorization: Bearer <token>` per OAuth 2.1 — never in a URI query string.
-- The token must have the scopes **`AccessWorkspace`**, **`AccessCanvases`**, and **`CreateFlowrun`**, and belong to a member of the workspace in the URL.
+- The token must have the scopes **`org:access`**, **`workspace:access`**, **`canvas:read`** and **`Trigger:manual:create`**, and belong to a member of the org and workspace in the URL whose role grants them (member or admin; a viewer's role has no `Trigger:manual:create`). Create one with `borgiq tokens create --name <name> --scopes org:access,workspace:access,canvas:read,Trigger:manual:create --json` — see [api-tokens.md](api-tokens.md).
 - Auth must be included on **every** request, even within one logical session.
 
-**Auth failures use HTTP status codes** (not JSON-RPC errors):
+**Auth failures use HTTP status codes** (not JSON-RPC errors), with the API's `{ "status", "message", "details" }` error body:
 
-```http
-HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Bearer
-```
-
-```http
-HTTP/1.1 403 Forbidden
-WWW-Authenticate: Bearer error="insufficient_scope", scope="workspace:read canvas:read flowrun:create"
-```
+| Status | When |
+|---|---|
+| `401` | No `Authorization` header — the response carries `WWW-Authenticate: Bearer resource_metadata="<protected-resource metadata URL>", scope="mcp:tools"` for OAuth discovery ([2.3](#23-oauth-21)) — or an invalid, expired or revoked token |
+| `403` | The PAT lacks a required scope, or its user is not a member of the org or workspace (`You do not have the necessary privilege to access this resource!`) |
+| `403` | An OAuth access token without the `mcp:tools` scope, with `WWW-Authenticate: Bearer resource_metadata="…", scope="mcp:tools", error="insufficient_scope"` |
 
 ### 2.3 OAuth 2.1
 
-The endpoint also supports the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) (OAuth 2.1). On a `401`, the `WWW-Authenticate` header carries a `resource_metadata` pointer to the Protected Resource Metadata endpoint (RFC 9728) so MCP clients can discover the authorization server and run the standard authorization-code + PKCE flow. Use OAuth for clients that support it; PATs remain the pragmatic path for header-based client configs.
+The endpoint also supports the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) (OAuth 2.1). On a `401` for a request with no credentials, the `WWW-Authenticate` header carries a `resource_metadata` pointer to the Protected Resource Metadata endpoint (RFC 9728) so MCP clients can discover the authorization server and run the standard authorization-code + PKCE flow. Use OAuth for clients that support it; PATs remain the pragmatic path for header-based client configs.
 
 ### 2.4 Origin policy
 
@@ -261,7 +257,7 @@ After initialization the client sends `notifications/initialized`; the server an
 }
 ```
 
-**Success response** (with structured content when the tool has an `outputSchema`):
+**Success response** (`structuredContent` is present when the tool's output is an object or array):
 
 ```json
 {
@@ -274,8 +270,7 @@ After initialization the client sends `notifications/initialized`; the server an
     "structuredContent": {
       "results": [{ "name": "Acme Corp", "id": "cust_123" }],
       "count": 1
-    },
-    "isError": false
+    }
   }
 }
 ```
@@ -284,10 +279,11 @@ After initialization the client sends `notifications/initialized`; the server an
 
 | Tool result type | `content` | `structuredContent` |
 |---|---|---|
-| `string` | `{ type: "text", text: <value> }` | `{ "value": <value> }` |
-| `object` | JSON-stringified text | The object directly (validated against `outputSchema` if present) |
-| `array` | JSON-stringified text | `{ "items": [...] }` |
+| `string` | `{ type: "text", text: <value> }` | — |
+| `object` or `array` | JSON-stringified text | The value itself |
 | Error | `{ type: "text", text: <error message> }` with `isError: true` | — |
+
+`isError` is omitted on a successful result.
 
 **Tool execution errors** are returned as tool results with `isError: true` — actionable feedback the calling LLM can use to self-correct:
 
@@ -312,7 +308,7 @@ After initialization the client sends `notifications/initialized`; the server an
 }
 ```
 
-Tool results currently use `text` content. If a tool actor has `continueOnError: true` and produces an error output, the error is returned as a tool result with `isError: true`; with `continueOnError: false`, the run enters error state and the MCP response carries the error message.
+Tool results use `text` content. A tool actor that fails answers at once, whatever its `continueOnError`: the client gets a tool result with `isError: true` whose text is the tool's error message (never its stack; an empty message becomes `The tool failed without an error message`). With `continueOnError: false` the tool's own job still ends in error state. The MCP Server Actor emits the result on its Status port with `isError` set.
 
 ---
 
@@ -357,23 +353,22 @@ Notes:
 {
   "jsonrpc": "2.0",
   "id": 3,
-  "error": { "code": -32602, "message": "Tool 'unknown_tool' not found. Use tools/list to discover available tools." }
+  "error": { "code": -32602, "message": "Unknown tool: unknown_tool" }
 }
 ```
 
 ### 6.2 Tool execution timeout
 
-If the tool doesn't complete within `responseTimeoutSeconds`, the client receives a tool result with `isError: true` ("Tool execution timed out after 60 seconds"). The underlying run continues to execute — it is not cancelled.
+A call has one deadline, `responseTimeoutSeconds` after the API receives it. If the tool has not answered by then, the client receives a tool result with `isError: true` and the text `MCP tool call timed out after 60 seconds` (with the configured number), and the MCP Server Actor's job ends with a timeout error. The tool's own run is not cancelled; a result it produces after the deadline is discarded.
 
 ### 6.3 Canvas not active
 
-If the canvas is in draft state or the actor is disabled:
+If the canvas or the McpServerActor does not exist, or the actor is disabled (`isActive: false`), the endpoint answers HTTP `404` with a `-32001` error whose message is `Canvas not found`, `MCP Server actor not found`, or, for a disabled actor:
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
-  "error": { "code": -32001, "message": "MCP server is not active. Ensure the canvas is deployed and the actor is enabled." }
+  "error": { "code": -32001, "message": "MCP server is not active. Ensure the actor is enabled." }
 }
 ```
 
@@ -426,11 +421,11 @@ Retry-After: 45
 | `-32601` | Method not found (unsupported MCP method) |
 | `-32602` | Invalid params (bad tool name or arguments) |
 | `-32603` | Internal error |
-| `-32000` | Server error (rate limit, workspace access denied) |
+| `-32000` | Server error (rate limit) |
 | `-32001` | MCP server not active |
 | `-32020` | Modern-era header/body mismatch (`Mcp-Method` / `Mcp-Name`) |
 | `-32022` | Unsupported `MCP-Protocol-Version` (response lists supported revisions) |
 
 ### 6.9 Workspace access
 
-The PAT must belong to a member of the workspace in the URL; otherwise the call fails with HTTP `403` and a `-32000` "Access denied to workspace" error.
+The PAT must belong to a member of the org and workspace in the URL; otherwise the call fails with HTTP `403` and the API error body (`You do not have the necessary privilege to access this resource!`), not a JSON-RPC error.

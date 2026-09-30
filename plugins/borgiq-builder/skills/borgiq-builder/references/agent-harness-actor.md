@@ -42,7 +42,7 @@ AgentHarnessActor creates an isolated sandbox (via an external vendor — E2B or
 - **Connected BorgIQ tools**: Tool actors are exposed as Claude Code skills via an auto-generated BorgIQ plugin
 - **MCP server support**: remote servers proxied through BorgIQ, MCP Server Actors inside BorgIQ, and stdio subprocess servers
 - **Network isolation**: Fine-grained allow/deny lists enforced via iptables firewall
-- **Output artifacts**: Returns workspace zip and Claude session data zip
+- **Output artifacts**: Returns workspace zip and harness session data zip
 
 ### Execution Flow
 
@@ -51,7 +51,7 @@ AgentHarnessActor creates an isolated sandbox (via an external vendor — E2B or
 3. Claude Code starts in the working directory with the given prompt
 4. Claude executes commands, writes files, calls tools as needed
 5. On completion, the workspace is zipped and returned as `outputZipFile`
-6. The Claude session data (`~/.claude`) is returned as `claudeSessionDataFile`
+6. The harness session data (`~/.claude` for Claude Code, `~/.codex` for Codex) is returned as `sessionDataFile`
 7. The sandbox remains hot for 5 minutes for fast continuation, then shuts down
 
 ## Key Differences from AiAgentActor
@@ -68,7 +68,7 @@ AgentHarnessActor creates an isolated sandbox (via an external vendor — E2B or
 | **Background processes** | Not supported (nothing survives a segment boundary) | Supported within sandbox lifetime |
 | **Network control** | Deno-level allow/deny lists across the whole tool runtime, bash included | Fine-grained allow/deny lists enforced with iptables |
 | **MCP servers** | Remote (`type: http`) + BorgIQ (`type: borgiq`) | Those two plus stdio subprocess servers |
-| **Output artifacts** | Final text + workspace zip + pi session data zip | Final text + workspace zip + Claude session data zip |
+| **Output artifacts** | Final text + workspace zip + pi session data zip | Final text + workspace zip + harness session data zip |
 | **Environment vars** | Supported (encrypted in transit; reserved names rejected) | Full support (encrypted in transit) |
 | **Tools** | Built-ins + BorgIQ actors via `aiAgentToolActorIds` | Claude Code built-in tools + BorgIQ actors + MCP servers |
 | **Timeout** | `timeoutInMinutes` across segments (default 30); no per-invocation wall-clock cap | Explicit timeout in minutes (default 15) |
@@ -212,7 +212,7 @@ actors:
         env:
           API_KEY: ${{ credentials.my_api_key }}
         returnOutputZipFile: true
-        returnClaudeSessionDataFile: true
+        returnSessionDataFile: true
       credentials:
         my_api_key:
           workspaceKey: my-api-key
@@ -251,7 +251,7 @@ The Done port emits when the agent completes:
     "mimeType": "application/zip",
     "size": 12345
   },
-  "claudeSessionDataFile": {
+  "sessionDataFile": {
     "id": "file-abc",
     "name": "claude-session-data.zip",
     "mimeType": "application/zip",
@@ -276,7 +276,7 @@ The Done port emits when the agent completes:
 | `success` | Whether the execution completed successfully |
 | `result` | The result text/data from the agent |
 | `outputZipFile` | BIQFile reference to the workspace zip (if `returnOutputZipFile` is true) |
-| `claudeSessionDataFile` | BIQFile reference to the Claude session data zip (if `returnClaudeSessionDataFile` is true) |
+| `sessionDataFile` | BIQFile reference to the harness session data zip (if `returnSessionDataFile` is true). The same file is also sent as the deprecated alias `claudeSessionDataFile` |
 | `meta.endReason` | Why the agent stopped: `completed`, `timeout`, or `error` |
 | `meta.model` | The Claude model used |
 | `meta.duration` | Total execution time in milliseconds |
@@ -385,12 +385,12 @@ Codex reasoning summaries used to arrive here as a notification with `notificati
 | `allowedTools` | string[] | all tools | Whitelist specific Claude Code tools (empty = all allowed) |
 | `disallowedTools` | string[] | - | Blacklist specific Claude Code tools |
 | `allowNet` | boolean | `true` | Allow outbound network access from sandbox |
-| `allowNetList` | string[] | - | Whitelist hosts/CIDRs (only when `allowNet: false`) |
-| `denyNetList` | string[] | - | Blacklist hosts/CIDRs (even when `allowNet: true`) |
+| `allowNetList` | string[] | - | Only these hosts/CIDRs (plus system endpoints) are reachable. Ignored when `allowNet: false`, which blocks everything but system endpoints. Mutually exclusive with `denyNetList` |
+| `denyNetList` | string[] | - | Block these hosts/CIDRs; everything else stays reachable. Ignored when `allowNet: false`. Mutually exclusive with `allowNetList` |
 | `mcpServers` | object[] | - | MCP servers: `type: http` (remote, proxied), `type: borgiq` (an MCP Server Actor), `type: stdio` (subprocess) |
 | `env` | object | - | Environment variables (encrypted in transit) |
 | `returnOutputZipFile` | boolean | `true` | Include workspace zip in done port result |
-| `returnClaudeSessionDataFile` | boolean | `true` | Include Claude session data zip in done port result |
+| `returnSessionDataFile` | boolean | `true` | Include the harness session data zip in done port result. `returnClaudeSessionDataFile` is its deprecated alias |
 
 ### aiAgentToolActorIds (for connected tools)
 
@@ -457,7 +457,7 @@ $HOME/
 |----------|-----------|--------|
 | Allow all (default) | `allowNet: true` | Full outbound access |
 | Block all outbound | `allowNet: false` | No network except AI provider & BorgIQ API |
-| Block all except specific | `allowNet: false`, `allowNetList: ["api.example.com"]` | Only whitelisted hosts |
+| Block all except specific | `allowNetList: ["api.example.com"]` (leave `allowNet` unset or `true`) | Only the listed hosts |
 | Allow all except specific | `allowNet: true`, `denyNetList: ["internal.corp.com"]` | All traffic except blacklisted |
 
 Network rules are enforced via iptables at sandbox launch. System endpoints (AI provider API, BorgIQ API) are always allowed and cannot be denied.
@@ -474,7 +474,7 @@ Network rules are enforced via iptables at sandbox launch. System endpoints (AI 
 
 1. **Active Execution**: Sandbox runs Claude Code
 2. **Hot Duration (5 minutes)**: After completion, sandbox stays alive for fast continuation
-3. **Scheduled Shutdown**: Workspace snapshot saved, Claude session data saved, sandbox destroyed, queue drained
+3. **Scheduled Shutdown**: Workspace snapshot saved, harness session data saved, sandbox destroyed, queue drained
 4. **Cold Restoration**: New sandbox created, workspace and session data restored from snapshots
 5. **Expiration**: Sessions expire after 7 days
 
@@ -634,7 +634,7 @@ A powerful pattern is using a DenoActor upstream to build a context zip file wit
 2. **Create `.claude/skills/`** — populate with skill directories from GitHub or other sources
 3. **Create `inputs/` and `outputs/`** — standard directories for task data
 4. **Use `stashFile()`** to upload the zip to BorgIQ storage and return a BIQFile reference
-5. **Pass environment variables** via `env` and `secrets` on the AgentHarnessActor for API keys needed by skills
+5. **Pass environment variables** via `env` and `credentials` on the AgentHarnessActor for API keys needed by skills
 
 ```yaml
 # DenoActor builds context, then AgentHarnessActor uses it
@@ -714,7 +714,7 @@ interface AgentHarnessActorResult {
   success: boolean;
   result?: unknown;
   outputZipFile?: BIQFile;        // Workspace zip (if returnOutputZipFile is true)
-  claudeSessionDataFile?: BIQFile; // Claude session data zip (if returnClaudeSessionDataFile is true)
+  sessionDataFile?: BIQFile;      // Harness session data zip (if returnSessionDataFile is true)
   meta: {
     endReason: 'completed' | 'timeout' | 'error';
     model?: string;
@@ -870,7 +870,7 @@ ACTR01agent:
 options:
   prompt: What is 2 + 2? Reply with just the number.
   returnOutputZipFile: false
-  returnClaudeSessionDataFile: false
+  returnSessionDataFile: false
   timeoutInMinutes: 5
 ```
 
@@ -1149,11 +1149,11 @@ Upload a codebase via `volumeZipFile`, run tests, and extract results.
 3. **Set `maxLoopCount`** — Prevent runaway executions and control costs
 4. **Use `timeoutInMinutes` appropriately** — Default is 15 minutes; increase for complex tasks, decrease for simple ones
 5. **Use sessions for multi-step work** — Pass a consistent `sessionId` for iterative development tasks
-6. **Pass secrets via `env` + `secrets`** — Never hardcode API keys in prompts
+6. **Pass secrets via `env` + `credentials`** — Never hardcode API keys in prompts
 7. **Choose the right sandbox provider** — E2B for internet access, Daytona for isolation
 8. **Set `continueOnError: true` on tool actors** — Let Claude handle tool failures gracefully
 9. **Use lower temperature for deterministic tasks** — Code generation benefits from `temperature: 0` or `0.3`
-10. **Disable file output for fast tasks** — Set `returnOutputZipFile: false` and `returnClaudeSessionDataFile: false` when you don't need workspace files
+10. **Disable file output for fast tasks** — Set `returnOutputZipFile: false` and `returnSessionDataFile: false` when you don't need workspace files
 
 ## TypeScript Schema Hint
 

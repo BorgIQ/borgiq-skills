@@ -34,7 +34,7 @@ actors:
     configuration:
       options:
         model: claude-opus-4-5
-        maxRetry: 3
+        maxRetries: 3
         prompt: >-
           Please write a LLM prompt using the users's initial prompt as the
           starting point. Only return the final prompt, don't include any
@@ -88,7 +88,7 @@ actors:
 - References upstream actor output via `msg.prompt_writer.body.prompt`
 - Includes detailed system prompt with prompt engineering best practices
 - Sets `emitInput: true` to include input messages in output for debugging
-- Uses `maxRetry: 3` for resilience
+- Uses `maxRetries: 3` for resilience
 
 **Sample Response:**
 ```json
@@ -403,7 +403,7 @@ Models of a workspace [custom provider](custom-ai-providers.md) are referenced a
 type: AiActor
 name: Summarize with Kimi
 configuration:
-  options: |
+  options:
     model: openrouter/moonshotai/kimi-k2
     systemPrompt: Summarize the text in three bullet points.
     prompt: ${{ inputs.text }}
