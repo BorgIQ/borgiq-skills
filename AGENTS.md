@@ -76,7 +76,7 @@ python3 scripts/quick_validate.py plugins/borgiq-builder         # one plugin
 python3 scripts/quick_validate.py plugins/borgiq-builder/skills/borgiq-form-builder  # one skill
 ```
 
-Cross-skill references inside the same plugin (the spoke → hub `references/` pattern) are allowed. References that escape the plugin root or fail to resolve are reported.
+Cross-skill references inside the same plugin (the spoke → hub `references/` pattern) are allowed. References that escape the plugin root or fail to resolve are reported, and so is an anchor (`file.md#section`, `#section`) that matches no heading in its target, slugged the way GitHub renders it. Links inside fenced blocks and inline code are ignored. Frontmatter may carry the Agent Skills spec's `compatibility` field (≤ 500 characters).
 
 ### init_skill.py
 
