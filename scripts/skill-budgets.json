@@ -1,0 +1,76 @@
+{
+  "_comment": "Ratchet: each entry starts at today's size. A PR that shrinks a file lowers its entry; nothing may grow past it. spec_exempt skills are over the Agent Skills limit (500 lines, 5,000 tokens) until they are restructured. reference_exceptions are hand-written references over reference_words_cap, each capped at its current size.",
+  "skills": {
+    "borgiq-builder": {
+      "words": 8979,
+      "lines": 924,
+      "description": 938
+    },
+    "borgiq-react-app-builder": {
+      "words": 5760,
+      "lines": 390,
+      "description": 804
+    },
+    "borgiq-agent-builder": {
+      "words": 2026,
+      "lines": 101,
+      "description": 593
+    },
+    "borgiq-json-schema-builder": {
+      "words": 1622,
+      "lines": 156,
+      "description": 493
+    },
+    "borgiq-form-builder": {
+      "words": 1084,
+      "lines": 95,
+      "description": 488
+    },
+    "deploy": {
+      "words": 1184,
+      "lines": 129,
+      "description": 219
+    },
+    "debug-flow": {
+      "words": 948,
+      "lines": 92,
+      "description": 205
+    },
+    "new-actor": {
+      "words": 950,
+      "lines": 104,
+      "description": 153
+    },
+    "test": {
+      "words": 449,
+      "lines": 76,
+      "description": 145
+    },
+    "validate": {
+      "words": 448,
+      "lines": 62,
+      "description": 195
+    }
+  },
+  "spec_exempt": [
+    "borgiq-builder",
+    "borgiq-react-app-builder"
+  ],
+  "reference_words_cap": 4000,
+  "reference_exceptions": {
+    "agent-harness-actor.md": 5649,
+    "ai-agent-actor.md": 6837,
+    "cli/canvas-bundles.md": 4637,
+    "cli/cli-command-reference.md": 6665,
+    "collection-api.md": 10439,
+    "deno-actor.md": 9465,
+    "interface-pages.md": 8991,
+    "python-actor.md": 6485,
+    "react-app-themes.md": 4099,
+    "stream-api.md": 5371,
+    "web-application-pattern.md": 5514
+  },
+  "arguments_in_shell_allowed": [
+    "new-actor/SKILL.md"
+  ]
+}

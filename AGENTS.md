@@ -60,6 +60,7 @@ If `borgiq` commands fail with `401`, run `borgiq auth login` again. The five li
 The `scripts/` directory contains developer tooling for working on this repo (these are NOT shipped to plugin users):
 
 - `quick_validate.py` — validate a SKILL.md, a plugin, or the whole marketplace
+- `skill_stats.py` — measure the shipped pack (words, lines, ~tokens, task load cost) and enforce the size budgets in `skill-budgets.json`
 - `init_skill.py` — initialize a new skill from template
 - `package_skill.py` — *(legacy)* package a skill as a `.skill` zip for Claude API users
 - `install_skills.py` — *(legacy)* install a `.skill` zip into `~/.claude/skills/`
@@ -77,6 +78,25 @@ python3 scripts/quick_validate.py plugins/borgiq-builder/skills/borgiq-form-buil
 ```
 
 Cross-skill references inside the same plugin (the spoke → hub `references/` pattern) are allowed. References that escape the plugin root or fail to resolve are reported, and so is an anchor (`file.md#section`, `#section`) that matches no heading in its target, slugged the way GitHub renders it. Links inside fenced blocks and inline code are ignored. Frontmatter may carry the Agent Skills spec's `compatibility` field (≤ 500 characters).
+
+### skill_stats.py
+
+Agents load a skill's SKILL.md whenever it triggers, and then whole reference files, so size is a cost every user pays. `skill_stats.py` keeps it visible and bounded:
+
+```bash
+python3 scripts/skill_stats.py                     # per-skill summary and totals
+python3 scripts/skill_stats.py --tasks             # load cost of each common task (scripts/task-paths.json)
+python3 scripts/skill_stats.py --json before.json  # snapshot; later: --compare before.json for a PR-body table
+python3 scripts/skill_stats.py --check             # CI: budgets, caps, task paths
+```
+
+`--check` enforces `scripts/skill-budgets.json`:
+
+- each SKILL.md's words, lines and description length stay within its budget. The budgets are a ratchet: a PR that shrinks a skill lowers its budget, so it cannot quietly regrow;
+- every SKILL.md not listed in `spec_exempt` stays within the Agent Skills limits (500 lines, ~5,000 tokens);
+- a hand-written reference stays under `reference_words_cap` (4,000 words), or under its own size if it is listed in `reference_exceptions`;
+- no SKILL.md puts `$ARGUMENTS` inside a shell block, where a harness that does not substitute it would run it literally;
+- every file in `scripts/task-paths.json` exists. When a change reroutes a common task, update its file list in the same PR.
 
 ### init_skill.py
 

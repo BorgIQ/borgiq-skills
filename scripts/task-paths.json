@@ -1,0 +1,222 @@
+{
+  "_comment": "Common tasks and the files an agent loads for each: the SKILL.md files that trigger plus the references the instructions route it to. Update a task's files in the same PR that changes its routing.",
+  "tasks": [
+    {
+      "task": "HTTP actor that posts to Slack (no template fits)",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/http-request-actor.md",
+        "borgiq-builder/references/http-request-actor-examples.md",
+        "borgiq-builder/references/auth-types.md",
+        "borgiq-builder/references/context.md"
+      ]
+    },
+    {
+      "task": "Webhook endpoint that routes by payload and responds",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/webhook-trigger-actor.md",
+        "borgiq-builder/references/router-actor.md",
+        "borgiq-builder/references/webhook-response-actor.md",
+        "borgiq-builder/references/workflow-example.md",
+        "borgiq-builder/references/context.md",
+        "borgiq-builder/references/edges-and-positioning.md"
+      ]
+    },
+    {
+      "task": "Scheduled job that fans out and joins",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/scheduled-trigger-actor.md",
+        "borgiq-builder/references/message-processor-actor.md",
+        "borgiq-builder/references/fork-join-common-mistakes.md",
+        "borgiq-builder/references/workflow-patterns.md",
+        "borgiq-builder/references/error-handling.md",
+        "borgiq-builder/references/edges-and-positioning.md"
+      ]
+    },
+    {
+      "task": "Human approval with a callback token",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/message-processor-actor.md",
+        "borgiq-builder/references/email-reply-workflow-example.md",
+        "borgiq-builder/references/router-actor.md",
+        "borgiq-builder/references/send-email-actor.md"
+      ]
+    },
+    {
+      "task": "Deno actor that calls two APIs",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/deno-actor.md",
+        "borgiq-builder/references/multi-api-examples.md",
+        "borgiq-builder/references/auth-types.md"
+      ]
+    },
+    {
+      "task": "Code actor that keeps a cursor across runs",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/deno-actor.md"
+      ]
+    },
+    {
+      "task": "Collection-backed CRUD backend",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/universal-trigger-actor.md",
+        "borgiq-builder/references/collection-actor.md",
+        "borgiq-builder/references/collection-api.md",
+        "borgiq-builder/references/collection-migrations.md"
+      ]
+    },
+    {
+      "task": "Record webhook events; process them on a schedule",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/stream-actor.md",
+        "borgiq-builder/references/stream-api.md",
+        "borgiq-builder/references/webhook-trigger-actor.md",
+        "borgiq-builder/references/scheduled-trigger-actor.md",
+        "borgiq-builder/references/collection-actor.md",
+        "borgiq-builder/references/collection-migrations.md"
+      ]
+    },
+    {
+      "task": "Signup form that posts to Slack",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-form-builder/SKILL.md",
+        "borgiq-builder/references/interface-pages.md",
+        "borgiq-builder/references/interface-trigger-actor.md",
+        "borgiq-builder/references/themes.md"
+      ]
+    },
+    {
+      "task": "Approval page mid-flow, emailed to a manager",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-form-builder/SKILL.md",
+        "borgiq-builder/references/interface-actor.md",
+        "borgiq-builder/references/interface-pages.md",
+        "borgiq-builder/references/send-email-actor.md"
+      ]
+    },
+    {
+      "task": "React dashboard over a collection with CRUD endpoints",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-react-app-builder/SKILL.md",
+        "borgiq-builder/references/react-app-themes.md",
+        "borgiq-builder/references/universal-trigger-actor.md",
+        "borgiq-builder/references/collection-api.md",
+        "borgiq-builder/references/collection-migrations.md"
+      ]
+    },
+    {
+      "task": "Maintain a legacy raw-HTML AppTriggerActor app",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-react-app-builder/SKILL.md",
+        "borgiq-builder/references/app-trigger-actor.md",
+        "borgiq-builder/references/web-application-pattern.md",
+        "borgiq-builder/references/react-app-themes.md"
+      ]
+    },
+    {
+      "task": "Research agent with two HTTP tools",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-agent-builder/SKILL.md",
+        "borgiq-builder/references/ai-agent-actor.md",
+        "borgiq-builder/references/http-request-actor.md",
+        "borgiq-json-schema-builder/SKILL.md"
+      ]
+    },
+    {
+      "task": "AiActor summary with structured output",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/ai-actor.md",
+        "borgiq-json-schema-builder/SKILL.md",
+        "borgiq-builder/references/ai-actor-examples.md"
+      ]
+    },
+    {
+      "task": "Claude Code in a sandbox with an MCP server",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-agent-builder/SKILL.md",
+        "borgiq-builder/references/agent-harness-actor.md",
+        "borgiq-builder/references/ai-agent-actor.md",
+        "borgiq-builder/references/mcp-server-actor.md"
+      ]
+    },
+    {
+      "task": "Expose actors as an MCP server to an external client",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-agent-builder/SKILL.md",
+        "borgiq-builder/references/mcp-server-actor.md",
+        "borgiq-builder/references/ai-agent-actor.md"
+      ]
+    },
+    {
+      "task": "Start a canvas from a template or recipe",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/borgiq-cli.md",
+        "borgiq-builder/references/cli/canvas-bundles.md",
+        "borgiq-builder/references/cli/cli-setup-scripts.md"
+      ]
+    },
+    {
+      "task": "Deploy a bundle (model-invoked)",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/borgiq-cli.md",
+        "borgiq-builder/references/cli/canvas-bundles.md",
+        "borgiq-builder/references/deployment.md"
+      ]
+    },
+    {
+      "task": "Deploy via the deploy command",
+      "files": [
+        "deploy/SKILL.md",
+        "borgiq-builder/references/cli/cli-data-formats.md"
+      ]
+    },
+    {
+      "task": "Debug a failed flowrun via the debug-flow command",
+      "files": [
+        "debug-flow/SKILL.md",
+        "borgiq-builder/references/flowrun-job-states.md",
+        "borgiq-builder/references/error-handling.md"
+      ]
+    },
+    {
+      "task": "No shell access: produce valid YAML",
+      "files": [
+        "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/validation.md"
+      ]
+    },
+    {
+      "task": "Exact AiAgentActor option types",
+      "files": [
+        "borgiq-agent-builder/SKILL.md",
+        "borgiq-builder/references/ai-agent-actor.md",
+        "borgiq-builder/references/typescript/actor-schemas-task-core.md"
+      ]
+    },
+    {
+      "task": "Exact props of form component select",
+      "files": [
+        "borgiq-form-builder/SKILL.md",
+        "borgiq-builder/references/interface-pages.md",
+        "borgiq-builder/references/typescript/form-components.md"
+      ]
+    }
+  ]
+}
