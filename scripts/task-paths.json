@@ -119,9 +119,7 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-react-app-builder/SKILL.md",
-        "borgiq-builder/references/app-trigger-actor.md",
-        "borgiq-builder/references/web-application-pattern.md",
-        "borgiq-builder/references/react-app-themes.md"
+        "borgiq-builder/references/app-trigger-actor.md"
       ]
     },
     {

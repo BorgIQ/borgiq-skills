@@ -7,7 +7,7 @@ description: Build custom app UIs on a BorgIQ canvas with a React (Vite + TypeSc
 
 Build a **React SPA** inside a **ReactAppTriggerActor** — the standard surface for custom app UIs on a canvas. The actor holds a real Vite + TypeScript project that BorgIQ **compiles server-side** (`deno install` + `deno task build`) and serves as static `dist/` assets in a sandboxed iframe with a short-lived content token.
 
-A data-entry form belongs in `borgiq-form-builder`. The legacy raw-HTML **AppTriggerActor** (no build step) remains supported for maintaining existing apps — its configuration is documented in the hub's [`app-trigger-actor.md`](../borgiq-builder/references/app-trigger-actor.md) and [`web-application-pattern.md`](../borgiq-builder/references/web-application-pattern.md) references, and it uses the same theme library — but new apps are built here.
+A data-entry form belongs in `borgiq-form-builder`. The legacy raw-HTML **AppTriggerActor** (no build step) remains supported for maintaining existing apps — its configuration, backend wiring and styling (the same theme library) are in the hub's [`app-trigger-actor.md`](../borgiq-builder/references/app-trigger-actor.md) reference — but new apps are built here.
 
 ## Mental model
 
@@ -18,7 +18,7 @@ Two edit surfaces, one actor:
 
 **Build → serve.** A ReactAppTriggerActor does nothing until you **Build** it: the build compiles the project and persists every `dist/` file as a durable artifact. **Serving requires a successful build** — a fresh actor returns `409 No build available` until you build. Rendering then uses the same sandboxed iframe, `frame-ancestors` restriction, and origin-checked short-lived content token as AppTriggerActor. Rebuild after every source change to publish it. **On a deployed workspace the app builds with the canvas's runtime build instead**: the editor's Build action is refused there (409 "Build the canvas instead"), and viewers get the app the active runtime build compiled — see the hub's [deployment reference](../borgiq-builder/references/deployment.md).
 
-**Calling backends.** The app talks to backends the web-application-pattern way: declare **endpoints** on the actor targeting a **webhook-capable trigger** (a **WebhookTriggerActor**, or a **UniversalTriggerActor** with its webhook source enabled), and call them by name with the `@borgiq/actors` SDK (`useEndpoint`/`callEndpoint`). Endpoints are **resolved and baked into the built artifact at Build time**, and the SDK attaches the `X-App-Actor-Token` to **its own fetches only** — a raw `fetch()` to a `/msg/` URL is **not** token-bridged, so always call through the SDK. Because endpoints are frozen into the build, **editing the endpoint list takes effect on the next Build**, not the next save.
+**Calling backends.** The app talks to backends through endpoints: declare **endpoints** on the actor targeting a **webhook-capable trigger** (a **WebhookTriggerActor**, or a **UniversalTriggerActor** with its webhook source enabled), and call them by name with the `@borgiq/actors` SDK (`useEndpoint`/`callEndpoint`). Endpoints are **resolved and baked into the built artifact at Build time**, and the SDK attaches the `X-App-Actor-Token` to **its own fetches only** — a raw `fetch()` to a `/msg/` URL is **not** token-bridged, so always call through the SDK. Because endpoints are frozen into the build, **editing the endpoint list takes effect on the next Build**, not the next save.
 
 **Following a stream.** An app can read a workspace **stream** live with `useStreamTail`. Declare the stream on the actor under `options.streams` — an exact `slug`, or a `slugPrefix` for streams a flow creates per session — and the SDK opens a Server-Sent Events tail against a BorgIQ endpoint (`/v1/app-streams/…`) with the app token it already holds: never a storage credential, never anything in a query string. Stream declarations are **frozen into the build like endpoints**, so a stream declared after the last Build is unreadable until the next one. Apps only **read** streams: to write one, call an endpoint whose flow appends — the write is then authored, validated, rate-limited and attributed by flow code.
 
@@ -139,11 +139,11 @@ ACTR01reactapp:
       allowedScriptDomains: []                    # ${{ vars.cdn_host }} works here — evaluated at build
       allowedStyleDomains: []
       allowedPermissions: []
-      allowWebAssembly: false                     # true → CSP script-src 'wasm-unsafe-eval' (WebAssembly only, never JS eval)
-      allowBlobWorkers: false                     # true → CSP worker-src 'self' blob: (inline ?worker&inline workers)
+      allowWebAssembly: false                     # true → WebAssembly may compile (never JS eval)
+      allowBlobWorkers: false                     # true → inline ?worker&inline workers may start
 ```
 
-Pair it with a backend (standard web-application pattern — the hub wires the edges):
+Pair it with a backend (the hub wires the edges):
 
 ```yaml
 ACTR01webhookhandler:
@@ -328,7 +328,7 @@ Full token sets, base stylesheet, component recipes, and rules live in
 | Stream tails per page | the SDK shares **one connection per stream** across components and refuses a **5th** distinct concurrent tail; the server's per-viewer ceiling is **4** open tails and **30** opens/min per app (`429 VIEWER_TAIL_LIMIT_EXCEEDED` / rate limit — close a tab); the workspace's **app-tail pool is 100**, separate from the 20 public/actor tails (`429 TAIL_LIMIT_EXCEEDED`), on which the hook goes `capped` → `polling` the paged read until `Retry-After` elapses |
 | Stream reads only | apps **read** streams (`useStreamTail` / `tailStream` / `readStream`); there is no append from an app — write through an endpoint whose flow appends |
 | Build output shape | **exactly one `.js`, at most one `.css`, and `index.html`** — the builder rejects a multi-file build with an actionable message. Keep the `vite.config.ts` single-file settings. A Web Worker must therefore be **inlined** (`import MyWorker from './worker?worker&inline'`) — `new Worker(new URL('./worker.ts', import.meta.url))` emits a second `.js` and fails the build |
-| WebAssembly / workers | **off by default** — `WebAssembly.compile`/`instantiate` needs `allowWebAssembly: true` (adds `'wasm-unsafe-eval'` to `script-src`; JS `eval`/`new Function` stay blocked), and an inline worker needs `allowBlobWorkers: true` (adds `worker-src 'self' blob:`). A blob worker inherits the app's CSP, so a worker that compiles WebAssembly (e.g. SQLite WASM) needs **both**. Ship the `.wasm` as a same-origin dist asset (counts toward the 50-file / 100 MB limits) and hand the worker an absolute URL resolved on the page (`new URL('assets/x.wasm', document.baseURI).href`) — relative URLs don't resolve inside a `blob:` worker. Fetch it (and any database file) at startup: after the ~2-minute token lifetime a late asset fetch fails. Changes apply on the **next Build** |
+| WebAssembly / workers | **off by default** — `WebAssembly.compile`/`instantiate` needs `allowWebAssembly: true`, and an inline worker needs `allowBlobWorkers: true`; a worker that compiles WebAssembly (e.g. SQLite WASM) needs **both** (CSP effects: [app-trigger-actor.md → WebAssembly and workers](../borgiq-builder/references/app-trigger-actor.md#webassembly-and-workers-react-apps-only)). Ship the `.wasm` as a same-origin dist asset (counts toward the 50-file / 100 MB limits) and hand the worker an absolute URL resolved on the page (`new URL('assets/x.wasm', document.baseURI).href`) — relative URLs don't resolve inside a `blob:` worker. Fetch it (and any database file) at startup: after the ~2-minute token lifetime a late asset fetch fails. Changes apply on the **next Build** |
 | Theming | **every app ships `src/theme.css`** (Base Contract + one theme block from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md)), imported first in `main.tsx`; default theme `hearth`; components use tokens only — no literal colors/fonts/radii |
 | Build output size | ≤ 100 MB total; ≤ 50 `dist` files (static assets — a single-JS/single-CSS build leaves plenty) |
 | CSP / permissions options | **interpolatable, evaluated at build time** — `${{ }}` in the seven security options (`allowedScriptDomains`, `allowedStyleDomains`, `allowInlineScripts`, `allowInlineStyling`, `allowedPermissions`, `allowWebAssembly`, `allowBlobWorkers`) is resolved by the build and frozen into the manifest; a `${{ vars.* }}` change takes effect on the **next Build**, not the next page load |
@@ -345,49 +345,14 @@ Full token sets, base stylesheet, component recipes, and rules live in
 2. **Edit** files in the full-page React editor (file tree + code editor) or via the `borgiq` CLI. Create `src/theme.css` from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) (default `hearth`) before writing components. Declare **endpoints** — and any **streams** the app follows (`options.streams`) — in the options form (or YAML), and asset overlays under `options.files`.
 3. **Build** — the editor's Build button, or `POST /v1/orgs/{org}/workspaces/{wsp}/canvases/{canvas}/apps/{actorId}/build`. Watch the status badge; on failure the editor surfaces the build error.
 4. **Open** the running app at `/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`.
-5. **Thumbnail** — once the built app renders correctly, screenshot it and attach the image as the actor's thumbnail (see [App thumbnail](#app-thumbnail)). Refresh it after a visible UI change.
+5. **Thumbnail** — once the built app renders correctly, screenshot it and attach the image as the actor's thumbnail ([app-thumbnail.md](../borgiq-builder/references/app-thumbnail.md)). Refresh it after a visible UI change.
 
 ## App thumbnail
 
-The actor's **thumbnail** is the image shown on its canvas node and on the workspace apps page. An app without one shows a generic placeholder, so give every app you build one. It applies to the legacy **AppTriggerActor** too.
-
-**Limits.** PNG, JPEG, WebP, or GIF, **≤ 2 MiB**; about **1280 px wide** is plenty. **No SVG.** The API checks the bytes, not the file extension, and stores the image itself. You send it inline, with no separate upload step. The CLI never resizes: if a PNG screenshot is too large, capture a smaller viewport or save it as `.jpg`.
-
-**Capture.** Screenshot the app's own page, not the editor around it. `borgiq canvas-actors app-url` prints the URL the app is served from:
-
-```bash
-SRC=$(borgiq canvas-actors app-url <canvas> <actorId>)    # stdout is only the URL
-npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=3000 "$SRC" thumbnail.png
-```
-
-- The URL carries a content token that **expires within minutes**. Fetch it right before the screenshot, never log it, and treat it like a password until then.
-- `--wait-for-timeout` gives the app time to call its endpoints and render real data. Raise it for slow backends. A screenshot of a loading spinner is a bad thumbnail.
-- A **React app must be built first**: an unbuilt one answers `409`. On a deployed workspace the URL serves the active runtime build.
-- `403` means the CLI token lacks the **`app:use`** scope. Mint one for the capture with `borgiq tokens create --name thumbnail --scopes org:access,workspace:access,canvas:read,canvas:write,app:use --json`, use its `rawToken` via `BORGIQ_API_TOKEN` without echoing it, and revoke it afterwards (`borgiq tokens revoke <id> --yes`).
-- `npx playwright screenshot` needs Playwright's Chromium (`npx playwright install chromium` once). If no headless browser is available, don't fake a thumbnail. Ask the user to upload one from the app editor's Settings, or send them `borgiq auth handoff-url --redirect /org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}` for their own browser script.
-
-**Attach**, either directly:
-
-```bash
-borgiq canvas-actors thumbnail set <canvas> <actorId> thumbnail.png
-borgiq canvas-actors thumbnail get <canvas> <actorId> --out check.png   # type/size; --out saves it
-borgiq canvas-actors thumbnail rm  <canvas> <actorId>
-```
-
-or, in a canvas bundle, put the file beside the actor's `actor.yaml` and name it there, then push:
-
-```text
-actors/triggers/react-app/<actorId>/
-  actor.yaml        # thumbnail: thumbnail.png
-  thumbnail.png
-```
-
-`bundle pull` writes an existing thumbnail the same way. A `thumbnail.*` file that `actor.yaml` doesn't name is **not pushed** (`bundle validate` warns). To remove the thumbnail, delete both the file and the `thumbnail:` line, then push. Details are in the hub's [canvas-bundles reference](../borgiq-builder/references/cli/canvas-bundles.md).
-
-These commands and the bundle file need a CLI that has `borgiq canvas-actors thumbnail` (`@borgiq/cli` >= 0.12.0). With an older CLI, set it through the API: `PATCH …/canvases/{canvas}/actors/{actorId}` with `{ "thumbnail": { "dataUrl": "data:image/png;base64,…" } }`, or `{ "thumbnail": null }` to remove it.
+Give every app a thumbnail (the image on its canvas node and the workspace apps page): capture it with `borgiq canvas-actors app-url` and a headless browser, then attach it with `borgiq canvas-actors thumbnail set` or a bundle `thumbnail.<ext>` file, as [app-thumbnail.md](../borgiq-builder/references/app-thumbnail.md) describes.
 
 ## Boundaries with the hub and sibling skills
 
 - **Wiring is the hub's job.** `borgiq-builder` owns edges, msgVars, IDs, and connecting the WebhookTrigger → task actors → WebhookResponse chain your endpoints target. Ask it to build the backend flow.
 - **Forms/interface pages → `borgiq-form-builder`.** Legacy raw-HTML AppTriggerActor apps are maintained via the hub's [`app-trigger-actor.md`](../borgiq-builder/references/app-trigger-actor.md) reference.
-- Same iframe/token/CSP model as AppTriggerActor — the security posture and `allowed*Domains` / `allowedPermissions` semantics are documented in the hub's [`app-trigger-actor.md`](../borgiq-builder/references/app-trigger-actor.md). `allowWebAssembly` / `allowBlobWorkers` are React-app-only (see its [WebAssembly and workers](../borgiq-builder/references/app-trigger-actor.md#webassembly-and-workers-react-apps-only) section).
+- Same iframe/token/CSP model as AppTriggerActor — the security posture and `allowed*Domains` / `allowedPermissions` semantics are documented in the hub's [`app-trigger-actor.md` → Content Security Policy](../borgiq-builder/references/app-trigger-actor.md#content-security-policy). `allowWebAssembly` / `allowBlobWorkers` are React-app-only (see its [WebAssembly and workers](../borgiq-builder/references/app-trigger-actor.md#webassembly-and-workers-react-apps-only) section).
