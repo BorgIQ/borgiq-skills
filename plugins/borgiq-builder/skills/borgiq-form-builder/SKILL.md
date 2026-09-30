@@ -1,97 +1,85 @@
 ---
 name: borgiq-form-builder
-description: Design BorgIQ interface pages, forms, form components, validation rules, conditional fields, themes, and the web-viewer embed. This is the primary BorgIQ UI surface. Use whenever the user is building an interface page, form, signup, data-entry UI, approval workflow, survey, or wants to embed another page inside an interface. Triggers on "build a form", "interface page", "approval flow", "data entry", "signup form", "survey", "feedback form", "InterfaceTriggerActor", "InterfaceActor".
+description: Design BorgIQ interface pages and forms for signed-in users — InterfaceTriggerActor and InterfaceActor pages, form components, prefill, validation, conditional fields, page colors and the web-viewer embed. Use when building a form, signup, survey, data-entry page or approval step. Triggers on "build a form", "interface page", "approval flow", "data entry", "signup form", "survey", "feedback form", "InterfaceTriggerActor", "InterfaceActor".
 ---
 
 # BorgIQ Form Builder
 
-Build forms and interface pages — the primary user-facing surface in BorgIQ workflows. Pair this skill with the hub `borgiq-builder` (which handles flow wiring) and, when fields produce or consume structured data, `borgiq-json-schema-builder`.
+Build forms and interface pages for BorgIQ workflows. This skill requires the `borgiq-builder` skill (the hub), which covers flow wiring, IDs and deployment and holds the references linked below. For structured data contracts, also use the `borgiq-json-schema-builder` skill.
+
+## Who can open a page
+
+**Every interface page requires a signed-in viewer; there is no anonymous access.** Opening or submitting a page takes a Viewer, Member or Admin role in the canvas's workspace, or an App user grant for that InterfaceTriggerActor. Workspace settings cannot grant App users an InterfaceActor, so send approval links only to workspace members. For public sign-ups or anonymous intake, post from a page hosted outside BorgIQ to a WebhookTriggerActor with `configuration.webhook.authorizationLevel: public` ([webhook-trigger-actor.md](../borgiq-builder/references/webhook-trigger-actor.md)).
 
 ## Mental model
 
-Interface pages are the **form surface** of BorgIQ. Two actors share one page-configuration schema:
+Two actors share one page schema:
 
 | Actor | When it fires | Use it for |
 |---|---|---|
-| **InterfaceTriggerActor** | Page submission **starts** the flow | Forms for people signed in to the workspace: requests, intake, feedback, surveys |
-| **InterfaceActor** | Renders **mid-flow** with two output ports — `meta` (URL on render) and `event` (on submission) | Approvals, async review, "send a form via email" patterns |
+| **InterfaceTriggerActor** | Page submission **starts** the flow | Forms for signed-in users: requests, intake, feedback, surveys |
+| **InterfaceActor** | Renders **mid-flow**; its Meta port (`SPRTdefault`) emits the page URL, its Event port (`SPRTevent00`) the submission | Approvals, async review, "send a form by email" |
 
-**Viewers must sign in; there is no anonymous access.** Opening or submitting a page requires a Viewer, Member or Admin role in the workspace, or an App user grant for that InterfaceTriggerActor (workspace settings cannot grant App users an InterfaceActor), so send approval links only to workspace members. For public sign-ups, post from a page hosted outside BorgIQ to a WebhookTriggerActor with `configuration.webhook.authorizationLevel: public` ([`references/webhook-trigger-actor.md`](../borgiq-builder/references/webhook-trigger-actor.md)).
+**Interfaces are forms, not apps.** For dashboards, SPAs or bespoke layouts, build a ReactAppTriggerActor app with the `borgiq-react-app-builder` skill. A `webViewer` embeds an external page or custom HTML *inside* a form (a help panel, a widget); never rebuild the form in it.
 
-**Interfaces are forms, not standalone apps.** Using an interface with no form fields (just display + webViewer) is no longer recommended — for interactive dashboards, SPAs, or bespoke layouts, build an app instead (see the `borgiq-react-app-builder` skill). The `webViewer` component embeds an external page or custom HTML *inside* a form, but it does not replace forms.
+## Rules
 
-## Key decisions
-
-1. **InterfaceTrigger vs InterfaceActor.** Does the form *start* the flow (Trigger) or sit *inside* it (Actor)? An InterfaceActor's `meta` port emits a URL that you can route to email/Slack and `event` fires when the user submits — this is the canonical async-approval pattern. Set its `timeoutInMinutes` to bound the wait (no timeout by default; on timeout the actor fails with `TimeoutError`).
-2. **Form width.** `formWidth` is `full` (data-dense layouts), `half` (default; a centered half-width column) or `adjustable` (a centered column the viewer can resize).
-3. **Single page vs multi-step.** Group within one page using `section` and `collapse`. Reach for a wizard (chained InterfaceActors or `onSubmit: nextInterface`) only when steps depend on prior answers or the form is long enough that users would abandon a single page.
-4. **Validation strategy.** `required: true` for mandatory, `readOnly: true` for display-only context, conditional fields for branching logic. The browser validates, and the server re-validates the submitted body against the page (400 with per-field errors).
-5. **Theme.** Native page chrome takes `themeColor` (primary color: hex `#RRGGBB` or a Mantine color name such as `blue`) and `backgroundColor` (a CSS color or Mantine color name); there is no font setting. `interface-pages.md` page colors (10 palettes — Modern Minimalist, Ocean Depths, etc.) can supply them. Custom HTML inside a `webViewer` is themed differently: use the app theme library (`react-app-themes.md`, default `hearth`) — it's plain CSS, no React required.
-6. **webViewer scope.** Use it to embed external pages or hand-written HTML/CSS *within* the form (e.g., a help panel, a third-party widget). Don't try to rebuild the form itself in webViewer — use the native components.
+1. **Trigger or actor.** A form that starts the flow is an InterfaceTriggerActor. For an approval, place an InterfaceActor, route the Meta port's `interfaceUrl` to email or Slack, and process the Event port's `body`. Set `timeoutInMinutes` to bound the wait: there is no timeout by default, and on expiry the actor fails with a `TimeoutError`.
+2. **Prefill with `default`**, never `defaultValue`: props a component's schema lacks are ignored without an error. `default: ${{ msg.<msgVar>.<field> }}` works on an InterfaceActor; any page can also be prefilled by `defaultValues` or URL query params, which win. Add `readOnly: true` for display-only context.
+3. **Width.** `formWidth` is `full` (data-dense layouts), `half` (default; a centered half-width column) or `adjustable` (a centered column the viewer can resize).
+4. **One page first.** Group fields with `section` and `collapse`. Chain pages (`onSubmit: nextInterface` into a downstream InterfaceActor) only when steps depend on earlier answers or the page grows too long.
+5. **Validation.** Mark mandatory fields `required: true`; use conditional fields for branching. The browser validates, and the server re-validates the body against the page (400 with per-field errors).
+6. **Keys are the contract.** The submitted `body` is keyed by each component's `key`; a nested component's values sit under its own key unless `extendParentObject: true`. Every page that collects input needs a `formButton` (label in `text`).
 
 ## Workhorse components
 
-Reach for these first; they cover ~80% of forms.
+`interface-components.md` has all 51 types.
 
 | Component | Use it for |
 |---|---|
-| `text` | Single-line input — names, titles, short answers |
-| `textarea` | Multi-line — descriptions, notes, longer feedback |
-| `select` | Dropdown choice when there are 4+ options |
-| `radio` | Mutually exclusive choice with 2-4 options — cleaner than `select` here |
-| `checkbox` | Single boolean — terms acceptance, opt-in, toggles |
-| `fileInput` / `fileDropzone` | Single file or multi-file drag-and-drop upload |
-| `section` | Group related fields; set `extendParentObject: true` to flatten into the parent payload |
-| `header` | Title/divider text — establishes visual hierarchy |
-| `markdown` | Rich instructional content (formatted help, intros) |
-| `formButton` | Submit button (label in `text`) — required to trigger the workflow |
+| `text` | Single line; `variant: email` validates an address |
+| `textarea` | Multi-line: descriptions, notes |
+| `select` / `radio` | One choice: `select` for 4+ options, `radio` for 2–4 |
+| `buttonGroup` | One choice as buttons, such as Approve / Reject |
+| `checkbox` | Single boolean: terms, opt-in |
+| `fileInput` / `fileDropzone` | File upload; drag-and-drop for several |
+| `section` | Group related fields |
+| `header` / `markdown` | Titles and formatted instructions |
+| `formButton` | Submits the form |
 
-See [`references/interface-components.md`](../borgiq-builder/references/interface-components.md) for the full catalog of 51 components, including selection (`multiSelect`, `multiCheckbox`, `buttonGroup`), date/time, arrays, and conditional fields.
+## Theming
 
-## Anti-patterns
-
-1. **Interfaces as standalone apps.** No form fields, just webViewer/markdown for display? That's a deprecated pattern — build an app via the `borgiq-react-app-builder` skill instead.
-2. **Arbitrary spacing or hex colors.** The theme's spacing scale and tokens are the contract. Hard-coded `padding: 17px` or `color: #4A90E2` outside the theme is a smell.
-3. **Missing interaction states.** Every button needs hover/focus/disabled; every list needs loading/empty/error. Forms without states feel like screenshots.
-4. **Sidebar with a different background color.** Fragments the visual space. Same background, subtle border for separation.
-5. **Skipping the squint test.** Blur your eyes — if the hierarchy isn't visible and surfaces aren't distinguishable, the design isn't intentional yet.
-
-## Theming, briefly
-
-Two surfaces, two mechanisms:
-
-- **Native page + form components** are themed by the page config (`themeColor`, `backgroundColor`); take the colors from a palette in the [page colors table](../borgiq-builder/references/interface-pages.md#page-colors). The page follows the viewer's light/dark scheme.
-- **Custom HTML inside a `webViewer`** uses the app theme library — [`references/react-app-themes.md`](../borgiq-builder/references/react-app-themes.md). It's framework-agnostic CSS (custom properties + class recipes), so it works in the webViewer's raw HTML+CSS with no React and no CDN: paste the Base Contract + one theme block (default `hearth`, or the theme closest to the page's palette) into the webViewer's styles, build markup on the recipe classes, and use Tabler icons as inline SVG with `stroke="currentColor"`. Never hard-code colors — tokens only, and dark mode comes wired in.
+- **Native page:** `themeColor` (primary color: hex `#RRGGBB` or a Mantine color name such as `blue`) and `backgroundColor`; no font setting, and the page follows the viewer's light/dark scheme. Take a palette from the [page colors table](../borgiq-builder/references/interface-pages.md#page-colors).
+- **Custom HTML in a `webViewer`:** style it with the app theme library, [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) (plain CSS: the Base Contract + one theme block, default `hearth`; tokens only, never hard-coded colors).
 
 ## Wiring to downstream actors
 
-Form submissions are emitted as structured data; downstream actors consume specific fields:
-
 ```yaml
-# Downstream HttpRequestActor accessing form data
+# A downstream actor reading a submission
 inputs:
   customerName: ${{ msg.signup_form.body.fullName }}
   customerEmail: ${{ msg.signup_form.body.email }}
+  submittedBy: ${{ msg.signup_form.meta.user.email }}
 ```
 
-The `body` keys come from your `key:` declarations on each component in the page config. Define them with care — they're the API contract between the form and the rest of the flow.
+## Read when
 
-## References
-
-| File | What's inside |
+| When you need | Read |
 |---|---|
-| [`references/interface-pages.md`](../borgiq-builder/references/interface-pages.md) | Page schema: options, page colors, nesting, prefill, validation, access, onSubmit; links the complete examples |
-| [`references/interface-components.md`](../borgiq-builder/references/interface-components.md) | Every component type and its props |
-| [`references/interface-trigger-actor.md`](../borgiq-builder/references/interface-trigger-actor.md) | InterfaceTriggerActor config, emitted message schema, downstream field access |
-| [`references/interface-actor.md`](../borgiq-builder/references/interface-actor.md) | InterfaceActor config, two-port pattern, async approval workflows |
-| [`references/react-app-themes.md`](../borgiq-builder/references/react-app-themes.md) | The app theme library for custom HTML in webViewer: token contract, base stylesheet, component recipes, five theme skins, Tabler icon rules |
-| [`references/typescript/index.md`](../borgiq-builder/references/typescript/index.md) | TypeScript/Zod schemas for every form component |
+| Page options, colors, nesting and body shape, prefill, validation, access, `onSubmit` | [interface-pages.md](../borgiq-builder/references/interface-pages.md) |
+| A component's props, the webViewer and its CSP options | [interface-components.md](../borgiq-builder/references/interface-components.md), then the generated module it links |
+| A complete page: contact, approval, multi-step, conditional fields, editable table | [interface-examples.md](../borgiq-builder/references/interface-examples.md) |
+| A form that starts a flow: options, emitted message, page URL | [interface-trigger-actor.md](../borgiq-builder/references/interface-trigger-actor.md) |
+| An approval mid-flow: ports, `timeoutInMinutes`, emailing the link, waiting-page status | [interface-actor.md](../borgiq-builder/references/interface-actor.md) and [send-email-actor.md](../borgiq-builder/references/send-email-actor.md) |
+| Styling custom HTML in a webViewer | [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) |
+| A public form with no sign-in | [webhook-trigger-actor.md](../borgiq-builder/references/webhook-trigger-actor.md) |
+| Exact types | [typescript/index.md](../borgiq-builder/references/typescript/index.md) |
 
-## When to hand off to other spokes
+## When to hand off to other skills
 
-| Customer ask | Hand off to |
+| Customer ask | Use |
 |---|---|
 | "I need a custom-styled dashboard / data explorer / SPA" | `borgiq-react-app-builder` (ReactAppTriggerActor) |
 | "The form fields should match a JSON schema" or "validate against this contract" | `borgiq-json-schema-builder` |
 | "Wire the form to an AI agent / tool-using LLM" | `borgiq-agent-builder` |
-| Anything about edges, msgVars, fork/join, deploy | Hub: `borgiq-builder` |
+| Edges, msgVars, fork/join, deploy | the hub, `borgiq-builder` |
