@@ -130,23 +130,11 @@ Cross-domain example: _"build a flow with an interface form that takes a custome
 
 ## TypeScript Definitions
 
-Complete TypeScript/Zod schema definitions for all actors are available in [references/typescript/](references/typescript/). Use these to understand exact data structures, validation rules, and type constraints.
+Complete TypeScript/Zod schema definitions for all actors are available in [references/typescript/index.md](references/typescript/index.md). Use these to understand exact data structures, validation rules, and type constraints.
 
-| Reference File | Description |
-|-------------|-------------|
-| [actor-schemas-triggers.md](references/typescript/actor-schemas-triggers.md) | Trigger actor options and results (Button, Webhook, Email, Interface, App, Scheduled, Universal, Callable) |
-| [actor-schemas-task-core.md](references/typescript/actor-schemas-task-core.md) | Core task actor schemas (AiActor, AiAgentActor, DenoActor, PythonActor, RouterActor, etc.) |
-| [actor-schemas-task-http.md](references/typescript/actor-schemas-task-http.md) | HttpRequestActor options and authentication types |
-| [actor-schemas-task-datastore.md](references/typescript/actor-schemas-task-datastore.md) | DataStoreActor actions (legacy — kept for TypeScript type reference) |
-| [actor-schemas-task-collection.md](references/typescript/actor-schemas-task-collection.md) | CollectionActor actions (query, getItem, putItem, batchGetItem, batchWriteItem, etc.) |
-| [actor-schemas-task-stream.md](references/typescript/actor-schemas-task-stream.md) | StreamActor actions (createStream, appendData, readStream, getStreamInfo, etc.) |
-| [actor-schemas-task-messageprocessor.md](references/typescript/actor-schemas-task-messageprocessor.md) | MessageProcessorActor actions (inject, split, collect, fork, forkJoin, delay, etc.) |
-| [actor-schemas-comment.md](references/typescript/actor-schemas-comment.md) | CommentActor schema |
-| [form-components.md](references/typescript/form-components.md) | Interface form component schemas (InterfaceTriggerActor and InterfaceActor only, not used by AppTriggerActor) |
-| [schemas.md](references/typescript/schemas.md) | Common schemas (IDs, files, runtime types, context, signals) |
-| [common-types.md](references/typescript/common-types.md) | Shared types, AI model definitions and model references (`ai/modelRef`: custom providers, `<slug>/<model-id>`), canvas, runtime, sandbox types |
+That file is a router: it maps each actor, action, form component and shared type to one file.
 
-**Usage:** When building actors or understanding output structures, read the relevant TypeScript reference markdown file to find exact field names, types, and validation rules. Each file contains a table of contents linking to individual type definitions.
+**Usage:** When building actors or understanding output structures, read the relevant TypeScript reference markdown file to find exact field names, types, and validation rules. Each file holds one source module and links the modules it imports.
 
 ## Task Actor Types
 
@@ -316,7 +304,7 @@ See [universal-trigger-actor.md](references/universal-trigger-actor.md) and [web
 
 ### Trigger Output
 
-All triggers emit a message accessible to downstream actors via `msg.<trigger_msgVar>`. The message structure varies by trigger type—see the TypeScript schemas in [references/typescript/actor-schemas-triggers.md](references/typescript/actor-schemas-triggers.md) for exact definitions:
+All triggers emit a message accessible to downstream actors via `msg.<trigger_msgVar>`. The message structure varies by trigger type—see the TypeScript schemas in [references/typescript/index.md](references/typescript/index.md) for exact definitions:
 
 - **ButtonTriggerActor**: Emits the configured `options` payload
 - **WebhookTriggerActor**: Emits `{ meta, method, headers, body, queryParams, rawBody?, response? }`

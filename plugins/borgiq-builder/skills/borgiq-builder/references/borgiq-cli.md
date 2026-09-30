@@ -323,7 +323,7 @@ Or pipe from stdin:
 cat outputs/my-workflow.yaml | borgiq canvases create-with-data --json
 ```
 
-The request body should include `name`, `slug`, `description`, and `data` (the full actor graph). See the [AI Agent API Guide](ai-agent-api-guide.md) for the expected JSON structure.
+The request body should include `name`, `slug`, `description`, and `data` (the full actor graph). See the [CLI data formats reference](cli/cli-data-formats.md#create-with-data-body) for the expected JSON structure.
 
 #### Create an empty canvas, then add actors incrementally
 

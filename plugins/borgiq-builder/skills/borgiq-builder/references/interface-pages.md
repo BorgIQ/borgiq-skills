@@ -2,7 +2,7 @@
 
 This reference documents the `page` configuration used by both InterfaceTriggerActor and InterfaceActor to render web forms and interfaces.
 
-Every page requires a signed-in workspace member; there is no anonymous access (see [Interface URL](interface-trigger-actor.md#interface-url)). Props not in a component's schema are ignored without an error (for example `defaultValue` instead of `default`); exact props are in [typescript/form-components.md](typescript/form-components.md).
+Every page requires a signed-in workspace member; there is no anonymous access (see [Interface URL](interface-trigger-actor.md#interface-url)). Props not in a component's schema are ignored without an error (for example `defaultValue` instead of `default`); exact props are in [typescript/index.md](typescript/index.md).
 
 ## Table of Contents
 

@@ -117,4 +117,4 @@ configuration:
 
 ## TypeScript Schema Hint
 
-See [typescript/actor-schemas-task-core.md](typescript/actor-schemas-task-core.md) (`actorSchemas/task/deprecatedAiAgent` section) for the complete TypeScript definitions.
+See [typescript/legacy/actorSchemas/task/deprecatedAiAgent.md](typescript/legacy/actorSchemas/task/deprecatedAiAgent.md) for the complete TypeScript definitions.

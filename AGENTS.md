@@ -112,7 +112,7 @@ python3 scripts/init_skill.py custom-skill --path /custom/location
 
 ### Generated type references
 
-`references/typescript/*.md` mirror the platform's runtime type definitions. BorgIQ maintainers generate them from the platform source and scrub them before they land here. **Never hand-edit them**: the next generation overwrites the edit. Report a wrong or missing type as an issue instead.
+`references/typescript/` mirrors the platform's runtime type definitions, one file per source module at the module's own path: `actorSchemas/task/aiAgent.ts` is `typescript/actorSchemas/task/aiAgent.md`. `typescript/index.md` is a generated router from a need (an actor, an action, a form component, `ctx`) to its files, and the types of legacy actors live under `typescript/legacy/`, linked only from the notes on those actors. Link a module by its file path, not by an anchor. BorgIQ maintainers generate the whole tree from the platform source and scrub it before it lands here. **Never hand-edit it**: the next generation overwrites the edit. Report a wrong or missing type as an issue instead.
 
 When a generated file changes (a renamed option, a new model, a new status field), prose in the other references may need the same change. Review the diff for that.
 

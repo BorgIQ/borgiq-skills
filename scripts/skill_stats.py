@@ -38,8 +38,7 @@ BUDGETS = REPO / "scripts" / "skill-budgets.json"
 TASKS = REPO / "scripts" / "task-paths.json"
 
 HUB_REFS = "borgiq-builder/references/"
-GENERATED = ("borgiq-builder/references/typescript/",
-             "borgiq-builder/references/ai-agent-api-guide.md")
+GENERATED = ("borgiq-builder/references/typescript/",)
 
 # Agent Skills spec limits for a SKILL.md body
 SPEC_MAX_LINES = 500

@@ -85,7 +85,7 @@ The `body` keys come from your `key:` declarations on each component in the page
 | [`references/interface-actor.md`](../borgiq-builder/references/interface-actor.md) | InterfaceActor config, two-port pattern, async approval workflows |
 | [`references/react-app-themes.md`](../borgiq-builder/references/react-app-themes.md) | The app theme library for custom HTML in webViewer: token contract, base stylesheet, component recipes, five theme skins, Tabler icon rules |
 | [`references/themes.md`](../borgiq-builder/references/themes.md) | 10 pre-built themes with palettes, typography, and best-use contexts |
-| [`references/typescript/form-components.md`](../borgiq-builder/references/typescript/form-components.md) | TypeScript/Zod schemas for every form component |
+| [`references/typescript/index.md`](../borgiq-builder/references/typescript/index.md) | TypeScript/Zod schemas for every form component |
 
 ## When to hand off to other spokes
 

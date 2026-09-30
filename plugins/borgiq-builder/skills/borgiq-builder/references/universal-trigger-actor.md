@@ -181,7 +181,7 @@ export const UniversalTriggerActorCodeDirSchema = makeCodeDirSchema({
 });
 ```
 
-Full definitions: [typescript/actor-schemas-triggers.md → universalTrigger](typescript/actor-schemas-triggers.md#actorschemastriggeruniversaltrigger) (options), [typescript/actor-schemas-triggers.md → triggerConfig](typescript/actor-schemas-triggers.md#actorschemastriggertriggerconfig) (static webhook/schedule/lifecycle config), and [typescript/schemas.md → schemas/trigger](typescript/schemas.md#schemastrigger) (the `TriggerEvent` union).
+Full definitions: [typescript/actorSchemas/trigger/universalTrigger.md](typescript/actorSchemas/trigger/universalTrigger.md) (options), [typescript/actorSchemas/trigger/triggerConfig.md](typescript/actorSchemas/trigger/triggerConfig.md) (static webhook/schedule/lifecycle config), and [typescript/schemas/trigger.md](typescript/schemas/trigger.md) (the `TriggerEvent` union).
 
 ## Code Files
 

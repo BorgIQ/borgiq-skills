@@ -962,4 +962,4 @@ Compose agents hierarchically using CallFlowActor tools to create specialized su
 
 ## TypeScript Schema Hint
 
-See [typescript/actor-schemas-task-core.md](typescript/actor-schemas-task-core.md) for the complete TypeScript definitions of AiAgentActor options and result schemas (`actorSchemas/task/aiAgent` section).
+See [typescript/actorSchemas/task/aiAgent.md](typescript/actorSchemas/task/aiAgent.md) for the complete TypeScript definitions of AiAgentActor options and result schemas.

@@ -332,7 +332,7 @@ Trigger -> CollectionActor (transactWrite) -> [Continue on success]
 
 ## TypeScript Schema Hint
 
-See [typescript/actor-schemas-task-collection.md](typescript/actor-schemas-task-collection.md) for complete TypeScript definitions including:
+See [typescript/actorSchemas/task/collection/index.md](typescript/actorSchemas/task/collection/index.md) for complete TypeScript definitions including:
 - `CollectionActorAction` - Enum of all available actions
 - `CollectionActorOptionsSchema` - Configuration options (discriminated union by action)
 - `CollectionActorCreateCollectionOptionsSchema` / `CollectionActorCreateCollectionResult` - Create collection

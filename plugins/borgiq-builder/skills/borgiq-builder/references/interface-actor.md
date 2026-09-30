@@ -382,4 +382,4 @@ Collect user input at any point in a workflow without requiring the workflow to 
 
 ## TypeScript Schema Hint
 
-The InterfaceActor shares the same page configuration schema as InterfaceTriggerActor. Exact definitions: InterfaceActor options in [typescript/actor-schemas-task-core.md](typescript/actor-schemas-task-core.md#actorschemastaskinterface), the page schema in [typescript/schemas.md](typescript/schemas.md#schemasinterface), and the components in [typescript/form-components.md](typescript/form-components.md).
+The InterfaceActor shares the same page configuration schema as InterfaceTriggerActor. Exact definitions: InterfaceActor options in [typescript/actorSchemas/task/interface.md](typescript/actorSchemas/task/interface.md), the page schema in [typescript/schemas/interface.md](typescript/schemas/interface.md), and the components in [typescript/index.md](typescript/index.md).
