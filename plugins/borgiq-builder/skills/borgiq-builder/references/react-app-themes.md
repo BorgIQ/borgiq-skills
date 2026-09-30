@@ -247,7 +247,7 @@ Copy rules: sentence case everywhere; buttons name the action ("Save changes", n
 
 ## Icons
 
-**Tabler Icons is the icon set** — one family in every theme, via `@tabler/icons-react` (MIT, ~5,000 stroke icons, tree-shakes into the single-JS build; inline SVG, so no CDN and no CSP change):
+**Tabler Icons is the icon set** — one family in every theme, via `@tabler/icons-react` (MIT, ~5,000 stroke icons, tree-shakes into the single-JS build; inline SVG, so no CDN and no CSP change). Add it to `package.json` `dependencies` at an exact version, and keep `build.rollupOptions.maxParallelFileOps: 20` in `vite.config.ts`: its thousands of per-icon modules otherwise fail the build with `EMFILE: too many open files`.
 
 ```tsx
 import { IconPlus } from '@tabler/icons-react'
