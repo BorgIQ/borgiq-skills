@@ -1267,6 +1267,25 @@ if (!response.ok) {
 const data = await response.json();
 ```
 
+### Stating BorgIQ's IP address in a request
+
+Some APIs want the caller's IP address in the request itself, such as Namecheap's `ClientIp`. Requests leave through BorgIQ's egress proxy, and only the proxy knows which of the published addresses (Org settings → Network) it is using. Read `BORGIQ_EGRESS_CLIENT_IP` and put it where the API asks. Its value is a token, the variable's own name, and the proxy replaces it with the real address as the request leaves:
+
+```typescript
+const clientIp = Deno.env.get('BORGIQ_EGRESS_CLIENT_IP')!;
+const url = new URL('https://api.namecheap.com/xml.response');
+url.search = new URLSearchParams({
+  ApiUser: req.inputs.apiUser,
+  ApiKey: req.credentials.NAMECHEAP_API_KEY,
+  UserName: req.inputs.apiUser,
+  Command: 'namecheap.domains.getList',
+  ClientIp: clientIp, // becomes e.g. 203.0.113.7 on the way out
+}).toString();
+const response = await fetch(url);
+```
+
+It is filled in where it appears in the URL, a header or a text body of an HTTPS request, and in the URL or a header of a plain `http://` request. It is **not** filled in in a binary or multipart body, once the code has transformed it (base64, hashing, a signature it computes itself), or in a database driver or other non-HTTP connection, which leaves from a different address. Only the proxy knows the address, so the variable is set only when requests go through it. It is BorgIQ's address, not your customer's: do not put it in fields that ask for the end user's IP, such as fraud checks.
+
 ## Runtime Context
 
 Access runtime information via `req.ctx`:
