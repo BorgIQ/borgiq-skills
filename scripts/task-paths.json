@@ -108,6 +108,7 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-react-app-builder/SKILL.md",
+        "borgiq-builder/references/react-app-sdk.md",
         "borgiq-builder/references/react-app-themes.md",
         "borgiq-builder/references/universal-trigger-actor.md",
         "borgiq-builder/references/collection-api.md",
