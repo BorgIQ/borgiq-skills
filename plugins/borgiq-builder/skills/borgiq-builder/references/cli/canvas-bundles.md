@@ -50,6 +50,8 @@ push → test.
 
 - **Git is the recovery path.** Commit after `init` or `pull` and before each push. After a push, review and commit the
   actor and version metadata its implicit pull refreshed.
+- **`push`, `pack` and `build` run the same local validation first** and stop on an error (with `--strict`, on a
+  warning too).
 - **`bundle init`** needs an empty directory and has no `--force`. It writes one starter: a webhook trigger → Deno
   task, plus an unconnected HTTP test-sender. It passes `bundle validate --strict` and can be pushed as is.
 - **Deployed workspace:** a push changes nothing that runs until the canvas is built. Use

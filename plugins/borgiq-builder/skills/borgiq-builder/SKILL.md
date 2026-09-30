@@ -1,916 +1,285 @@
 ---
 name: borgiq-builder
-description: Build Actors, Triggers, AI Agents, and web apps for BorgIQ. Supports HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor (serverless coding agent with filesystem/bash, sessions, and BorgIQ tools), AgentHarnessActor (sandboxed Claude Code with session persistence), CollectionActor, StreamActor, ReactAppTriggerActor, InterfaceTriggerActor, WebhookTriggerActor. Use for workflow automations, REST API integrations, custom Deno/Python actors, AI-powered tasks, autonomous AI agents with tools, agent harness sandboxed execution, triggers (scheduled, webhook, email, button, interface, app, callable), or web apps with actor-backed APIs. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
+description: Build BorgIQ workflows (actors, triggers, wiring, expressions, storage) and deploy, run and debug them with the borgiq CLI. Covers HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor, AgentHarnessActor, CollectionActor, StreamActor, WebhookTriggerActor, InterfaceTriggerActor, ReactAppTriggerActor. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
 ---
 
 # BorgIQ Builder
 
-Build Actors and Triggers that power BorgIQ automation workflows.
+Routing, core rules and where to read more. Read only what a task needs.
 
-## Table of Contents
+## Load map
 
-- [BorgIQ Platform Overview](#borgiq-platform-overview)
-- [Routing to Specialized Skills](#routing-to-specialized-skills)
-- [TypeScript Definitions](#typescript-definitions)
-- [Task Actor Types](#task-actor-types)
-- [Trigger Actor Types](#trigger-actor-types)
-- [Common Actor Structure](#common-actor-structure)
-- [Actor Naming Conventions](#actor-naming-conventions)
-- [Configuration Interpolation Order](#configuration-interpolation-order)
-- [BorgIQ Expressions](#borgiq-expressions)
-- [Context Variables](#context-variables)
-- [Q-lib Functions](#q-lib-functions)
-- [Actor Source Files](#actor-source-files)
-- [Actor Memory](#actor-memory)
-- [Authentication](#authentication)
-- [Actor ID, Validation, and Post-Processing](#actor-id-validation-and-post-processing)
-- [Generation Instructions](#generation-instructions)
-- [Workflow Composition](#workflow-composition)
-- [Actor Connections and Edges](#actor-connections-and-edges)
-- [Workflow Examples](#workflow-examples)
-- [Workflow Patterns](#workflow-patterns)
-  - [Web apps and forms — handed off to spokes](#web-apps-and-forms--handed-off-to-spokes)
-  - [Collection migrations and provisioning](#collection-migrations-and-provisioning)
-  - [Streams: events in order, consumed by cursor](#streams-events-in-order-consumed-by-cursor)
-- [Editing Existing Workflows](#editing-existing-workflows)
-- [Migration from Other Platforms](#migration-from-other-platforms)
-- [Deploying and Testing with the CLI](#deploying-and-testing-with-the-cli)
-  - [Canvas Bundles](references/cli/canvas-bundles.md)
-  - [CLI Command Map](references/borgiq-cli.md#command-map)
-  - [CLI Data Formats](references/cli/cli-data-formats.md)
-  - [CLI Scaffolding](references/borgiq-cli.md#start-from-a-template)
-  - [CLI Errors](references/borgiq-cli.md#errors)
+Paths are under `references/`.
 
-## BorgIQ Platform Overview
+| Task | Read |
+|---|---|
+| Choose an actor or trigger type | `choosing-actors.md` |
+| Webhook endpoint that routes and responds | `webhook-trigger-actor.md`, `router-actor.md`, `webhook-response-actor.md`, `workflow-example.md` |
+| Scheduled job, fan-out and join | `scheduled-trigger-actor.md`, `message-processor-actor.md`, `error-handling.md` |
+| Approval by emailed link, any recipient | `message-processor-actor.md` → Human approval pattern (the token `url` takes only POST, so the link opens a GET webhook flow that calls `notifyCallbackToken`), `router-actor.md`, `send-email-actor.md` |
+| Approval page for a signed-in workspace member | InterfaceActor, via the form spoke |
+| Deno or Python code, state across runs | `code-actor-runtime.md` + `deno-actor.md` or `python-actor.md` |
+| Collection-backed CRUD API | `universal-trigger-actor.md`, `collection-design.md`, `collection-sdk.md`, `collection-migrations.md` |
+| Record events, process them later | `stream-actor.md`, `collection-migrations.md` |
+| Forms, apps, AI agents, schemas | [Spokes](#spokes) |
+| Start from a template or recipe | `borgiq-cli.md`, `cli/canvas-bundles.md` → Templates |
+| Build and push a bundle; deployed workspace | `cli/canvas-bundles.md`; `deployment.md` |
+| Run, monitor, debug a flowrun | `flowrun-job-states.md`, `error-handling.md` |
+| Edit an existing canvas | `editing-workflows.md` |
+| No shell | `validation.md` |
+| Exact option and result types | [typescript/index.md](references/typescript/index.md) |
 
-BorgIQ is an automation platform where nodes are called **Actors**. Workflows chain Actors together with connections (edges). Each actor emits messages stored under `msg.ActorName`.
+## Non-negotiables
 
-### Workspaces and Canvases
+1. **Search [templates](references/borgiq-cli.md#start-from-a-template)** (`borgiq templates apps --search <vendor>`)
+   **and, for a multi-actor flow, [recipes](references/borgiq-cli.md#start-from-a-recipe)** (`borgiq recipes list`,
+   CLI ≥ 0.13.0) before hand-building.
+2. **With a shell, build in a canvas bundle.** Edges and positions live only in `canvas.yaml`; adding an actor follows
+   the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule).
+3. **Mint IDs with `borgiq generate`** (`id actor|edge|sourceport|webhooktriggerkey`, `msgvar "<name>"`); never
+   invent them. Most port IDs are fixed per type ([ports](references/edges-and-positioning.md#port-ids)). With no
+   shell, use the formats in [validation.md](references/validation.md).
+4. **An actor's output is `msg.<msgVar>`.** With `continueOnError: true`, a failure lands in `err.<msgVar>`.
+5. **Fan-out is automatic:** N incoming edges mean N runs. [`fork`/`forkJoin`](references/message-processor-actor.md#fork-actions)
+   are only for joining; `forkJoin` needs `enableSTM` and `size: ${{ ctx.actor.upstreamActorCount }}` after N
+   parallel actors, or a number when a connected path can drop or reroute its message.
+6. **Inputs are the wire; `vars` are local scratch.** Code actors never interpolate `vars`/`outputs`; `codeDir` is
+   never interpolated.
+7. **`${{ }}` goes only in YAML values and must be pure** (no I/O). Escape it as `\${{` (`"\\${{"` in double quotes):
+   it stays unevaluated, backslash included.
+8. **One connection per actor;** more go through credentials `source: connection`. Never put secrets in inputs.
+   [Server-side](references/code-actor-runtime.md#server-side-vs-sent-to-runtime) credentials (the default) are
+   placeholders that work only inside outbound HTTPS requests.
+9. **Code-actor memory merges:** return only the half you change, spread the prior state, `null` clears a key; set
+   the enable flags; defaults are 1 KB LTM and 4 KB STM ([memory](references/code-actor-runtime.md#memory)).
+10. **Collections and streams must exist before use.** Ship an idempotent, manual-invoke migration runner
+    ([below](#collection-migrations-and-provisioning)); `putItem` is create-only.
+11. **On a deployed workspace, runs execute the active build:** push, then build ([deployment.md](references/deployment.md)).
+12. **Validate before presenting or pushing:** `borgiq bundle validate <dir> --strict`, or `borgiq validate <file>`
+    for a document.
+13. **Web apps are ReactAppTriggerActor** (React spoke). **Forms are interface pages** (form spoke), which require
+    signed-in viewers.
+14. **Run states are lowercase, and `completed` does not mean success:** read the summary's `errors`.
 
-BorgIQ organizes workflows in a hierarchical structure:
+## Platform model
 
-| Concept | Description | Identifier |
-|---------|-------------|------------|
-| **Workspace** | A container for canvases, connections, and team members. Workspaces provide isolation and access control. | `workspaceSlug` (e.g., `my-team`, `prod-ws`) |
-| **Canvas** | A container for one or more workflows and their connections. Each workflow within a canvas has its own trigger actor. | `canvasSlug` (e.g., `process-orders`, `send-notifications`) |
-| **Actor** | An individual node within a canvas that performs work or triggers execution. | `actorId` (e.g., `ACTR01kd6tesvky0mh8x1css3sv5yg`) |
+A workspace holds canvases, connections, secrets and assets. A canvas holds workflows, each started by exactly one
+trigger actor (a run is a flowrun); task actors do the work, passing messages along edges.
 
-**Slug Format:**
-- Workspace slugs: 5-10 lowercase alphanumeric characters with hyphens (e.g., `john-dev`)
-- Canvas slugs: 2-255 lowercase alphanumeric characters with hyphens (e.g., `skill-test`)
+## Spokes
 
-**Cross-Canvas/Workspace Calls:**
-Actors can invoke sub-flows in other canvases or workspaces using CallFlowActor. When `workspaceSlug` or `canvasSlug` is omitted, the current workspace/canvas is assumed.
+A flow across domains (form → agent → Slack) uses this hub plus each spoke it touches.
 
-### Actor Categories
+- Use the `borgiq-form-builder` skill (or read [its SKILL.md](../borgiq-form-builder/SKILL.md)) for interface
+  pages: signups, surveys, data entry, approval pages.
+- Use the `borgiq-react-app-builder` skill (or read [its SKILL.md](../borgiq-react-app-builder/SKILL.md)) for any
+  app UI (dashboards, SPAs, `useEndpoint`, `useStreamTail`, app themes) and legacy AppTriggerActor apps.
+- Use the `borgiq-agent-builder` skill (or read [its SKILL.md](../borgiq-agent-builder/SKILL.md)) to choose and
+  configure AiAgentActor, AgentHarnessActor or McpServerActor.
+- Use the `borgiq-json-schema-builder` skill (or read [its SKILL.md](../borgiq-json-schema-builder/SKILL.md)) for
+  non-trivial schemas: `outputSchema`, tool inputs, collection items, sub-flow contracts.
 
-There are two categories of actors:
+## Actor catalog
 
-| Category | Description | Examples |
-|----------|-------------|----------|
-| **Trigger Actors** | Start workflows (flowruns). Each workflow has exactly one trigger. A canvas can contain multiple workflows, each with its own trigger. | ButtonTriggerActor, WebhookTriggerActor, ScheduledTriggerActor |
-| **Task Actors** | Perform work within the workflow. Process data, make API calls, route messages, etc. | HttpRequestActor, DenoActor, AiActor, RouterActor |
+Scenarios: [choosing-actors.md](references/choosing-actors.md).
 
-**Example workflow:** `TriggerActor -> TaskActor1 -> TaskActor2` produces:
-```json
-{
-  "msg": {
-    "trigger_actor": { "...output from trigger..." },
-    "task_actor_1": { "...output from task 1..." },
-    "task_actor_2": { "...output from task 2..." }
-  }
-}
-```
+### Task Actor Types
 
-### Concurrent Execution Model
+| Type | Use for |
+|---|---|
+| [HttpRequestActor](references/http-request-actor.md) | One REST call, when no template fits |
+| [DenoActor](references/deno-actor.md) | TypeScript: dependent API calls, npm packages, I/O, loops |
+| [PythonActor](references/python-actor.md) | Python 3.11 packages, data science, shell tools (`git`, `jq`) |
+| [MessageProcessorActor](references/message-processor-actor.md) | Transforms (`inject`, the default), filter, delay, split/collect, fork/join, dedupe, callbacks |
+| [RouterActor](references/router-actor.md) | Branch on conditions, one port per route |
+| [AiActor](references/ai-actor.md) | One LLM call: generate, classify, extract, structured output |
+| [AiRouterActor](references/ai-router-actor.md) | Route by AI classification |
+| [AiAgentActor](references/ai-agent-actor.md) | Agent loop: workspace, bash, sessions, actors as tools |
+| [AgentHarnessActor](references/agent-harness-actor.md) | Claude Code, Codex, OpenCode or pi in a sandbox VM |
+| [CollectionActor](references/collection-actor.md) | Current state: CRUD, queries, labels, TTL, transactions, queues |
+| [StreamActor](references/stream-actor.md) | Append-only ordered logs read by cursor |
+| [CallFlowActor](references/call-flow-actor.md) | Call a sub-flow and wait, or fire and forget |
+| [CallableResponseActor](references/callable-response-actor.md) | Return a sub-flow's result to a waiting CallFlowActor; otherwise it just emits |
+| [WebhookResponseActor](references/webhook-response-actor.md) | Answer a WebhookTriggerActor's caller |
+| [InterfaceActor](references/interface-actor.md) | A form page mid-flow; `timeoutInMinutes` bounds the wait |
+| [SendEmailActor](references/send-email-actor.md) | Text or HTML email with attachments |
+| [CommentActor](references/comment-actor.md) | A canvas note; never runs |
 
-**BorgIQ executes all downstream actors concurrently by default.** When an actor emits a message, all connected downstream actors start executing in parallel without any explicit configuration.
+Legacy, never create: [DeprecatedAiAgent](references/ai-agent-actor.md#legacy-deprecatedaiagent);
+[DataStoreActor](references/typescript/legacy/actorSchemas/task/dataStore/index.md) (use CollectionActor).
 
-```
-     A
-    / \
-   B   C      <- B and C run concurrently when A emits
-    \ /
-     D        <- D receives TWO separate messages (one from B, one from C)
-```
+### Trigger Actor Types
 
-**Key behavior:**
-- If A connects to both B and C, both B and C execute concurrently when A emits
-- D will receive **two separate messages** and execute **twice** (once for B's output, once for C's output)
-- No `fork` action is needed for parallel execution—it happens automatically
+| Type | Starts a flow on |
+|---|---|
+| [ButtonTriggerActor](references/button-trigger-actor.md) | A click in the UI; emits its `options` |
+| [WebhookTriggerActor](references/webhook-trigger-actor.md) | An HTTP request that feeds a multi-actor flow |
+| [UniversalTriggerActor](references/universal-trigger-actor.md) | Webhook, schedule, lifecycle or manual Invoke, handled in its `receive(req)` code |
+| [ScheduledTriggerActor](references/scheduled-trigger-actor.md) | A cron schedule |
+| [EmailTriggerActor](references/email-trigger-actor.md) | An email to its address |
+| [InterfaceTriggerActor](references/interface-trigger-actor.md) | A form submission (form spoke) |
+| [CallableTriggerActor](references/callable-trigger-actor.md) | A CallFlowActor call; its `schemas.inputs` is the contract |
+| [McpServerActor](references/mcp-server-actor.md) | External MCP clients calling its tool actors |
+| [ReactAppTriggerActor](../borgiq-react-app-builder/SKILL.md) | Nothing: hosts a React app; emits no messages |
+| [AppTriggerActor](references/app-trigger-actor.md) | Nothing: legacy raw-HTML app, maintain only; emits no messages |
 
-**When to use `fork`/`forkJoin`:**
+### Universal Trigger vs Webhook Trigger (HTTP endpoints)
 
-Only use the `fork` and `forkJoin` MessageProcessorActor actions when you need to **synchronize** parallel paths and emit a **single combined message**. See [message-processor-actor.md](references/message-processor-actor.md#fork-actions) for detailed documentation, a complete example and common pitfalls to avoid, and [workflow-patterns.md](references/workflow-patterns.md) for the pattern index.
+- **Self-contained route** (parse, auth, collection reads and writes, validation, response) → a webhook-enabled
+  UniversalTriggerActor replying with `Signal.webhookRespond` under `options.webhook.respondImmediately: false`.
+- **Orchestration** (AI, integrations, routing, a fork) → a WebhookTriggerActor feeding task actors and a
+  WebhookResponseActor.
+- **Several endpoints** → one trigger each, mixing both; never merge routes to save actors.
 
-| Scenario | Use Fork/ForkJoin? |
-|----------|-------------------|
-| Run B and C in parallel, D processes each separately | **No** - just connect A→B→D and A→C→D |
-| Run B and C in parallel, D needs combined results from both | **Yes** - use `fork` before the branches, `forkJoin` to recombine |
-| Fire-and-forget parallel notifications (email + Slack) | **No** - just connect to both actors |
-| Parallel API calls where you need all results together | **Yes** - use `fork`/`forkJoin` pattern |
-
-**Critical rules:**
-- `forkJoin` requires `enableSTM: true`
-- MessageProcessorActor always uses only `SPRTdefault` (fork uses multiple edges, not multiple sourcePorts)
-- Only RouterActor, AiRouterActor, InterfaceActor, AiAgentActor, and AgentHarnessActor use multiple sourcePorts ([port IDs](references/edges-and-positioning.md#port-ids))
-
-## Routing to Specialized Skills
-
-This skill is the **hub** of the `borgiq-builder` plugin. It covers actor wiring, edges, msgVars, expressions, and overall workflow composition. Four **spoke** skills ship in the same plugin and load automatically when their domain appears in the user's request. Pull them in actively when the work crosses into their area — they're more opinionated and focused than this hub.
-
-| Spoke | Load when the user is doing… | What it owns |
-|---|---|---|
-| **`borgiq-form-builder`** | Interface pages, forms, signups, surveys, approval forms, data-entry UIs, web-viewer embeds — signed-in workspace members only | InterfaceTriggerActor + InterfaceActor + form components + themes + webViewer styling |
-| **`borgiq-react-app-builder`** | Custom app UIs — dashboards, data explorers, SPAs, any component-based or multi-file frontend, npm UI libraries, `useEndpoint`, `useGetSession` (who is viewing the app), `useStreamTail` (follow a workspace stream live); also owns maintaining legacy raw-HTML AppTriggerActor apps | ReactAppTriggerActor + server-side Vite build + `codeDir`/`options.files` model + `@borgiq/actors` SDK + webhook endpoints + declared stream tails + viewer session + the app theme library |
-| **`borgiq-agent-builder`** | Autonomous AI behavior — AiAgentActor (serverless coding agent with filesystem/bash + tools), AgentHarnessActor (sandboxed Claude Code, Codex, OpenCode or pi), McpServerActor (expose tools to external agents) | AiActor when-not-to-use + AiAgentActor + AgentHarnessActor + McpServerActor |
-| **`borgiq-json-schema-builder`** | Non-trivial JSON schemas — AiActor `outputSchema`, agent tool input schemas, Collection item schemas, Callable response schemas | All schema-design decisions, anti-patterns, and the BorgIQ `type: any` convention |
-
-Cross-domain example: _"build a flow with an interface form that takes a customer name, hands it to an AI agent that researches them, posts the result to Slack"_ → hub orchestrates + `borgiq-form-builder` designs the form + `borgiq-agent-builder` designs the agent + `borgiq-json-schema-builder` defines the research output schema. The hub stays in context throughout and handles wiring, edges, IDs, and the Slack HTTP actor.
-
-## TypeScript Definitions
-
-Complete TypeScript/Zod schema definitions for all actors are available in [references/typescript/index.md](references/typescript/index.md). Use these to understand exact data structures, validation rules, and type constraints.
-
-That file is a router: it maps each actor, action, form component and shared type to one file.
-
-**Usage:** When building actors or understanding output structures, read the relevant TypeScript reference markdown file to find exact field names, types, and validation rules. Each file holds one source module and links the modules it imports.
-
-## Task Actor Types
-
-| Type | Description | Reference |
-|------|-------------|-----------|
-| **HttpRequestActor** | Makes REST API calls to external services (Gmail, GitHub, Airtable, etc.) | [http-request-actor.md](references/http-request-actor.md) |
-| **DenoActor** | Executes custom TypeScript/JavaScript code in a sandboxed Deno runtime | [deno-actor.md](references/deno-actor.md) |
-| **PythonActor** | Executes custom Python code in a sandboxed Python runtime with UV package management | [python-actor.md](references/python-actor.md) |
-| **AiActor** | Invokes AI models (LLMs) for text generation, structured output, and AI-powered tasks. Built-in providers or a workspace [custom provider](references/custom-ai-providers.md) (`<slug>/<model-id>`) | [ai-actor.md](references/ai-actor.md) |
-| **AiAgentActor** | Autonomous AI coding agent running in checkpointed serverless segments. Has a private workspace with built-in filesystem/bash tools (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, plus an opt-in `code_execution` tool for running code) plus BorgIQ actors as tools, session continuation via `sessionId`, and workspace zip in/out (`volumeZipFile` → `outputZipFile`). Has two output ports: Done (final result + zips) and Status (assistant turns + tool results). Tool actors are rendered inside the agent boundary with empty edges. | [ai-agent-actor.md](references/ai-agent-actor.md) |
-| **DeprecatedAiAgent** | Legacy orchestrator-loop AI agent (the former `AiAgentActor`) — no filesystem or sessions. Hidden from the palette; existing instances keep running. **Do not create new instances — use AiAgentActor.** | [ai-agent-actor.md](references/ai-agent-actor.md#legacy-deprecatedaiagent) |
-| **AgentHarnessActor** | Runs a harness CLI (Claude Code by default; Codex, OpenCode or pi) in an isolated sandbox (E2B or Daytona) with full filesystem access, code execution, session persistence via `sessionId`, and queued inbound messages. Supports `volumeZipFile` for context, network control, MCP servers, environment variables, and returns workspace + session data zips. Use it for a harness CLI, stdio MCP servers, package installs, daemons, or a full machine; AiAgentActor also runs code and keeps sessions. Has two output ports: Done (final result with output files) and Status (real-time execution updates). | [agent-harness-actor.md](references/agent-harness-actor.md) |
-| **AiRouterActor** | Routes messages to different outputs based on AI-powered classification | [ai-router-actor.md](references/ai-router-actor.md) |
-| **RouterActor** | Routes messages based on boolean conditions (if/else, switch logic) | [router-actor.md](references/router-actor.md) |
-| **MessageProcessorActor** | Processes, transforms, and controls message flow (inject data, delay, split/collect arrays, dedupe, filter, fork/forkJoin, callbacks). **Important:** Always has only `SPRTdefault` sourcePort—fork uses multiple edges to create parallel paths, not multiple sourcePorts. | [message-processor-actor.md](references/message-processor-actor.md) |
-| **WebhookResponseActor** | Sends custom HTTP responses back to WebhookTriggerActor callers | [webhook-response-actor.md](references/webhook-response-actor.md) |
-| **CallableResponseActor** | Returns data from sub-flows back to parent flows (CallFlowActor). **Only valid in flows triggered by CallableTriggerActor.** | [callable-response-actor.md](references/callable-response-actor.md) |
-| **CallFlowActor** | Invokes sub-flows by calling a CallableTriggerActor in another canvas/workspace | [call-flow-actor.md](references/call-flow-actor.md) |
-| **InterfaceActor** | Renders a web form/page mid-workflow with two output ports: Meta (URL info on render) and Event (form submission data). Only signed-in workspace members can open it; `timeoutInMinutes` bounds the wait | [interface-actor.md](references/interface-actor.md) |
-| **SendEmailActor** | Sends text/HTML emails with optional attachments | [send-email-actor.md](references/send-email-actor.md) |
-| **CollectionActor** | Persistent structured storage organized into named collections with labels, TTL, queries, batch operations, and transactions. Recommended for all new storage needs. **One collection per app** — model all entity types with key prefixes ([single-collection design](references/collection-design.md#one-collection-per-app)). | [collection-actor.md](references/collection-actor.md) |
-| **StreamActor** | Append-only, ordered, cursor-addressed record logs — event ingestion, audit trails, activity feeds, and incremental processing that resumes from a persisted cursor. Reads return **one bounded page**, never the stream. **Streams must be created before use** and **expire one hour after the last append** unless created `persistent: true` or with an explicit `idleTtlSeconds`. Use for "what happened, in order"; use CollectionActor for "the current value of X" ([Collections vs Streams](references/stream-actor.md#collections-vs-streams)). | [stream-actor.md](references/stream-actor.md) |
-| **McpServerActor** | Exposes its child tool actors as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server endpoint that external AI agents (Claude Desktop, Cursor, custom agents) can connect to. Category `trigger` (receives no messages). Reuses the AiAgentActor tool-actor pattern (`aiAgentToolActorIds`, `${{aiInput}}` schema filtering) — the difference is that an external MCP client drives tool invocations instead of an internal LLM loop. | [mcp-server-actor.md](references/mcp-server-actor.md) |
-| **CommentActor** | Non-functional UI element for adding notes, TODOs, and documentation to workflows | [comment-actor.md](references/comment-actor.md) |
-
-> **⚠️ Before hand-building an integration actor — especially an `HttpRequestActor` — search the template catalog first.** BorgIQ ships vetted templates for most third-party actions (Gmail, Slack, GitHub, Google, Notion, …). Adapting a template is the single biggest defense against the most common failure mode: hand-writing an actor's `options`, `sourcePorts`, and schemas from scratch and getting them subtly wrong. **Only hand-build when no template fits.**
->
-> ```bash
-> borgiq templates apps --search "<vendor>" --json     # run a few queries, e.g. gmail, google, slack
-> borgiq templates list --app-id TAPP... --json        # list that app's templates (paginates/sorts)
-> borgiq templates get ATMP... --json \                # fetch the chosen template, then convert it:
->   | borgiq scaffold actor-from-template --output actor.json --print-id
-> borgiq canvas-actors create <canvasSlugOrId> <actorId> --file actor.json --json
-> ```
->
-> In a bundle, write the `templates get` actor payload (already ExportedCanvasActor object shape) as `actor.yaml`, apply the [template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation) (fresh actor ID and trigger keys, keep `template` provenance), and complete the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). `scaffold actor-from-template` produces the YAML-string CanvasActor mutation shape for the direct/batch fallback and performs those fixups automatically. Full flow: [Deploying and Testing with the CLI](#deploying-and-testing-with-the-cli).
->
-> **Multi-actor patterns have recipes.** When the ask is a whole flow or a chain of steps ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"), check `borgiq recipes list --json` before composing actors by hand: `borgiq recipes add <id> --canvas <canvas> [--after <actorId>] --settings <file>` lands the whole recipe with fresh ids, wired in, with the user's connections and inputs applied. Recipes are not versioned and not linked back — the actors are ordinary canvas actors afterwards. See [Start from a recipe](references/borgiq-cli.md#start-from-a-recipe).
-
-### Choosing a Task Actor Type
-
-**Important: DenoActor vs MessageProcessorActor**
-
-Use **MessageProcessorActor** as the default for data transformations. It handles most transformation needs via YAML configuration and `${{ }}` expressions without custom code.
-
-Use **DenoActor** (or PythonActor) ONLY when you need:
-- **Fetch/HTTP requests** - Making API calls within custom logic
-- **I/O operations** - File handling, network calls, or async operations
-- **NPM/external libraries** - Using third-party packages not available in Q-lib
-- **Complex imperative logic** - Loops, recursion, or stateful algorithms that can't be expressed declaratively
-
-**Important: Prefer PythonActor when CLI tools are needed.** If the workflow needs to run command line applications available on the Lambda image (e.g., `git`, `aws-cli`, `jq`, `ImageMagick`, `tar`), use **PythonActor**. DenoActor has no shell access. PythonActor can invoke these tools via `subprocess.run()`.
-
-If the task can be done with `${{ }}` expressions and Q-lib functions, use MessageProcessorActor.
-
-**Important: Avoid overusing DenoActor for data transformation.** Every non-code actor's `vars` and `outputs` sections support `${{ }}` expressions (code actors skip both). Use `vars` for intermediate computations and `outputs` for formatting the final result. Only reach for DenoActor when you need fetch, I/O, or imperative logic.
-
-| Scenario | Use |
-|----------|-----|
-| Single API call | HttpRequestActor |
-| Multiple sequential API calls that depend on each other | **DenoActor** or **PythonActor** |
-| Data transformation with expressions and Q-lib | **MessageProcessorActor** (`inject`) |
-| Data transformation requiring fetch, I/O, or NPM libraries | DenoActor or PythonActor |
-| API call + data processing | DenoActor or PythonActor |
-| Data science / ML operations (pandas, numpy, scikit-learn) | **PythonActor** |
-| Custom Python code execution | PythonActor |
-| Shell command execution (git, aws-cli, jq, ImageMagick, tar, etc.) | **PythonActor** |
-| Text generation, summarization, or classification | AiActor |
-| Structured data extraction from unstructured text | AiActor |
-| Multi-turn conversations or chatbot interactions | AiActor |
-| AI with function/tool calling (single call, returns tool calls) | AiActor |
-| Autonomous AI agent with tool execution loop | **AiAgentActor** |
-| Complex tasks requiring multiple tool calls | **AiAgentActor** |
-| Research agents that search and synthesize information | **AiAgentActor** |
-| AI-driven file/data processing (unzip, script, edit, re-zip) | **AiAgentActor** (built-in filesystem + bash) |
-| AI agent that writes AND runs code | **AiAgentActor** (`enableCodeExecution: true`) |
-| Resumable AI sessions across invocations | **AiAgentActor** (`sessionId`) |
-| Agent needing stdio MCP servers, a harness CLI, daemons, or a full sandbox VM | AgentHarnessActor |
-| Multi-agent systems with sub-agents | AiAgentActor (with CallFlowActor tools) |
-| Route messages based on AI classification | AiRouterActor |
-| Intent detection with branching workflows | AiRouterActor |
-| If/else branching with boolean conditions | RouterActor |
-| Switch-case routing based on data values | RouterActor |
-| Inject constants or computed values | MessageProcessorActor (`inject`) |
-| Delay workflow execution | MessageProcessorActor (`delayBySeconds`, `delayUntil`) |
-| Process array items individually | MessageProcessorActor (`split`) |
-| Recombine processed array items | MessageProcessorActor (`collect`) |
-| Deduplicate messages | MessageProcessorActor (`dedupeByCount`, `dedupeByTime`) |
-| Filter messages conditionally | MessageProcessorActor (`filter`) |
-| Run parallel paths and join results | MessageProcessorActor (`fork`, `forkJoin`) |
-| Human-in-the-loop approval workflows | MessageProcessorActor (`issueCallbackToken`, `waitForCallbackToken`) |
-| Render LiquidJS templates | MessageProcessorActor (`renderTemplate`) |
-| Extract data with regex | MessageProcessorActor (`regexExtract`) |
-| Get file download URL or base64 content | MessageProcessorActor (`downloadFileUrl`, `downloadFileAsBase64`) |
-| Return dynamic HTTP response to webhook caller | WebhookResponseActor |
-| Return data from sub-flow to parent flow (requires CallableTriggerActor) | CallableResponseActor |
-| Invoke a sub-flow and wait for response | CallFlowActor |
-| Fire-and-forget sub-flow execution | CallFlowActor (`waitForResponse: false`) |
-| Call sub-flows in other workspaces or canvases | CallFlowActor |
-| Display a form mid-workflow and capture user input | InterfaceActor |
-| Send a form URL via email/Slack for async user input | InterfaceActor |
-| Build approval workflows without InterfaceTriggerActor | InterfaceActor |
-| Send notification emails | SendEmailActor |
-| Distribute reports via email with attachments | SendEmailActor |
-| Send HTML formatted emails | SendEmailActor |
-| Store structured data persistently | CollectionActor (`putItem`, `getItem`) |
-| Model an app's entities (users, orders, comments, …) | CollectionActor — **one collection per app**, entity key prefixes ([single-collection design](references/collection-design.md#one-collection-per-app)) |
-| Query stored data | CollectionActor (`query`) |
-| Batch read/write operations | CollectionActor (`batchGetItem`, `batchWriteItem`) |
-| Atomic counter increment/decrement | CollectionActor (`updateItem` with `atomicCounters`) |
-| Transactional operations | CollectionActor (`transactWrite`, `transactGet`) |
-| Job queue / task queue | CollectionActor (queue pattern — `putItem` to enqueue, `query` + `updateItem` to dequeue) |
-| Record events in order (webhook events, audit trail, activity feed, agent progress) | StreamActor (`appendData`) — **not** `event:<timestamp>` Collection items |
-| Process a backlog incrementally / resume where the last run stopped | StreamActor (`readStream` from a cursor persisted in a Collection; loop `nextCursor` while `hasMore`) |
-| Only run when new records arrived | StreamActor (`getStreamInfo` — compare `tailCursor` to the persisted cursor) |
-| Look up or update the current value of something | CollectionActor — a stream is not a place for current state |
-
-## Trigger Actor Types
-
-Trigger actors start workflows (flowruns). Each workflow must have exactly one trigger, but a canvas can contain multiple workflows, each with its own trigger.
-
-| Type | Description | Reference |
-|------|-------------|-----------|
-| **ButtonTriggerActor** | Manual trigger via button click in the UI | [button-trigger-actor.md](references/button-trigger-actor.md) |
-| **WebhookTriggerActor** | Receives HTTP requests at a unique webhook URL | [webhook-trigger-actor.md](references/webhook-trigger-actor.md) |
-| **EmailTriggerActor** | Receives emails at a unique email address | [email-trigger-actor.md](references/email-trigger-actor.md) |
-| **InterfaceTriggerActor** | Displays a web form to signed-in workspace members and triggers on submission | [interface-trigger-actor.md](references/interface-trigger-actor.md) |
-| **ReactAppTriggerActor** | The standard app surface: a React app compiled server-side, served in a sandboxed iframe, calling flows through named webhook endpoints. Does not emit messages. | [`borgiq-react-app-builder` spoke](../borgiq-react-app-builder/SKILL.md) |
-| **AppTriggerActor** | Legacy raw HTML/CSS/JS app; maintain existing ones only. Does not emit messages. | [app-trigger-actor.md](references/app-trigger-actor.md) |
-| **ScheduledTriggerActor** | Runs on a cron-based schedule | [scheduled-trigger-actor.md](references/scheduled-trigger-actor.md) |
-| **UniversalTriggerActor** | Code-first trigger that fires on webhook requests, a cron schedule, or manual Invoke — user TypeScript (`receive(req: TriggerRequest)`) runs on every fire and branches on `req.trigger.type` | [universal-trigger-actor.md](references/universal-trigger-actor.md) |
-| **CallableTriggerActor** | Invoked by parent flows (sub-flow entry point) | [callable-trigger-actor.md](references/callable-trigger-actor.md) |
-
-### Choosing a Trigger Type
-
-| Scenario | Use |
-|----------|-----|
-| Manual/ad-hoc execution | ButtonTriggerActor |
-| External service notifications (GitHub, Stripe, Slack) | WebhookTriggerActor |
-| Build an API endpoint | WebhookTriggerActor |
-| Process incoming emails | EmailTriggerActor |
-| Forms and data collection for signed-in workspace members | InterfaceTriggerActor |
-| Web applications (SPA, dashboards, interactive tools) | ReactAppTriggerActor |
-| Periodic/scheduled tasks (hourly, daily, weekly) | ScheduledTriggerActor |
-| One workflow fired by webhook **and** schedule (and manual testing) | UniversalTriggerActor |
-| Custom code at trigger time (normalize, filter, dedupe, respond before emitting) | UniversalTriggerActor |
-| Reusable sub-flows called by other workflows | CallableTriggerActor |
-
-#### Universal Trigger vs Webhook Trigger (HTTP endpoints)
-
-Both build HTTP endpoints, but they sit at opposite ends of a spectrum: a UniversalTriggerActor *is* the whole handler (request parsing, auth, storage, validation, and response all run inside its `receive` code), while a WebhookTriggerActor is the *entrance* to a multi-actor flow that does the work downstream.
-
-| Decision | Use |
-|----------|-----|
-| The endpoint can fully handle request parsing, auth checks, Collection API calls, validation, and the response from its own code | **UniversalTriggerActor** (respond with `Signal.webhookRespond` under `options.webhook.respondImmediately: false`) |
-| The request needs to enter a multi-actor flow — especially AiActor, integration actors (HttpRequestActor/template actors), routers, or a WebhookResponseActor | **WebhookTriggerActor** |
-| One canvas exposes several endpoints with materially different latency, response, or orchestration needs | **Multiple triggers** — one per endpoint, mixing Universal and Webhook as each route requires |
-
-**Rules of thumb:**
-
-- **Self-contained CRUD / lookups → Universal.** If a route is "parse the request, read/write a Collection, return JSON," keep it inside one UniversalTriggerActor and respond from its code. No edges, no downstream actors.
-- **Orchestration → Webhook.** The moment a route needs an LLM call, a third-party API, conditional routing, or a fan-out/fork, use a WebhookTriggerActor feeding the real actors and a WebhookResponseActor (or AiActor → WebhookResponseActor) for the reply.
-- **Don't collapse endpoints into one Universal Trigger just to reduce actor count.** If even one route needs downstream actor orchestration, give that route its own WebhookTriggerActor rather than forcing AI/integration logic into trigger code. Mixed canvases (some Universal routes, some Webhook routes) are normal and correct.
-
-**URL wiring note:** the two trigger types expose their URLs under **different context maps** — `${{ ctx.canvas.webhookTriggers.<msgVar>.url }}` for a WebhookTriggerActor, `${{ ctx.canvas.universalTriggers.<msgVar>.url }}` for a UniversalTriggerActor (which appears there only when `configuration.webhook.enabled: true`). The URL shape is identical; only the map differs.
-
-See [universal-trigger-actor.md](references/universal-trigger-actor.md) and [webhook-trigger-actor.md](references/webhook-trigger-actor.md) for full configuration. For app frontends calling these endpoints, the `borgiq-react-app-builder` spoke owns the wiring (see [Web apps and forms — handed off to spokes](#web-apps-and-forms--handed-off-to-spokes)).
-
-### Trigger Output
-
-All triggers emit a message accessible to downstream actors via `msg.<trigger_msgVar>`. The message structure varies by trigger type—see the TypeScript schemas in [references/typescript/index.md](references/typescript/index.md) for exact definitions:
-
-- **ButtonTriggerActor**: Emits the configured `options` payload
-- **WebhookTriggerActor**: Emits `{ meta, method, headers, body, queryParams, rawBody?, response? }`
-- **EmailTriggerActor**: Emits `{ messageId, from, to, subject, date, hasAttachments, textBody, htmlBody, attachments, headers }`
-- **InterfaceTriggerActor**: Emits `{ meta: { submissionInterfaceId, user }, body: { ...field values... } }`
-- **ReactAppTriggerActor** and **AppTriggerActor**: Do **not** emit messages (no downstream workflow). They host a web application only.
-- **ScheduledTriggerActor**: Emits `{ triggeredAt, lastTriggeredAt }`
-- **UniversalTriggerActor**: Emits whatever `results` the user code returns (free-form; `results: undefined` emits nothing)
-- **CallableTriggerActor**: Emits the payload passed by the parent flow
-
-**Important:** When a task requires multiple HTTP requests stitched together, use a **DenoActor** or **PythonActor** instead of chaining multiple HttpRequestActors. Examples: [deno-actor.md](references/deno-actor.md#examples), [python-actor.md](references/python-actor.md#examples).
+URLs: `${{ ctx.canvas.webhookTriggers.<msgVar>.url }}`, `${{ ctx.canvas.universalTriggers.<msgVar>.url }}` (only
+with `configuration.webhook.enabled: true`). Apps call triggers by URL, never edges
+([backend wiring](references/app-trigger-actor.md#backend-wiring)). [Matrix](references/choosing-actors.md#universal-trigger-vs-webhook-trigger).
 
 ## Common Actor Structure
 
-All actors share a common YAML structure.
-
-**Important: Do not confuse actor-level `schemas` with actor-specific schema options.**
-
-- **`actors.ACTRxxxxx.schemas.inputs`** and **`actors.ACTRxxxxx.schemas.outputs`** define the actor's reusable interface—what inputs the actor accepts and what outputs it produces. These are used for templatization and validation at the actor boundary.
-
-- **`actors.ACTRxxxxx.configuration.options.inputSchema`** or **`outputSchema`** are actor-specific configuration options with different purposes. For example, AiActor's `configuration.options.outputSchema` tells the AI model to produce structured output matching that schema—it's a directive to the LLM, not a definition of the actor's interface.
+A `metadata` + `actors` document keys actors by ID. In a bundle, `actor.yaml` holds one actor without `position` and
+`edges` ([edges-and-positioning.md](references/edges-and-positioning.md)).
 
 ```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
+metadata: { schemaVersion: v1.0, source: BIQCanvas }
 actors:
-  ACTR01xxxxx:
-    type: HttpRequestActor  # or DenoActor, AiActor
+  ACTR01kx4b00000000000000000001:
+    id: ACTR01kx4b00000000000000000001
+    type: HttpRequestActor
     version: 1
-    name: Actor Name Here
-    msgVar: actor_name_here
-    description: What this actor does
+    name: Fetch user profile from Gmail
+    msgVar: fetch_user_profile_from_gmail
+    description: Fetches the sender's Gmail profile
     isActive: true
     continueOnError: false
     enableLTM: false
     enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
+    sourcePorts: [{ id: SPRTdefault }]
     configuration:
       inputs:
-        # Map upstream data and parameters here, e.g.
-        userId: ${{ msg.fetch_user.id }}
-        limit: 50
-      # vars: (optional — only if you need to reuse a derived value within this actor)
-      #   - intermediateName: ${{ Q.lo.camelCase(inputs.userId) }}
-      options:
-        # Actor-type-specific options — reference ${{ inputs.* }} (or ${{ vars.* }} if defined)
-      outputs: ${{ results.body }}
-      connection:
-        key: connection-key-from-workspace
-      error:
-        if: ${{ error_condition }}
-        retryIf: ${{ retry_condition }}
-        message: ${{ error_message }}
+        userId: ${{ msg.webhook_trigger.body.userId }}
+      options: {}               # the type's options, reading ${{ inputs.* }}
+      connection: { key: gmail-connection }
     schemas:
-      inputs:
-        type: object
-        properties:
-          fieldName:
-            type: string
-            title: Field Title
-            description: Field description
-        required:
-          - fieldName
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
+      inputs: { type: object, properties: { userId: { type: string, title: User ID } }, required: [userId] }
+    position: { x: 0, 'y': 0 }
     edges: {}
 ```
 
-## Actor Naming Conventions
+- `schemas.inputs`/`outputs` are the actor's interface (editor form, templates, validation);
+  `configuration.options.inputSchema`/`outputSchema` are type options (AiActor's tells the model what to return).
+- **Names:** verb, object, context, proper nouns capitalized ("Fetch user profile from Gmail", "Create Issue in
+  GitHub").
+- A type's options and defaults: `borgiq actors schema <Type> --json`, its reference, or the generated types.
 
-Use concise, descriptive names with proper noun capitalization.
+## Configuration and expressions
 
-**Good names:**
-- Fetch user profile from Gmail
-- Create Issue in GitHub
-- Process calendar events
-- Transform data for Airtable
-
-**Bad names:**
-- Gmail: Fetch user profile (wrong format)
-- Create Issue (missing context)
-- Find users (too vague)
-
-## Configuration Interpolation Order
-
-BorgIQ actors are designed to be **templatized and reusable**. Configuration sections are processed in order:
-
-1. **inputs** — The actor's parameter surface. **Map all upstream actor data here** using `${{ msg.<upstream_msgVar>.field }}`, `${{ ctx.* }}`, or `${{ err.* }}`. Every parameter the actor consumes should pass through `inputs` and be declared in `schemas.inputs`. Inputs are interpolated first.
-
-2. **vars** — *Optional.* Intermediate values reused within **this actor's own** `options`/`outputs`. Only add `vars` when the same derived value is referenced from more than one place inside the actor (e.g. building an email body that's then base64-encoded and referenced from `options`). Can reference `inputs`. If the value is used once, inline it instead — `vars` is not a wiring layer.
-
-3. **options** — Actor-specific configuration. Has access to `inputs`, `vars`, `msg`, `ctx`, and `err`.
-
-4. **Actor executes** — Results are stored in `results`.
-
-5. **error** — Error handling. Has access to `results`. Determines if the actor failed and whether to retry.
-
-6. **outputs** — Output transformation. Only evaluated if no error. Transforms `results` for downstream actors. Code actors (Deno, Python, UniversalTrigger) skip steps 2 and 6: the code's return value is the message.
-
-### inputs vs vars — the rule
-
-**Inputs are the wire.** `vars` is local scratch space. Mapping upstream `msg.*` data into `vars` is wrong even though both can hold any expression: it leaves the actor's declared input schema empty, breaks reusability, and forces `options`/`prompt`/`body` to reference `vars.X` instead of the actor's real parameter surface.
-
-**Anti-pattern (do not generate this):**
-```yaml
-configuration:
-  vars:
-    - name: ${{ msg.normalize_lead.name }}        # WRONG — upstream data belongs in inputs
-    - company: ${{ msg.normalize_lead.company }}
-  inputs:
-    name: ''                                       # WRONG — declared inputs left empty
-    company: ''
-  options:
-    prompt: 'Research ${{ vars.name }} at ${{ vars.company }}'  # WRONG — should reference inputs
-```
-
-**Correct:**
-```yaml
-configuration:
-  inputs:
-    name: ${{ msg.normalize_lead.name }}
-    company: ${{ msg.normalize_lead.company }}
-  options:
-    prompt: 'Research ${{ inputs.name }} at ${{ inputs.company }}'
-# No vars needed — single-use values stay inline.
-```
-
-**Correct use of `vars` (intermediate reused inside the actor):**
-```yaml
-configuration:
-  inputs:
-    from: ${{ msg.trigger.from }}
-    to: ${{ msg.trigger.to }}
-    body: ${{ msg.trigger.body }}
-  vars:
-    - rawEmail:
-        - 'From: ${{ inputs.from }}'
-        - 'To: ${{ inputs.to }}'
-        - ''
-        - ${{ inputs.body }}
-    - encoded: ${{ Q.toBase64(vars.rawEmail.join('\r\n')) }}
-  options:
-    body:
-      raw: ${{ vars.encoded }}     # vars.encoded is reused; building it inline would duplicate logic
-```
-
-## BorgIQ Expressions
-
-Use `${{ <javascript-expression> }}` for Deno-compatible JavaScript expressions. Only YAML values can contain expressions. Plain YAML rejects `: ` in a value, so double-quote an expression containing one (a ternary, an object literal): `a: "${{ x ? 1 : 2 }}"`.
-
-**Available:** `Q.*` utility functions (see [q-lib.md](references/q-lib.md)), all JavaScript web standard globals (`btoa`, `JSON.parse`, `Math.*`, array/string methods, etc.)
-
-**Restrictions:** NO I/O operations (`fetch`, file system). Pure computation only.
-
-**Examples:**
-```yaml
-url: https://api.example.com/users/${{ inputs.userId }}
-body: ${{ Q.toJSON(inputs.data) }}
-data: ${{ msg.previous_actor.body }}
-```
-
-## Context Variables
-
-See [references/context.md](references/context.md) for full documentation.
-
-| Variable | Description |
-|----------|-------------|
-| `inputs` | Actor input parameters |
-| `msg` | Upstream actor messages (`msg.ActorName`) |
-| `ctx` | Runtime context (org, workspace, canvas, flowrun, actor info) |
-| `trigger` | The firing event (trigger actors only) |
-| `credentials` | Mapped credentials from workspace |
-| `connection` | The actor's one connection (`connection.auth`) |
-| `assets` | Workspace assets by key |
-| `results` | Response after actor invocation |
-| `vars` | Computed variables |
-| `err` | Error information from upstream actors |
-
-For error handling patterns (continueOnError, split/collect, fork/forkJoin), see [error-handling.md](references/error-handling.md).
-
-## Q-lib Functions
-
-Access utility functions via `Q.*`. See [references/q-lib.md](references/q-lib.md) for complete reference.
-
-**Common functions:** `Q.toJSON()`, `Q.toBase64()`, `Q.isHTTPStatusInRange()`, `Q.lo.*` (Lodash), `Q.dateFns.*` (date-fns)
-
-## Actor Source Files
-
-Code-running actors — **DenoActor, DenoTestActor, UniversalTriggerActor, PythonActor** — carry their source in `configuration.codeDir`: a list of `{path, content}` files forming a small project, a sibling of `options` and **never interpolated**.
+Order: `inputs` → `vars` → `options` → run (`results`) → `error` → `outputs` (only without an error)
+([scope per step](references/context.md#scope-and-interpolation-order)). Map every upstream value into `inputs` and
+declare it in `schemas.inputs`; add `vars` only for a value reused inside the actor:
 
 ```yaml
-configuration:
-  options: {}
-  codeDir:
-    - path: main.ts          # required entrypoint (main.py for PythonActor)
-      content: |
-        import type { Request, Response } from "@borgiq/actors";
-
-        import { format } from "./lib/format.ts";
-
-        export default async function receive(req: Request): Promise<Response> {
-          return { results: format(req.inputs) };
-        }
-    - path: lib/format.ts
-      content: |
-        export const format = (inputs: unknown) => ({ inputs });
+# Wrong: upstream data in vars, declared inputs left empty
+vars: [{ name: '${{ msg.normalize_lead.name }}' }]
+inputs: { name: '' }
+options: { prompt: 'Research ${{ vars.name }}' }
+# Right
+inputs: { name: '${{ msg.normalize_lead.name }}' }
+options: { prompt: 'Research ${{ inputs.name }}' }
 ```
 
-- Exactly one entry must be the **entrypoint**: `main.ts` for the three Deno-family types, `main.py` for PythonActor. Everything else is yours to arrange in folders.
-- Import your own files relatively — `./lib/format.ts` in Deno (extension included), `from lib.format import format` in Python (packages need `__init__.py`).
-- `${{ }}` inside source is literal text, never an expression: pass runtime values through `configuration.inputs` and read `req.inputs`.
-- Some filenames are reserved by the runtime, and the tree is capped at 200 files / 1 MiB. Per-type details: [code-actor-runtime.md → Source files](references/code-actor-runtime.md#source-files-codedir). In a canvas bundle the same tree is real files under the actor's `code/` directory ([canvas-bundles.md](references/cli/canvas-bundles.md#code-actor-project-trees)).
-- **Deno-family imports may not leave the actor's own files, and this is enforced** (not for
-  PythonActor). A relative import that escapes the actor's tree fails when the actor loads — the
-  error tells the user that the actor imports something outside its own code directory, and (on a
-  deployed workspace) the build names the specifier. Use relative imports between your own files,
-  `@borgiq/actors`, `npm:`/`jsr:`/`node:` packages, or an approved `https:` host.
-- **Pin `npm:` and `jsr:` versions exactly** — `npm:escape-html@1.0.3`, never bare or a `^` range. On
-  a deployed workspace a build resolves each specifier once and every run uses that resolution, so an
-  unpinned specifier makes what you get depend on when the canvas was last built. Deno refuses
-  versions published under 7 days ago (`minimumDependencyAge: P7D`): pin one at least a week old.
-- **Never write `configuration.code`** (legacy single-string source): the runtime reads only `codeDir`, and an actor without a `codeDir` entrypoint cannot run (`canvases validate` reports it).
+Expressions are JavaScript over [`Q` helpers](references/q-lib.md) (`Q.toJSON`, `Q.lo`, `Q.dateFns`, …) and
+standard globals (`JSON`, `Math`, `btoa`). Double-quote a value containing `: `: `a: "${{ x ? 1 : 2 }}"`.
+Variables ([context.md](references/context.md)): `msg`, `err`, `ctx` (org, workspace, canvas with trigger URL maps,
+actor, flowrun), `inputs`, `vars`, `credentials`, `connection`, `assets`; `trigger` only in a trigger's own
+configuration; `results` only in `error` and `outputs`. Auth: `auth: ${{ connection.auth }}` with
+`connection: { key, type }` ([auth-types.md](references/auth-types.md)).
 
-(ReactAppTriggerActor also uses `configuration.codeDir`, for a whole Vite project — see the `borgiq-react-app-builder` spoke. AppTriggerActor keeps `configuration.options.html` / `.css` / `.script`.)
+## Wiring
 
-On a **deployed** workspace, a canvas's code actors are compiled ahead of time and every run —
-triggers and editor test runs alike — executes that build rather than the canvas's current code, so
-an edit takes effect only after the next build; a canvas with no fully successful build cannot run
-at all. See [references/deployment.md](references/deployment.md).
+- Edges run from a `sourcePortId` to `TPRTdefault`; ports per type and hand placement:
+  [edges-and-positioning.md](references/edges-and-positioning.md). `bundle push --auto-layout` arranges the canvas.
+- Failures and the `error` block (`if`, `retryIf`, `message`, `includeResult`): [error-handling.md](references/error-handling.md).
+  Every actor between a split or fork and its join needs `continueOnError: true`, or the join waits forever.
+- A sub-flow's `schemas.inputs` is not enforced: keep the caller's `payload`, that schema and downstream reads in
+  step ([contract](references/callable-trigger-actor.md#input-schema--the-sub-flow-contract)).
+- Flow shapes: [workflow-patterns.md](references/workflow-patterns.md); a whole bundle: [workflow-example.md](references/workflow-example.md).
 
-## Actor Memory
+## Code actors
 
-Code-running actors (DenoActor, PythonActor, UniversalTriggerActor) carry two
-key-value memory stores, **STM** and **LTM**. Every actor has **both**, always
-present on `req.memory`. The read/write API is **identical** for the two — they
-differ only in **lifetime**:
+DenoActor, PythonActor and UniversalTriggerActor export `receive(req)` and return a `Response`
+([code-actor-runtime.md](references/code-actor-runtime.md), with the language file).
 
-| Type | Field | Lifetime / Scope | Use for |
-|------|-------|------------------|---------|
-| **STM** (Short-Term Memory) | `req.memory.stm` | One flowrun, this actor. **Reclaimed when the flowrun completes.** | Run-local state across messages within a single run (counters, running totals, fork/join bookkeeping, dedup sets) |
-| **LTM** (Long-Term Memory) | `req.memory.ltm` | **Survives across all flowruns** for this actor (until you overwrite it) | State that must outlive a run: last-processed timestamp/cursor, registered webhook IDs, poll checkpoints |
+- **Source:** `configuration.codeDir`, `{ path, content }` files with one root entrypoint (`main.ts`/`main.py`), at
+  most 200 files and 1 MiB, some paths reserved ([source files](references/code-actor-runtime.md#source-files-codedir));
+  in a bundle, files under `code/`. Never write `configuration.code`. Deno imports stay in the actor's tree. Pin
+  dependencies exactly (Deno: versions at least 7 days old).
+- **Data:** values arrive as `req.inputs` from `configuration.inputs`; `results` becomes `msg.<msgVar>`; secrets are
+  `req.credentials.<name>`, the connection `req.connection` ([credentials](references/code-actor-runtime.md#credentials-and-connections)).
+- **Memory:** `stm` lasts one flowrun, `ltm` every flowrun; default to STM. Writing a store that is not enabled is an
+  error; enabling one serializes the actor's messages; over a cap the run fails (`MemoryExceedAllowedSize`).
+- **Whole flow in one actor:** a DenoActor, extra connections as `source: connection` credentials
+  ([consolidating](references/code-actor-runtime.md#consolidating-a-flow-into-one-actor)).
 
-The split is deliberate: STM is **garbage-collected promptly once its flowrun
-ends**, while LTM is kept indefinitely — separating them keeps that cleanup cheap.
-So **default to STM for anything run-local** (it cleans itself up) and reserve LTM
-for the few values that genuinely must survive to the next run.
+## Storage
 
-### The contract: value-in / value-out
-
-Memory is **not** a mutable global. You **read** the current state from
-`req.memory`, and **persist** changes by **returning** a `memory` object in the
-`Response`. There is no other way to write it.
-
-**The runtime shallow-merges each half you return into the stored half.** Return
-`memory: { ltm: { cursor: 5 } }` and the stored LTM gets `cursor: 5` while every
-other LTM key keeps its value. Each top-level key you return replaces that key's
-whole value; nested objects are not merged.
-
-- **Read-modify-write: spread the prior half, then set your keys** —
-  `memory: { ltm: { ...req.memory?.ltm, cursor: 5 } }`. The spread is undefined-safe
-  (an empty store spreads to nothing), so no `?? {}` guard is needed.
-- **The two halves are independent.** `memory: { ltm }` merges into LTM and leaves
-  STM untouched (and vice versa).
-- **Omit `memory` entirely to change nothing.** `return { results }` persists no
-  memory; both halves keep their stored values.
-- **To clear a key, return it as `null`**: `memory: { ltm: { checkpoint: null } }`; it then reads as
-  `null`. Omitting the key, a TypeScript `undefined` (dropped in transit) and `{ ltm: {} }` change nothing.
-
-```typescript
-import type { Request, Response } from "@borgiq/actors";
-
-export default async function receive(req: Request): Promise<Response> {
-  // READ — optional chaining is undefined-safe; each store is empty on first use
-  const lastCursor = req.memory?.ltm?.cursor ?? 0;
-
-  // ...do work...
-
-  // WRITE — return the keys you set; the store merges them into the stored LTM.
-  // Clear a key with `null`: memory: { ltm: { cursor: null } }.
-  return {
-    results: { lastCursor },
-    memory: { ltm: { ...req.memory?.ltm, cursor: lastCursor + 1 } },
-  };
-}
-```
-
-When several keys change together, build the snapshot once with spread (or
-`Object.assign`) — both treat a missing/undefined prior store as empty:
-
-```typescript
-const ltm = { ...req.memory?.ltm, cursor: lastCursor + 1, lastRunAt: req.inputs.triggeredAt };
-// equivalently: const ltm = Object.assign({}, req.memory?.ltm, { cursor: ..., lastRunAt: ... });
-return { results, memory: { ltm } };
-```
-
-### Enabling memory
-
-Set the matching flag in the actor config. Returning a **non-empty** `stm`/`ltm`
-for a store that isn't enabled is a **runtime error** (`STM is not enabled for the
-actor` / `LTM is not enabled for the actor`):
-
-```yaml
-enableSTM: true   # required to write req.memory.stm
-enableLTM: true   # required to write req.memory.ltm
-```
-
-A store that is not enabled arrives as `{}`, so only a non-empty half trips this
-error; return only the half you use. Enabling a store also **serializes** the
-actor's message processing — one message at a time **within a flowrun** for STM,
-and **across all flowruns** for LTM — so read-modify-write is race-free. (LTM
-additionally roots the actor's temp-file directory at the actor scope so files
-persist across runs within the same warm container; see [code-actor-runtime.md → Temporary files](references/code-actor-runtime.md#temporary-files).)
-
-### Clean-code rules
-
-1. **Default to STM; reach for LTM only for state that must survive the run.** STM is auto-reclaimed when the flowrun ends; LTM lives until overwritten.
-2. **Return only the half you mutated** (`memory: { ltm }` or `memory: { stm }`); omit `memory` to persist nothing. The half you return is merged into the stored value; the half you omit is left as-is.
-3. **Spread the prior state, then set your keys.** `memory: { ltm: { ...req.memory?.ltm, cursor } }` (spread is undefined-safe). The store merges, so omitting a key never clears it: **clear a key by returning it as `null`** (`{ ltm: { checkpoint: null } }`).
-4. **Read with optional chaining + default** — `req.memory?.ltm?.cursor ?? 0`; each store is empty on first use.
-5. **Keep payloads small** — LTM is capped at **1 KB** and STM at **4 KB** per actor by default, measured as JSON after the merge (workspace settings → **Actors** → *Max LTM (KB)* / *Max STM (KB)*). Over a cap, the run fails with `MemoryExceedAllowedSize` (not retried) and no memory change is saved. Store IDs/cursors, not whole datasets.
-
-See [code-actor-runtime.md → Memory](references/code-actor-runtime.md#memory) for the
-full reference and the LTM cursor example.
-
-## Authentication
-
-**Key rule:** An actor can have **only ONE connection**, but **multiple credentials**.
-
-| Scenario | Use | Example |
-|----------|-----|---------|
-| Single auth source | `connection` | `auth: ${{ connection.auth }}` with `connection: { key: my-connection }` |
-| Multiple auth sources | `credentials` with `source: connection` | Access via `credentials['name'].auth` in code |
-
-See [auth-types.md](references/auth-types.md) for authentication type details and [code-actor-runtime.md](references/code-actor-runtime.md#credentials-and-connections) for multi-connection patterns.
-
-## Actor ID, Validation, and Post-Processing
-
-For ID generation, validation, and post-processing, see [validation.md](references/validation.md).
-
-**Quick reference:**
-```bash
-borgiq generate id actor                   # Generate actor ID
-borgiq generate id edge                    # Generate edge ID
-borgiq generate msgvar "Name"              # Generate msgVar
-borgiq validate file.yaml                  # Validate a metadata + actors document
-borgiq validate file.yaml --post-process -i # Optional cleanup; does not validate
-borgiq bundle validate <dir> --strict      # Validate a bundle
-```
-
-**Always validate** generated or edited YAML before presenting to the user: `borgiq validate` checks a `metadata` + `actors` document, not a bundle's `actor.yaml`.
-
-## Generation Instructions
-
-1. With shell access, write the actors into bundle files ([Deploying](#deploying-and-testing-with-the-cli)); without it, return only YAML, no explanations
-2. Return ONE actor per request (unless building a complete flow)
-3. Generate each actor ID with `borgiq generate id actor` before building
-4. Use URL concatenation: `https://api.example.com/${{ inputs.id }}`
-5. Only use `outputs` section if user requests custom output formatting
-6. Use `|` for multiline strings with special characters, properly indented
-7. Generate appropriate input schemas; keep them simple
-8. Map each input from upstream (`${{ msg.<msgVar>.<field> }}`); leave one empty only when nothing upstream supplies it ([inputs vs vars](#inputs-vs-vars--the-rule))
-9. Use 2-space indentation consistently
-10. Use `connection` for auth; a second source goes in `credentials` with `source: connection`
-11. Never ask for secrets via `inputs`
-12. For object schemas without defined properties, use `type: any`. For example `type: object\ntitle: UserInfo\ndescription: User information` should be `type: any` thus it would be written as `type: any\ntitle: UserInfo\ndescription: User information`
-13. Actors are single-purpose; suggest variants for different options
-14. Assume inputs may be missing; use `?.` operator for optional access
-15. Expressions can be `undefined` `${{ inputs?.field }}` will be `undefined` if `inputs` or `inputs.field` is `undefined`
-16. Handle empty arrays gracefully: `field: "${{ inputs.field?.length > 0 ? inputs.field : undefined }}"`
-17. **For parallel workflows**, see [Concurrent Execution Model](#concurrent-execution-model) - use fork/forkJoin only when combining results, not for fire-and-forget
-18. **Always validate generated YAML** using `borgiq validate` before presenting to the user
-19. Put setup instructions, prerequisites, and a brief spec in the canvas `README.md`; add a CommentActor (negative `y`) only for an in-canvas note or, without a bundle, for those notes ([comment-actor.md](references/comment-actor.md))
-
-## Workflow Composition
-
-Actors can be chained together to form workflows:
-
-```
-TriggerActor -> ProcessActor -> OutputActor
-```
-
-Each downstream actor has access to all upstream messages via `msg`:
-- `msg.trigger_actor` - Output from trigger
-- `msg.process_actor` - Output from process step
-
-When building complex automations, consider splitting into multiple actors:
-- **HttpRequestActor** for API calls
-- **DenoActor** for data transformation and business logic (TypeScript/JavaScript)
-- **PythonActor** for data transformation, business logic, and data science tasks (Python)
-- **AiActor** for AI-powered processing (summarization, classification, extraction)
-- Chain them for reliability and reusability
-
-First plan the workflow in a flowchart or sequence diagram. Then build the actors one by one. Use subagents to build the actors, to reduce the complexity of the main agent. Provide enough context to the subagents to build the actors.
-
-**Converting flows to single actors:** When asked to consolidate a flow into a single actor, always use DenoActor. See [code-actor-runtime.md](references/code-actor-runtime.md#consolidating-a-flow-into-one-actor) for connection handling patterns (single connection vs multiple connections via secrets).
-
-### Sub-flow input contracts
-
-When you build a sub-flow, treat its **CallableTriggerActor as a typed function signature**: declare the expected payload as `schemas.inputs` on the trigger (don't leave `schemas: {}`). Be aware that this schema is **not enforced at runtime** — the platform hands the caller's payload to the sub-flow as-is. The schema drives the editor (it renders the parent CallFlowActor's payload form and the manual-invoke UI) and documents the interface. Precisely because nothing validates the payload at the boundary, keep three things in lockstep by discipline: the parent CallFlowActor's `payload` keys, the trigger's `schemas.inputs`, and the downstream `${{ msg.<callable_msgVar>.<field> }}` reads. Drift between them does not fail fast — the missing or mistyped field arrives as `undefined` deep in the flow. See [callable-trigger-actor.md → Input Schema](references/callable-trigger-actor.md#input-schema--the-sub-flow-contract); for schema design, use the `borgiq-json-schema-builder` spoke.
-
-## Actor Connections and Edges
-
-For detailed documentation on edges, ports, positioning, and router configurations, see [edges-and-positioning.md](references/edges-and-positioning.md).
-
-**Quick reference:**
-- Edges connect actors via `sourcePortId` → `targetPortId` (always `TPRTdefault`)
-- Generate edge IDs: `borgiq generate id edge`
-- Position actors top-to-bottom: increment `y` by 200 (600 after Interface actors)
-- RouterActor and AiRouterActor use custom source ports (`SPRT` + 7 characters); other ports: [Port IDs](references/edges-and-positioning.md#port-ids)
-
-## Workflow Examples
-
-For complete workflow examples with full YAML, see [workflow-example.md](references/workflow-example.md). This includes:
-- Webhook-based workflow with routing and conditional responses
-- Edge configuration and actor positioning
-- Router with multiple source ports
-
-For the callback-token (human approval) pattern, see [message-processor-actor.md](references/message-processor-actor.md#human-approval-pattern).
-
-## Workflow Patterns
-
-For common workflow patterns including multi-source aggregation, fire-and-forget notifications, conditional branching, and more, see [workflow-patterns.md](references/workflow-patterns.md).
-
-Key patterns:
-- **Multi-Source Aggregation** - Use `fork`/`forkJoin` when combining results from multiple parallel API calls
-- **Fire-and-Forget** - Direct connections without fork for independent parallel operations
-- **Split/Collect** - Process array items individually and recombine results
-
-### Web apps and forms — handed off to spokes
-
-Building a custom app UI (dashboards, data explorers, SPAs — ReactAppTriggerActor, compiled server-side and served in a sandboxed iframe) is covered by the **`borgiq-react-app-builder`** spoke, which also owns maintaining legacy raw-HTML AppTriggerActor apps (configuration in [app-trigger-actor.md](references/app-trigger-actor.md)). Building forms, interface pages, signup flows, and surveys for signed-in workspace members (InterfaceTriggerActor / InterfaceActor with form components) is covered by the **`borgiq-form-builder`** spoke. All auto-load when their domain appears in the user's request — see [Routing to Specialized Skills](#routing-to-specialized-skills) above.
-
-Key wiring facts this hub still owns: **App and Webhook triggers connect via URL reference, not via edges.** For an AppTriggerActor, use `${{ ctx.canvas.webhookTriggers.<msgVar>.url }}` in its inputs. A ReactAppTriggerActor instead declares named **endpoints** targeting webhook-capable triggers and calls them with `useEndpoint('<name>')` — but the hub still builds the same `WebhookTrigger → task actors → WebhookResponse` backend chain. A webhook-enabled **UniversalTriggerActor** can also serve as an endpoint: its URL lives under `${{ ctx.canvas.universalTriggers.<msgVar>.url }}` (a separate map from `webhookTriggers`), and a self-contained route can respond from its own code via `Signal.webhookRespond` with no downstream chain — see [Universal Trigger vs Webhook Trigger](#universal-trigger-vs-webhook-trigger-http-endpoints).
+- **Collections hold current state:** one per app, entity key prefixes (`ticket:<id>`, `comment:<ticketId>:<at>`) and
+  a `$meta` manifest row; split only for a security boundary, on request, or near the ~1,000 WCU/s partition limit.
+  Keep items small, label only what you query, use what a write emits (reads are eventually consistent)
+  ([design](references/collection-design.md), [actions](references/collection-actor.md), [code](references/collection-sdk.md)).
+- **Streams hold what happened, in order**, never `event:<timestamp>` items. Unless created `persistent: true`, a
+  stream is deleted `idleTtlSeconds` (default one hour) after its last append. `readStream` returns one page: loop
+  `nextCursor` while `hasMore`, persist the cursor in a collection. Nothing fires on arrival: poll `getStreamInfo` on a
+  schedule, or tail over SSE ([stream-actor.md](references/stream-actor.md)).
 
 ### Collection migrations and provisioning
 
-**One collection per app.** Model *all* of an app's entity types in a **single collection**, separated by key prefixes (`ticket:<id>`, `user:<id>`, `comment:<ticketId>:<at>`) — never one collection per entity type. The platform is already single-table (every collection in every workspace shares one DynamoDB table; a collection is one partition key, the item key is the sort key), so a prefix query (`ticket:*`) is exactly as fast and as isolated as a dedicated collection, and transactions, batch ops, and provisioning all stay simpler. One partition key carries an internal app of ~100,000 users with headroom **provided items stay small (children as `comment:<ticketId>:<at>` rows, never embedded arrays), you label only what you query by (each label is a GSI write), and no single item takes a write per request** — see the [capacity model](references/collection-design.md#capacity-model). Reads are eventually consistent: use what a write returns rather than re-reading it. Split into multiple collections **only** when a security/access boundary requires it, the user explicitly asks, or sustained writes approach the ~1,000 WCU/s partition limit (shard by collection). Because the Collections UI lists keys in byte order one page at a time, every app collection also carries a **`$meta` manifest** — a `$`-prefixed row sorts before every entity row, so it is the first thing anyone sees and it lists every key prefix in the collection (`$` is also the namespace for the `$migration:<id>` ledger and `$counter:<name>` rows). Full rules, the worked ticketing example, the `$meta` shape, and label guidance: [collection-design.md](references/collection-design.md).
+Missing storage fails with `COLLECTION_NOT_FOUND`/`STREAM_NOT_FOUND`: the app works where it was hand-made and 404s
+elsewhere. The [migration runner](references/collection-migrations.md) is a UniversalTriggerActor fired only by manual
+invoke (`webhook.enabled: false`, `schedule.enabled: false`). It creates the collection (swallowing
+`COLLECTION_ALREADY_EXISTS`) and each stream `persistent: true`, runs migrations missing from its `$migration:<id>`
+ledger, seeds with `putItem` (swallowing `ITEM_ALREADY_EXISTS`, never `overwrite: true`) and rewrites `$meta`. Run it
+(canvas Invoke or `borgiq triggers run`) after deploying to a new workspace or adding a migration.
 
-**Collections are not implicit — a `putItem`/`query` against a slug that was never created fails with `COLLECTION_NOT_FOUND`.** So any app or flow backed by a [CollectionActor](references/collection-actor.md) needs a **provisioning step** that creates its collection and seeds default data before it serves traffic — and that step must be safe to re-run on every deploy and in every workspace.
+## Build, deploy and debug
 
-Treat this like database migrations: when you design a collection-backed app, also design an **idempotent migration runner** that brings a workspace's storage up to the shape the app expects. Think through collection management as part of the build — don't bolt it on later. The pattern:
-
-- Build the runner as a **UniversalTriggerActor fired with the `manual` trigger type only** — set `webhook.enabled: false` and `schedule.enabled: false` so it can never run off an HTTP request, a cron tick, a button, or a sub-flow call. Provisioning is a deliberate operator action.
-- It holds an ordered list of migrations (each with a stable `id`), reads `$migration:<id>` ledger keys stored in the app's own collection, **skips already-applied** migrations, runs the rest in order, records each success, and finally rewrites the `$meta` manifest (the one `overwrite: true` write — it is derived from code) with the applied `schemaVersion` and the app's entity prefixes.
-- The runner **ensures the app's collection exists** (`createCollection`, swallowing `COLLECTION_ALREADY_EXISTS`) and each migration **seeds defaults idempotently** — `putItem` is create-only by default, so catch `ITEM_ALREADY_EXISTS` on re-runs; never pass `overwrite: true` for seed data, which would clobber user-edited rows on every deploy.
-- Run it via canvas Invoke or `borgiq triggers run` (the manual invoke) after deploying to a new workspace and after appending migrations. Re-running is always safe.
-
-A collection-backed app shipped without a migration actor is a gap: it works in the dev workspace where collections were hand-created, then 404s in prod. Full guidance, the worked migration-manager trigger, and idempotency techniques are in [collection-migrations.md](references/collection-migrations.md).
-
-### Streams: events in order, consumed by cursor
-
-**Event-shaped data goes in a Stream, not a Collection.** Anything that is "what happened, in order" — webhook deliveries, an audit trail, an activity feed, an agent's progress — is appended to a [StreamActor](references/stream-actor.md) stream and consumed by walking a cursor forward. Modelling it as `event:<timestamp>` Collection items forces client-side ordering and pagination a stream gives you for free; modelling *current state* as a stream forces a replay to find the latest value. The decision table: [Collections vs Streams](references/stream-actor.md#collections-vs-streams).
-
-Three rules an agent must design around:
-
-- **Streams are not implicit and they expire.** `appendData` against a slug that was never created fails with `STREAM_NOT_FOUND`, and a stream created with neither `persistent: true` nor `idleTtlSeconds` is hard-deleted one hour after its last append. Any app or scheduled consumer that depends on a stream creates it `persistent: true` in the same idempotent provisioning step as its collection ([collection-migrations.md](references/collection-migrations.md#provisioning-streams)); scratch logs get a TTL and clean themselves up.
-- **`readStream` returns one bounded page, never the stream.** The page is budgeted by the workspace message-size limit and carries `nextCursor` and `hasMore`. Loop the cursor on a canvas edge for a backlog; persist it in the app's collection to resume across flowruns.
-- **There is no "record arrived" trigger in v1.** A ScheduledTriggerActor calls `getStreamInfo`, compares `tailCursor` to the persisted cursor, and reads only when it moved — cheap enough for a one-minute schedule. Live views tail over SSE instead: React apps via `useStreamTail`, external dashboards via the REST API.
-
-The rules, every action, and worked canvases for all three — ingestion, a chunked backlog loop, and the scheduled resumable consumer — are in [stream-actor.md](references/stream-actor.md); the SDK, REST, and SSE reference is [stream-api.md](references/stream-api.md).
-
-## Editing Existing Workflows
-
-For detailed guidance on editing workflows, see [editing-workflows.md](references/editing-workflows.md).
-
-**Key points:**
-- When renaming actors, regenerate `msgVar` and update all `msg.<msgVar>` references
-- Always validate after editing (`borgiq bundle validate` in a bundle, `borgiq validate` for a document)
-- See reference for common editing patterns and checklists
-
-## Migration from Other Platforms
-
-For teams migrating automations from n8n, Zapier, or Make, see [migration-from-automation-platforms.md](references/migration-from-automation-platforms.md).
-
-**Key principles:**
-- **Integrations → templates first**, then a single HttpRequestActor with the appropriate Connection when no template fits
-- **Data transformations → MessageProcessorActor** — use `inject` action with `${{ }}` expressions instead of platform-specific formatters or code nodes
-- **Parallel execution is automatic** — no need to configure; all downstream actors run concurrently
-- The reference includes concept mapping tables, expression migration guides, and per-platform examples
-
-## Deploying and Testing with the CLI
-
-> **Requires shell access (Claude Code, terminal).** If you don't have shell access (Claude.ai projects), skip this section — present the generated YAML to the user for manual deployment via the BorgIQ web UI.
-
-The `borgiq` CLI (`@borgiq/cli`) lets you deploy workflows to the platform, trigger flows, monitor execution, and debug failures. For full reference, see [borgiq-cli.md](references/borgiq-cli.md).
-
-**Install:** `npm install -g @borgiq/cli`
-
-Canvas bundles require **`@borgiq/cli` >= 0.8.0**, `borgiq ai-providers` (workspace AI providers and usable models, see [custom-ai-providers.md](references/custom-ai-providers.md)) >= 0.12.0, and `borgiq recipes` **>= 0.13.0**; other floors are in [CLI versions](references/borgiq-cli.md#cli-versions). Detect a command with `borgiq help <command>` (`<command> --help` exits 0 even when it is missing) and fall back to the direct path if bundles are missing:
+**Mode check.** No shell: see [Generation Instructions](#generation-instructions). Otherwise run `borgiq auth status`
+(on failure the user runs `borgiq auth login`; never ask for or read the token) and `borgiq --version`. Check a
+command with `borgiq help <cmd>` (`<cmd> --help` exits 0 even for unknown commands): bundles need ≥ 0.8.0, recipes
+≥ 0.13.0 ([versions](references/borgiq-cli.md#cli-versions)); upgrade with `npm install -g @borgiq/cli`.
 
 ```bash
-borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq connections list --json; borgiq secrets list --json    # keys to use; ask the user for missing ones
+borgiq bundle init ./my-flow.borgiq-canvas --name "My Flow" --slug my-flow   # or: bundle pull <canvas> <dir>
+git init ./my-flow.borgiq-canvas     # commit the baseline, and before every push
+# read README.md and AGENTS.md; edit actor.yaml, code/*, canvas.yaml
+borgiq bundle validate ./my-flow.borgiq-canvas --strict
+borgiq bundle push ./my-flow.borgiq-canvas --create --auto-layout  # first push; later --dry-run, then push
+borgiq canvases validate my-flow --json
 ```
 
-**End-to-end workflow:**
+- A push applies only changed actors, and nothing if one conflicts or changed on the server ([sync](references/cli/canvas-bundles.md#incremental-sync-and-conflicts)).
+- Deployed workspace (`isDeployed` in `borgiq workspaces deployment --json`): `bundle push --runtime-build` or
+  `bundle build`.
+- Run: `borgiq triggers run --canvas <canvasId> --actor-id <triggerId> --json` (canvas ULID, no payload), then
+  `flowruns status` and `flowruns summary`; payloads, test runs and debugging: [flowrun-job-states.md](references/flowrun-job-states.md).
+- No bundle possible (no shell, a CLI without `bundle` that cannot upgrade, a one-off patch):
+  [cli-data-formats.md](references/cli/cli-data-formats.md). Never patch out of band once a bundle exists.
+- Renaming an actor: new msgVar, update every `msg.<old>` ([editing-workflows.md](references/editing-workflows.md)).
+  Porting from another platform: [migration-from-automation-platforms.md](references/migration-from-automation-platforms.md).
 
-1. **Discover resources** — Check what connections, secrets, and assets exist in the workspace:
-   ```bash
-   borgiq connections list --json
-   borgiq secrets list --json
-   borgiq assets list --json
-   ```
-   Use the returned keys in actor configurations. If a needed resource doesn't exist, instruct the user to create it with a specific key name.
+## Generation Instructions
 
-2. **Discover actor types** — Check available actor types and their configuration schemas:
-   ```bash
-   borgiq actors list
-   borgiq actors schema HttpRequestActor --json
-   ```
-
-   **Check the template catalog first** — when the user's ask matches an existing template (e.g. "send a Slack message", "open a GitHub issue", "summarize with OpenAI"), prefer adapting a template over hand-building the actor. Search supports name/description/tags, filters by type (`TASK`/`TRIGGER`) and template app, and paginates with `--page` / `--page-size`:
-   ```bash
-   borgiq templates list --search slack --type TASK --json
-   borgiq templates apps --search slack --json                     # discover app ids
-   borgiq templates list --app-id TAPP01... --page 2 --json        # filter + paginate
-   borgiq recipes list --kind FLOW --json                          # multi-actor starting points (recipes)
-   borgiq recipes get RCPE01... --json                             # what a recipe asks for (settings), entry/exit
-   borgiq templates get ATMP01... --json                           # fetch full actor payload
-   ```
-   `borgiq recipes` needs CLI >= 0.13.0: run `borgiq help recipes` first, and if it fails, build from templates instead.
-   The template's `actor` payload is in ExportedCanvasActor object shape. In a bundle, write it as `actor.yaml` with fresh IDs/trigger keys and the `template` provenance block per [the template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation), then follow the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). For the direct fallback (`canvas-actors create` / `batch`), convert it to the CanvasActor YAML-string shape with `borgiq scaffold actor-from-template` (which mints a fresh actor ID and msgVar and adds the provenance block):
-   ```bash
-   ACTOR_ID=$(borgiq templates get ATMP01... --json \
-     | borgiq scaffold actor-from-template \
-         --name "My instance" --output actor.json --print-id)   # --print-id prints only the id, on stdout
-   borgiq canvas-actors create CANV01... "$ACTOR_ID" --file actor.json --json
-   ```
-   See [borgiq-cli.md](references/borgiq-cli.md#start-from-a-template) for the search/paginate pattern and the full converter reference.
-
-3. **Start the canvas bundle** — This is the `rails new` moment: every canvas is built and maintained as a bundle folder. Initialize a new one, or pull an existing canvas:
-   ```bash
-   # New canvas:
-   borgiq bundle init ./my-flow.borgiq-canvas --name "My Flow" --slug my-flow
-   # Existing canvas:
-   borgiq bundle pull <canvasSlugOrId> ./my-flow.borgiq-canvas
-   ```
-   Initialize git and commit the baseline. Read the bundle's `README.md` (the canvas's own documentation, synced with the canvas — see [The canvas README](references/cli/canvas-bundles.md#the-canvas-readme)) and [canvas-bundles.md](references/cli/canvas-bundles.md) before editing the bundle, and update the README when you change what it describes.
-
-4. **Build in the bundle** — Design actors and wiring in `actor.yaml`, `code/*`, and `canvas.yaml` using the actor references. Mint IDs with `borgiq generate`. Adding an actor follows the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule): actor folder, `actors[]` index entry, `graph.nodes` entry — then wire it in `graph.edges`.
-
-5. **Validate and push** — Commit, then deploy from the files:
-   ```bash
-   borgiq bundle validate ./my-flow.borgiq-canvas --strict
-   borgiq bundle push ./my-flow.borgiq-canvas --create --auto-layout   # first deploy of a new canvas
-   borgiq bundle push ./my-flow.borgiq-canvas                          # existing canvas; --dry-run to preview,
-                                                                       # --auto-layout when actors were added/removed/rewired
-   ```
-   `bundle push` validates, applies only changed actors with three-way (content-hash + `editVersion`) conflict detection, and refreshes the local bundle. On a deployed workspace (`isDeployed` in `borgiq workspaces deployment --json`), runs execute the canvas's last runtime build, so push with `--runtime-build` or the push changes nothing that runs — see [deployment.md](references/deployment.md).
-
-6. **Validate on server** — Catch issues local validation can't detect (missing connections, invalid references):
-   ```bash
-   borgiq canvases validate <canvasSlugOrId> --json
-   ```
-
-7. **Layout** — `push --auto-layout` already arranges actors; to re-run it separately:
-   ```bash
-   borgiq canvases layout <canvasSlugOrId>
-   ```
-
-8. **Execute** — Trigger the flow and monitor. `triggers run` takes the canvas ID and sends no payload ([to send one](references/flowrun-job-states.md#run-a-flow)):
-   ```bash
-   borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json   # flowrun ID: flowrun.id
-   borgiq flowruns status <flowrunId> --json    # poll while state is "running"
-   borgiq flowruns summary <flowrunId> --json   # "completed" is not success: errors must be empty
-   ```
-
-9. **Debug** — If something fails, inspect what the failed job received, fix the bundle files, and push again:
-   ```bash
-   borgiq flowrun-results summaries --job-id <jobId> --json          # error details
-   borgiq flowrun-jobs source-message <jobId> --json                 # the message it received ...
-   borgiq flowrun-messages data <sourceFlowrunMessageId> --json      # ... and its msg.<msgVar> data
-   # Fix the responsible actor.yaml / code/* in the bundle, then bundle push.
-   borgiq flowrun-jobs re-run --job-id <jobId> --json                # re-run with fixed config
-   ```
-
-### Fallback — direct document/batch workflow (no bundle)
-
-Use this only when a bundle is not possible: no shell/filesystem access, a CLI without `borgiq bundle` that cannot be upgraded, or a one-off patch to a canvas nobody maintains locally. Never patch out of band when a local bundle is the source of truth — edit the bundle and push it instead.
-
-**Two formats with different rules** for the configuration fields (`options`, `inputs`, `vars`, `outputs`, `credentials`, `error`) and `schemas.inputs`:
-
-| Command | Format | Configuration fields |
-|---|---|---|
-| `canvases create-with-data` | ExportedCanvasData envelope (YAML or JSON) | Native objects |
-| `canvas-actors create/update/batch` | CanvasActor mutation (JSON, or YAML when the file ends in `.yaml`/`.yml`) | Each of those fields serialized as a **YAML string**; `codeDir` and `webhook` stay structured |
-
-**New canvas** — validate the generated `metadata` + `actors` document, then restructure it into the envelope: move `metadata.schemaVersion` to `data.schemaVersion`, nest `actors` under `data`, remove the now-empty `metadata` block, and add top-level `name`, `slug`, and `messageTTLInDays`:
-
-```bash
-borgiq validate outputs/my-flow.yaml
-borgiq canvases create-with-data --file outputs/my-flow.yaml --json
-```
-
-**Existing canvas without a local bundle** — validate the actor definitions in document form first, then build `add`/`update`/`remove` operations. Each operation requires `type`, `actorId`, `timestamp` (epoch ms — omitting it is a 400), and `data` with YAML-string configuration fields:
-
-```bash
-borgiq canvas-actors batch <canvasSlugOrId> --file changes.json --json
-```
-
-See [cli-data-formats.md](references/cli/cli-data-formats.md) for field-by-field schemas and common mistakes, and `borgiq scaffold actor|actor-from-template|canvas|batch` to generate correctly-shaped payloads instead of hand-writing them.
-
-See [borgiq-cli.md](references/borgiq-cli.md) for complete command reference, debugging workflows, and export/import patterns.
-
-See [flowrun-job-states.md](references/flowrun-job-states.md) for understanding flowrun states, job states, and counters when interpreting CLI debug output.
+- **Shell:** write bundle files and validate them (rule 12). **No shell:** return one `metadata` + `actors` YAML
+  document, IDs composed per [validation.md](references/validation.md), and say it is unvalidated.
+- Build what was asked: one actor, or a flow planned first (a flowchart) and built one actor at a time. Keep actors
+  single-purpose; suggest variants for other options.
+- Keep input schemas simple; an object without defined properties is `type: any`, not `type: object`.
+- Map each input from upstream; leave one empty only when nothing upstream supplies it.
+- Assume values may be missing (`${{ inputs?.field }}` is then `undefined`); pass an empty array on as `undefined`:
+  `"${{ inputs.items?.length > 0 ? inputs.items : undefined }}"`.
+- Add `outputs` only when the user asks for custom output formatting.
+- Indent with 2 spaces; use `|` for multi-line strings with special characters.
+- Setup steps and prerequisites go in the bundle's `README.md`. A setup CommentActor goes above a new workflow only
+  when the user wants notes on the canvas or you return a document without a bundle; never on a single-actor addition
+  ([comment-actor.md](references/comment-actor.md)).
