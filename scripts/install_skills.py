@@ -24,8 +24,15 @@ For non-Claude targets, SKILL.md files are transformed at install time:
        get a defensive prologue. `deploy` and `test` get a stronger warning
        since they have platform side effects.
 
+The installer only replaces skill directories it installed. Each install
+writes a marker file into the skill directory. An existing directory without
+the marker (someone else's `test` or `deploy` skill, say) is skipped and
+reported, unless you pass --force. A directory from an older version of this
+installer, which wrote no marker, is recognized by a SKILL.md that mentions
+BorgIQ and is replaced.
+
 Usage:
-    install_skills.py [--dry-run] [--target claude|codex|opencode|pi|all]
+    install_skills.py [--dry-run] [--force] [--target claude|codex|opencode|pi|all]
     install_skills.py [--all]
 
 Options:
@@ -33,6 +40,8 @@ Options:
     --target TARGET   Force install to a specific target (or 'all').
                       Default: auto-detect based on which directories exist.
     --all             Shorthand for --target all.
+    --force           Replace same-named skill directories this installer
+                      did not create.
 
 Examples:
     install_skills.py                    # Auto-detect and install to all found
@@ -233,9 +242,34 @@ def detect_targets(forced=None):
     return detected
 
 
-def install_one_skill(skill_src: Path, target_skill_dir: Path, transform: bool, dry_run: bool) -> str:
-    """Install one skill into one target dir. Returns 'new' or 'replaced'."""
-    state = "replaced" if (target_skill_dir.exists() or target_skill_dir.is_symlink()) else "new"
+INSTALL_MARKER = ".borgiq-skills-install"
+
+
+def installed_by_us(target_skill_dir: Path) -> bool:
+    """True if this directory holds a BorgIQ skill this installer put there.
+
+    A marker file says so. Directories from before the marker existed are
+    recognized by a SKILL.md that mentions BorgIQ. A symlink is never ours:
+    the installer only copies.
+    """
+    if target_skill_dir.is_symlink():
+        return False
+    if (target_skill_dir / INSTALL_MARKER).is_file():
+        return True
+    skill_md = target_skill_dir / "SKILL.md"
+    try:
+        return skill_md.is_file() and "borgiq" in skill_md.read_text(encoding="utf-8").lower()
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def install_one_skill(skill_src: Path, target_skill_dir: Path, transform: bool, dry_run: bool,
+                      force: bool = False) -> str:
+    """Install one skill into one target dir. Returns 'new', 'replaced' or 'skipped'."""
+    exists = target_skill_dir.exists() or target_skill_dir.is_symlink()
+    if exists and not force and not installed_by_us(target_skill_dir):
+        return "skipped"
+    state = "replaced" if exists else "new"
 
     if dry_run:
         return state
@@ -246,6 +280,10 @@ def install_one_skill(skill_src: Path, target_skill_dir: Path, transform: bool, 
         shutil.rmtree(target_skill_dir)
 
     shutil.copytree(skill_src, target_skill_dir)
+    (target_skill_dir / INSTALL_MARKER).write_text(
+        "Installed by the BorgIQ skills installer (scripts/install_skills.py).\n"
+        "The installer replaces this directory on the next install.\n"
+    )
 
     if transform:
         skill_md = target_skill_dir / "SKILL.md"
@@ -255,7 +293,8 @@ def install_one_skill(skill_src: Path, target_skill_dir: Path, transform: bool, 
     return state
 
 
-def install_to_target(name: str, target_cfg: dict, skills: list, dry_run: bool) -> int:
+def install_to_target(name: str, target_cfg: dict, skills: list, dry_run: bool,
+                      force: bool = False, skipped: list = None) -> int:
     """Install every skill into one target. Returns count installed."""
     target_dir = target_cfg["path"]
     transform_note = " (transformed for non-Claude)" if target_cfg["transform"] else ""
@@ -268,7 +307,12 @@ def install_to_target(name: str, target_cfg: dict, skills: list, dry_run: bool) 
     for skill_dir in sorted(skills):
         skill_name = skill_dir.name
         target_skill_dir = target_dir / skill_name
-        state = install_one_skill(skill_dir, target_skill_dir, target_cfg["transform"], dry_run)
+        state = install_one_skill(skill_dir, target_skill_dir, target_cfg["transform"], dry_run, force)
+        if state == "skipped":
+            print(f"  ⚠️  {skill_name} (skipped: {target_skill_dir} exists and was not installed by this installer)")
+            if skipped is not None:
+                skipped.append(target_skill_dir)
+            continue
         if state == "replaced":
             marker, suffix = "🔄", " (would overwrite existing)" if dry_run else " (replaced existing)"
         else:
@@ -280,7 +324,7 @@ def install_to_target(name: str, target_cfg: dict, skills: list, dry_run: bool) 
     return count
 
 
-def install_skills(dry_run=False, forced_target=None) -> int:
+def install_skills(dry_run=False, forced_target=None, force=False) -> int:
     """Copy all skills from source dir into every detected (or forced) target."""
     source_dir = get_skills_source_dir()
 
@@ -312,12 +356,21 @@ def install_skills(dry_run=False, forced_target=None) -> int:
         print("🔍 DRY RUN - No files will be copied\n")
 
     total = 0
+    skipped = []
     for name, cfg in targets:
-        total += install_to_target(name, cfg, skills, dry_run)
+        total += install_to_target(name, cfg, skills, dry_run, force, skipped)
 
     verb = "Would perform" if dry_run else "Successfully performed"
     marker = "🔍" if dry_run else "✅"
     print(f"{marker} {verb} {total} install(s) across {len(targets)} target(s)")
+
+    if skipped:
+        print()
+        print(f"⚠️  Skipped {len(skipped)} directory(ies) that another tool or you created:")
+        for path in skipped:
+            print(f"   {path}")
+        print("   Move or rename them and re-run, or pass --force to replace them.")
+        return -1
 
     return total
 
@@ -342,6 +395,7 @@ def main():
         sys.exit(0)
 
     dry_run = "--dry-run" in sys.argv or "-n" in sys.argv
+    force = "--force" in sys.argv
     forced_target = parse_target_arg(sys.argv)
 
     valid_targets = set(TARGETS.keys()) | {"all"}
@@ -354,7 +408,7 @@ def main():
     print("=" * 40)
     print()
 
-    result = install_skills(dry_run=dry_run, forced_target=forced_target)
+    result = install_skills(dry_run=dry_run, forced_target=forced_target, force=force)
     sys.exit(1 if result < 0 else 0)
 
 
