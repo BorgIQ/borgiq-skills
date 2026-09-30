@@ -144,8 +144,8 @@ status:
 |---|---|
 | [`references/ai-actor.md`](../borgiq-builder/references/ai-actor.md) | `outputSchema` examples, structured output patterns for code/HTML generation |
 | [`references/ai-agent-actor.md`](../borgiq-builder/references/ai-agent-actor.md) | Tool input schemas, `${{aiInput}}` pattern |
-| [`references/collection-actor.md`](../borgiq-builder/references/collection-actor.md) | CollectionActor YAML actions, examples |
-| [`references/collection-api.md`](../borgiq-builder/references/collection-api.md) | Key design, labels, options, queue pattern, concurrent updates, nested-object replacement |
+| [`references/collection-actor.md`](../borgiq-builder/references/collection-actor.md) | CollectionActor options, queue pattern, concurrent updates, nested-object replacement |
+| [`references/collection-design.md`](../borgiq-builder/references/collection-design.md) | Key design, `$meta`, labels, capacity |
 | [`references/callable-response-actor.md`](../borgiq-builder/references/callable-response-actor.md) | Sub-flow response schema contracts |
 
 ## When to hand off to other spokes

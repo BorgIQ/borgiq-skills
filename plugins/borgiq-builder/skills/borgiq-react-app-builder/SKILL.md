@@ -70,7 +70,7 @@ skill (the hub) for wiring and IDs, and on its shared references under `../borgi
    `user:<id>`) plus a `$meta` manifest row; split only for a security boundary or on request. Collections are not
    implicit (`COLLECTION_NOT_FOUND` until created), so ship an idempotent migration runner that creates and seeds it.
    See the hub's [Collection migrations and provisioning](../borgiq-builder/SKILL.md#collection-migrations-and-provisioning),
-   [single-collection design](../borgiq-builder/references/collection-api.md#single-collection-design) and
+   [single-collection design](../borgiq-builder/references/collection-design.md#one-collection-per-app) and
    [collection-migrations.md](../borgiq-builder/references/collection-migrations.md).
 4. **Live data.** Tail a stream when a flow produces events the viewer should see as they happen; otherwise call an
    endpoint.

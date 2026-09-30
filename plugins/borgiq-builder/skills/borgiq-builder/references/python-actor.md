@@ -676,7 +676,7 @@ def receive(req: Request) -> Response:
 
 The Collection API provides structured, persistent storage organized into named collections, backed by DynamoDB. All operations use `POST /collections` with an `action` field.
 
-**For full documentation** of all 13 actions, parameters, conditions, concurrent update patterns, DynamoDB behavior, and error codes, see [collection-api.md](collection-api.md).
+**For full documentation** of all 13 actions, parameters, conditions, concurrent update patterns, and error codes, see [collection-actor.md](collection-actor.md) and [collection-sdk.md](collection-sdk.md).
 
 **Quick reference:**
 
@@ -717,13 +717,13 @@ def receive(req: Request) -> Response:
     return Response(results=results.get('value', {}))
 ```
 
-See [collection-api.md](collection-api.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and DynamoDB mapping details.
+See [collection-actor.md](collection-actor.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and semantics.
 
 ### Stream API
 
 The Stream API provides append-only, ordered, cursor-addressed record logs — for events, activity feeds, and incremental processing with a resumable cursor. All operations use `POST /streams` with an `action` field and return the `{ ok, value, error? }` envelope.
 
-**For full documentation** of all 7 actions, cursors, TTL/persistence, the paging loop, tailing, error codes, and limits, see [stream-api.md](stream-api.md).
+**For full documentation** of all 7 actions, cursors, TTL/persistence, the paging loop, tailing, error codes, and limits, see [stream-actor.md](stream-actor.md) and [stream-api.md](stream-api.md).
 
 ```python
 from borgiq import Request, Response, biq_api
@@ -749,7 +749,7 @@ def receive(req: Request) -> Response:
     return Response(results={'records': page['records'], 'nextCursor': page['nextCursor'], 'tail': info['tailCursor']})
 ```
 
-Streams must be created before use (`createStream`; nothing auto-creates) and expire one hour after their last append unless created with `persistent: True` or an explicit `idleTtlSeconds` — see [stream-api.md → Lifecycle](stream-api.md#lifecycle-ttl-and-persistence). For "what happened, in order" use a stream; for "the current value of X" use a Collection ([Collections vs Streams](stream-api.md#collections-vs-streams)).
+Streams must be created before use (`createStream`; nothing auto-creates) and expire one hour after their last append unless created with `persistent: True` or an explicit `idleTtlSeconds` — see [stream-actor.md → Rules](stream-actor.md#rules). For "what happened, in order" use a stream; for "the current value of X" use a Collection ([Collections vs Streams](stream-actor.md#collections-vs-streams)).
 
 ## Error Handling
 
