@@ -27,28 +27,28 @@
       "description": 488
     },
     "deploy": {
-      "words": 1184,
-      "lines": 129,
-      "description": 219
+      "words": 1301,
+      "lines": 135,
+      "description": 208
     },
     "debug-flow": {
-      "words": 948,
-      "lines": 92,
+      "words": 1215,
+      "lines": 105,
       "description": 205
     },
     "new-actor": {
-      "words": 950,
-      "lines": 104,
+      "words": 1051,
+      "lines": 114,
       "description": 153
     },
     "test": {
-      "words": 449,
-      "lines": 76,
+      "words": 705,
+      "lines": 96,
       "description": 145
     },
     "validate": {
-      "words": 448,
-      "lines": 62,
+      "words": 491,
+      "lines": 64,
       "description": 195
     }
   },

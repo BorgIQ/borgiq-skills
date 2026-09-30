@@ -3,7 +3,7 @@ name: test
 description: Trigger a deployed BorgIQ flow with a sample payload, wait for it to complete, and report pass/fail with the final actor output. Does NOT deploy.
 disable-model-invocation: true
 argument-hint: "<canvasId> <triggerActorId> '<json-payload>'"
-allowed-tools: Bash(borgiq triggers*) Bash(borgiq flowruns*) Bash(borgiq flowrun-jobs*) Bash(borgiq flowrun-results*) Bash(borgiq canvases*) Bash(borgiq workspaces*)
+allowed-tools: Bash(borgiq triggers*) Bash(borgiq flowruns*) Bash(borgiq flowrun-jobs*) Bash(borgiq flowrun-results*) Bash(borgiq flowrun-messages*) Bash(borgiq canvases*) Bash(borgiq canvas-actors*) Bash(borgiq workspaces*) Bash(borgiq auth*)
 ---
 
 # /test — trigger a flow and assert on the result
@@ -23,31 +23,46 @@ Accepted forms:
 
 - `/borgiq-builder:test <canvasId> <triggerActorId> '{"key": "value"}'`
 - `/borgiq-builder:test <canvasId> <triggerActorId> --fixture <path-to-payload.json>`
-- `/borgiq-builder:test` (no args) — ask which canvas and trigger to use; default the payload to `{}`
+- `/borgiq-builder:test` (no args) — ask which canvas and trigger to use; run without a payload
 
-If only the canvasId is given, list triggers in that canvas and ask the user which to fire:
+If only the canvasId is given, list the canvas's actors and ask which trigger (a type ending in `TriggerActor`) to fire:
 
 ```bash
-borgiq canvases get <canvasSlugOrId> --json   # inspect triggers
+borgiq canvas-actors list <canvasSlugOrId> --json
 ```
+
+`triggers run` takes the canvas ID (ULID), not the slug; `borgiq canvases get <slug> --json` returns it as `metadata.id`.
 
 ## Trigger the flow
 
+**No payload** — a manual run carries no request data:
+
 ```bash
-borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --payload '<json>' --json
+borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
 ```
 
-Capture the `flowrunId` from the response.
+The flowrun ID is `flowrun.id` in the response.
+
+**With a payload** — `triggers run` cannot send one. POST it to the trigger's webhook URL; only a WebhookTriggerActor, or a UniversalTriggerActor with `webhook.enabled: true`, has one. Take `triggerKey`, `authorizationLevel` and `allowedMethods` (default POST) from `configuration.webhook` in `borgiq canvas-actors get <canvas> <triggerActorId> --json`, and `apiUrl`, `defaultOrg`, `defaultWorkspace` from `borgiq auth status --json`:
+
+```bash
+curl -sS -D - -X POST '<apiUrl>/msg/<org>/<workspace>/<canvasId>/<triggerActorId>/<triggerKey>' \
+  -H 'Content-Type: application/json' -d '<json>'   # --fixture: -d @<path>
+```
+
+The flowrun ID is the `X-BIQ-Flowrun-Id` response header. An `authorizationLevel` of `public`, or none, needs no credentials; `apiKey` and `appsAndApiKey` need `-H 'Authorization: Bearer <token>'` with a personal access token the user supplies (never read the CLI's stored token); an `apps` trigger accepts only app tokens, so test it through its app.
+
+To test one actor on the latest message its upstream actors emitted, use `borgiq flowrun-jobs test-run --canvas <canvasId> --actor-id <actorId> --json` (`--publish` passes its output on).
 
 ## Wait for completion
 
-Poll until the flowrun reaches a terminal state. Don't loop in a `sleep` block — use `borgiq flowruns watch` if available, otherwise poll with reasonable backoff (3s, 5s, 10s):
+Poll with backoff (3s, 5s, 10s), not a `sleep` loop:
 
 ```bash
 borgiq flowruns status <flowrunId> --json
 ```
 
-Terminal states are `Completed`, `Failed`, `Cancelled`. See `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/flowrun-job-states.md` for the full state machine.
+`state` is lowercase: `running` while any of its `counters` is above zero, then `completed` (or `user-interrupted`). A flowrun waiting for a callback token or an interface submission (a human step) stays `running`; report that rather than polling on. See `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/flowrun-job-states.md` for the full state machine.
 
 ## Report the result
 
@@ -57,15 +72,20 @@ Once terminal, pull the summary:
 borgiq flowruns summary <flowrunId> --json
 ```
 
+`completed` does not mean success: PASS means `state` is `completed` and `errors` is empty. `errors[]` lists `actorId`, `actorName`, `jobId` and `error`; `actors[].jobs[]` gives each job's `state`, `status` and `error`.
+
+To show what an actor emitted, read one of its messages in this flowrun; its output is `msg.<msgVar>`:
+
+```bash
+borgiq flowrun-messages list --canvas <canvasSlugOrId> --actor-id <actorId> --flowrun-id <flowrunId> --json
+borgiq flowrun-messages data <messageId> --json
+```
+
 Then assert based on the user's intent:
 
 - If the user supplied an expected output shape, compare against it.
 - If not, report what the final actor emitted and let the user judge.
-- For `Failed` flowruns, surface the failing actor's `runtime-data` and the error message:
-  ```bash
-  borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json
-  borgiq flowrun-results summaries --job-id <jobId> --json
-  ```
+- For each entry in `errors`, report the actor and its error; `borgiq flowrun-results summaries --job-id <jobId> --json` lists every attempt of that job.
 
 ## Exit summary
 
