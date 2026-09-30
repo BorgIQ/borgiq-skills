@@ -20,7 +20,7 @@ Use the `borgiq` CLI to deploy workflows to the platform, trigger flows, monitor
 The canvas bundle is the default way to build and edit canvases: actor configuration lives in parsed-object `actor.yaml` files, code in native files under `code/` (a project tree, entrypoint plus helpers, for the actors that run code), the graph in `canvas.yaml`, and push/pull synchronize with three-way sync (a per-actor content-hash + edit-version baseline in `sync.actors`). Direct export documents and CanvasActor batch payloads are the fallback for environments without shell access or bundle support.
 
 ```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 # New canvas: init -> edit -> validate -> create
 borgiq bundle init ./my-flow.borgiq-canvas --name "My Flow" --slug my-flow
 borgiq bundle validate ./my-flow.borgiq-canvas --strict
@@ -33,7 +33,7 @@ borgiq bundle push ./my-flow.borgiq-canvas --dry-run
 borgiq bundle push ./my-flow.borgiq-canvas   # add --auto-layout when actors were added, removed, or rewired
 ```
 
-Read [Canvas Bundles](cli/canvas-bundles.md) before hand-editing the layout. It defines the three-edit rule, the `codeDir` contract — including the [project tree](cli/canvas-bundles.md#code-actor-project-trees) that Deno, Deno Test, Universal Trigger, and Python actors keep under `code/`, with its required `main.ts` / `main.py` entrypoint and reserved filenames — root graph ownership, incremental sync verdicts, and conflict recovery. Bundle commands require a CLI build containing BorgIQ CLI PR #37; until a release version is published, the capability check above is authoritative. If the command is unavailable, use the direct document/batch workflow below.
+Read [Canvas Bundles](cli/canvas-bundles.md) before hand-editing the layout. It defines the three-edit rule, the `codeDir` contract — including the [project tree](cli/canvas-bundles.md#code-actor-project-trees) that Deno, Deno Test, Universal Trigger, and Python actors keep under `code/`, with its required `main.ts` / `main.py` entrypoint and reserved filenames — root graph ownership, incremental sync verdicts, and conflict recovery. Bundle commands need `@borgiq/cli` ≥ 0.8.0 (see [CLI versions](#cli-versions)). If the command is unavailable, use the direct document/batch workflow below.
 
 ## Setup
 
@@ -42,6 +42,19 @@ Read [Canvas Bundles](cli/canvas-bundles.md) before hand-editing the layout. It 
 ```bash
 npm install -g @borgiq/cli
 ```
+
+### CLI versions
+
+Check the version with `borgiq --version`, or one command with `borgiq help <command>`, which exits non-zero when the command is missing (`borgiq <command> --help` exits 0 either way).
+
+| Commands | Need `@borgiq/cli` |
+|---|---|
+| `bundle` (`init`, `pull`, `push`, `pack`, `unpack`, `validate`), `scaffold` | ≥ 0.8.0 |
+| `bundle build` (react-app builds) | ≥ 0.9.0 |
+| Multi-file `code/` trees with `main.ts` / `main.py` entrypoints | ≥ 0.10.0 |
+| `workspaces deployment`, `canvases runtime-build`, `bundle push --runtime-build`, canvas builds in `bundle build` | ≥ 0.11.0 |
+| `ai-providers`, `canvas-actors app-url` / `thumbnail`, the bundle's `README.md` and `thumbnail.<ext>` files | ≥ 0.12.0 |
+| `recipes` | ≥ 0.13.0 — check with `borgiq help recipes` before using it |
 
 **Authentication — user handles this, not the AI agent:**
 
@@ -152,37 +165,40 @@ done
 The `list` envelope is **metadata only**. To get the actor definition, fetch the template by id:
 
 ```bash
-borgiq templates get TMPL01kd6gqghj04j8765nnqyp09a --json
+borgiq templates get ATMP01kd6gqghj04j8765nnqyp09a --json
 ```
 
 The returned object includes an `actor` field carrying the full `ExportedCanvasActor` payload — drop this into `canvas-actors create` / `batch` (remember to convert config fields to YAML strings per the [data formats reference](cli/cli-data-formats.md)) instead of writing the actor from scratch.
 
 **End-to-end pattern — search, pick, instantiate:**
 
-The YAML-string conversion is handled by `borgiq scaffold actor-from-template` (see [cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template](cli/cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template)), which mirrors the platform's `importActor()` and also generates a fresh actor id, a `webhookTriggerKey` for trigger types that need one, and the `template: { id, version, appName }` provenance:
+The YAML-string conversion is handled by `borgiq scaffold actor-from-template` (see [cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template](cli/cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template)), which mirrors the platform's `importActor()` and also generates a fresh actor id and msgVar, replaces a top-level `webhookTriggerKey` when the template carries one, and adds the `template: { id, version, appName }` provenance:
 
 ```bash
 # 1. Find a template
 borgiq --json templates list --search "send slack" --type TASK \
   | jq '.data[] | {id, name, appName}'
 
-# 2. Convert in one pipe and capture the generated actor id
-ACTOR_ID=$(borgiq templates get TMPL01kd6gqghj04j8765nnqyp09a --json \
+# 2. Convert in one pipe and capture the generated actor id (--print-id prints only the id, on stdout;
+#    the actor JSON goes to --output)
+ACTOR_ID=$(borgiq templates get ATMP01kd6gqghj04j8765nnqyp09a --json \
   | borgiq scaffold actor-from-template \
       --name "Notify #ops on deploy" \
       --output outputs/notify-ops-actor.json \
-      --print-id 2>&1 >/dev/null)
+      --print-id)
 
 # 3. Create the actor in the canvas
 borgiq canvas-actors create "$CANVAS_ID" "$ACTOR_ID" \
   --file outputs/notify-ops-actor.json --json
 ```
 
-For batch mode: pipe the converter through `--batch` to emit the operations envelope directly into `borgiq canvas-actors batch`. The command does **not** wire credentials, secrets, or `inputs` values — apply those via a follow-up `canvas-actors update`.
+For batch mode: pipe the converter's JSON (omit `--output` and `--print-id`) into `borgiq scaffold batch --output ops.json`, which wraps it in the operations envelope for `borgiq canvas-actors batch <canvas> --file ops.json`. `actor-from-template` does **not** wire credentials, secrets, or `inputs` values — apply those via a follow-up `canvas-actors update`.
 
 See [cli-command-reference.md#template-commands](cli/cli-command-reference.md#template-commands) for the full flag list and example outputs.
 
 ### Start from a recipe (a multi-actor starting point)
+
+Recipes need `@borgiq/cli` ≥ 0.13.0. Check first: `borgiq help recipes >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"`. If the installed CLI has no `recipes` command and cannot be upgraded, build the flow from templates instead.
 
 A **recipe** is a saved starting point BorgIQ publishes: a single task actor (`TASK`, e.g. an AI agent with its tools already attached), a single trigger (`TRIGGER`), a whole flow (`FLOW`, trigger → steps), or a flow segment (`SEGMENT`, a trigger-less chain). Unlike a template it is **not versioned and not linked back** — once added, the actors are the user's and nothing updates them (a step inside that came from a template keeps its own `template` stamp). Prefer a recipe over hand-building when the user's ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"); prefer a template for one integration step you want to keep updatable.
 
@@ -486,13 +502,13 @@ borgiq canvases layout <canvasSlugOrId> --source-actor-id ACTR01flow1trigger --s
 
 ### Manual trigger
 
-The canvas must contain a `ButtonTriggerActor`:
+Fires the trigger actor you name, with no payload (there is no payload option):
 
 ```bash
 borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
 ```
 
-Save the returned `flowrun.id` for monitoring.
+Save the returned `flowrun.id` for monitoring. To run with a payload, POST it to a webhook or universal trigger's URL — see [flowrun-job-states.md](flowrun-job-states.md#monitor-a-flow-until-completion).
 
 ### Test run a single actor
 
@@ -518,16 +534,16 @@ borgiq flowrun-jobs re-run --job-id <flowrunJobId> --json
 
 ### Poll flowrun status (recommended for agents)
 
-Poll every 2-3 seconds until `state` is `Completed` or `UserInterrupted`:
+Poll every 2-3 seconds until `state` is `completed` or `user-interrupted`:
 
 ```bash
 borgiq flowruns status <flowrunId> --json
 ```
 
-**States:**
-- `Running` — at least one counter > 0
-- `Completed` — all done
-- `UserInterrupted` — manually interrupted
+**States** (lowercase):
+- `running` — at least one counter > 0
+- `completed` — all counters are zero; this does **not** mean success — check the summary's `errors`
+- `user-interrupted` — manually interrupted
 
 ### Get full execution summary
 
@@ -537,7 +553,7 @@ After completion, get a complete picture of what happened:
 borgiq flowruns summary <flowrunId> --json
 ```
 
-Returns per-actor job details, statuses, errors, and timing.
+Returns `state`, `actors[]` (each with `jobs[]`: `jobId`, `state`, `status`, `error`, `resultId`, timing) and `errors[]` (`actorId`, `actorName`, `jobId`, `error`). The flowrun succeeded only if `errors` is empty.
 
 ### Interrupt a running flow
 
@@ -566,34 +582,30 @@ Shows status (`success` or `error`), timing, and error metadata.
 
 ### Get full job result data
 
-```bash
-borgiq flowrun-results data <resultId> --json
-```
-
-Returns the complete runtime response: messages emitted per port, error details, signal data.
+`borgiq flowrun-results data <resultId>` fails against the current API, which requires a `rootPath` query the CLI does not send. Read what a job emitted with [`flowrun-messages`](#view-messages-between-actors) instead.
 
 ### Get runtime data (what the actor received)
 
-This is the most useful debugging tool — see exactly what config and data an actor had:
+`--root-path` takes `ctx`, `trigger` or `inputs`; the CLI's help also lists `request` and `user`, which the API rejects:
 
 ```bash
-# Actor context (configuration, secrets, connection data)
+# Run context: org, workspace, canvas, flowrun, trigger, actor ids and names (no configuration or secrets)
 borgiq flowrun-jobs runtime-data <jobId> --root-path ctx --json
-
-# Interpolated inputs the actor received
-borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json
-
-# Trigger event for the firing (webhook request, schedule timestamps, …)
+# Trigger event (webhook request, schedule timestamp, …) — trigger actors' jobs only
 borgiq flowrun-jobs runtime-data <jobId> --root-path trigger --json
+# Tool-call input — agent or MCP tool-call jobs only
+borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json
 ```
+
+For the data any other job received, read its [source message](#get-source-message-for-a-job).
 
 ### View messages between actors
 
 ```bash
-# List messages for a specific actor and port
-borgiq flowrun-messages list --canvas <id> --flowrun-id <id> --actor-id <id> --json
+# List the messages an actor emitted in a flowrun (the 10 newest)
+borgiq flowrun-messages list --canvas <canvasSlugOrId> --flowrun-id <id> --actor-id <id> --json
 
-# Get full message payload
+# Get the full message payload: { msg, err }, keyed by msgVar — the actor's own output is msg.<msgVar>
 borgiq flowrun-messages data <messageId> --json
 ```
 
@@ -607,10 +619,11 @@ borgiq flowrun-jobs ai-timeline <jobId> --json
 
 ### Get source message for a job
 
-See what triggered a specific job:
+See the message a job received:
 
 ```bash
-borgiq flowrun-jobs source-message <jobId> --json
+borgiq flowrun-jobs source-message <jobId> --json      # { sourceFlowrunMessage: { id, messageType } }
+borgiq flowrun-messages data <sourceFlowrunMessageId> --json   # the msg.<msgVar> data it received
 ```
 
 ---
@@ -625,11 +638,15 @@ borgiq canvases export <canvasSlugOrId> > canvas-backup.json
 
 ### Duplicate a canvas
 
-Export, then re-import (IDs are regenerated automatically):
+`canvases create-with-data` does not accept the `{ yaml, errors }` that `canvases export` prints. Unpack the export into a bundle instead:
 
 ```bash
-borgiq canvases export <canvasSlugOrId> | borgiq canvases create-with-data --json
+borgiq canvases export <canvasSlugOrId> --json | borgiq bundle unpack - ./copy.borgiq-canvas
+# Edit canvas.name and canvas.slug in ./copy.borgiq-canvas/canvas.yaml — both must be unused in the workspace.
+borgiq bundle push ./copy.borgiq-canvas --create
 ```
+
+Actor IDs are kept; they only need to be unique within a canvas.
 
 ### Verify import data before creating
 
@@ -668,10 +685,10 @@ borgiq canvases layout <canvasSlugOrId>
 borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
 # Save the returned flowrun ID
 
-# 8. Monitor (poll until Completed)
+# 8. Monitor (poll until state is no longer running)
 borgiq flowruns status <flowrunId> --json
 
-# 9. Check results
+# 9. Check results (success: errors is empty)
 borgiq flowruns summary <flowrunId> --json
 ```
 
@@ -684,11 +701,12 @@ borgiq flowruns summary <flowrunId> --json
 # 2. Get error details
 borgiq flowrun-results summaries --job-id <jobId> --json
 
-# 3. See what config was used
-borgiq flowrun-jobs runtime-data <jobId> --root-path ctx --json
+# 3. See what config is set now
+borgiq canvas-actors get <canvasSlugOrId> <actorId> --json
 
 # 4. See what input data was received
-borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json
+borgiq flowrun-jobs source-message <jobId> --json
+borgiq flowrun-messages data <sourceFlowrunMessageId> --json
 
 # 5. Fix the actor configuration
 borgiq canvas-actors batch <canvasSlugOrId> --file fix.json --json

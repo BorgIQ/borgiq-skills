@@ -54,51 +54,51 @@ borgiq generate msgvar "Fetch user profile from Gmail"
 
 ## Validation
 
-**IMPORTANT:** Always validate and post-process generated or edited YAML before presenting it to the user.
+**IMPORTANT:** Always validate generated or edited YAML before presenting it to the user.
+
+`borgiq validate` checks a workflow document with top-level `metadata` and `actors`. It does not validate a bundle's `actor.yaml`; for a bundle directory run `borgiq bundle validate <dir> --strict`.
 
 ```bash
 # From file
-borgiq validate actor.yaml
+borgiq validate workflow.yaml
 
 # From stdin
-cat actor.yaml | borgiq validate
-
-# Skip TypeScript validation for DenoActor code (faster)
-borgiq validate actor.yaml --skip-typecheck
+cat workflow.yaml | borgiq validate
 ```
 
-Code typechecking (DenoActor/PythonActor) runs only when `deno` / `python3` are installed; otherwise it is skipped with a warning. Exit code is non-zero when the workflow is invalid.
+Actor code is not typechecked or syntax-checked locally; `--skip-typecheck` is still accepted and does nothing. The BorgIQ API is the authority on code. Exit code is non-zero when the workflow is invalid.
 
 **Validation checks:**
 - YAML syntax and structure
 - Required fields (type, name, msgVar, configuration)
-- Actor ID format (`ACTR` + 26 lowercase alphanumeric chars)
-- Edge ID format (`EDGE` + 26 lowercase alphanumeric chars)
+- Actor ID format (`ACTR` + 26 lowercase ULID chars: digits and `a`–`z` except `i`, `l`, `o`, `u`)
+- Edge ID format (`EDGE` + 26 lowercase ULID chars, same set)
 - Source port ID format (`SPRT` + 7 lowercase alphanumeric chars or `SPRTdefault`)
 - Actor-specific options (HttpRequestActor, DenoActor, MessageProcessorActor, etc.)
-- TypeScript/JavaScript syntax for DenoActor code
+- Text checks on DenoActor and PythonActor code (for example, that a `receive` handler is defined)
 - Memory requirements (enableLTM/enableSTM for specific actions)
 - Edge consistency (source/target actor IDs, port IDs)
 
 ## Post-Processing
 
-After validation, run the post-processing command to clean up unnecessary fields:
+After validation, optionally run the post-processing command to clean up the document. It does not validate:
 
 ```bash
 # Post-process and output to stdout
-borgiq validate actor.yaml --post-process
+borgiq validate workflow.yaml --post-process
 
 # Post-process and modify file in place
-borgiq validate actor.yaml --post-process --in-place
-borgiq validate actor.yaml --post-process -i
+borgiq validate workflow.yaml --post-process --in-place
+borgiq validate workflow.yaml --post-process -i
 
 # From stdin
-cat actor.yaml | borgiq validate --post-process
+cat workflow.yaml | borgiq validate --post-process
 ```
 
-**Post-processing transformations:**
-- Removes `label` from edges for non-router actors (only AiRouterActor and RouterActor use edge labels)
-- Ensures consistent YAML formatting
+**Post-processing transformations** (RouterActor and AiRouterActor are left untouched):
+- Adds an empty `schemas: {}` to an actor that has none
+- Removes `label` from edges (only AiRouterActor and RouterActor use edge labels)
+- When it changed anything, rewrites the document in consistent YAML formatting
 
 ## Complete Workflow
 

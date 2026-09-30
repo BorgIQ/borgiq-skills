@@ -17,7 +17,7 @@ The `--json` flag controls **output format only** — without it the CLI renders
 | Command | `--file` | JSON Schema | Config fields format |
 |---------|----------|-------------|---------------------|
 | `borgiq canvases create-with-data` | Yes | `ExportedCanvasData` envelope | **JSON objects** |
-| `borgiq canvases update-data` | Yes | `ExportedCanvasData` in `{ canvas, mode }` wrapper | **JSON objects** |
+| `borgiq canvases update-data` | Yes | `ExportedCanvasData` canvas data (`{ schemaVersion, actors }`); the CLI wraps it as `{ canvas, mode }` | **JSON objects** |
 | `borgiq canvas-actors create` | Yes | `CanvasActorSchema` (without `id`) | **YAML strings** |
 | `borgiq canvas-actors update` | Yes | `CanvasActorSchema` partial (without `id`) | **YAML strings** |
 | `borgiq canvas-actors batch` | Yes | `{ operations: ActorOperation[] }` | **YAML strings** |
@@ -58,11 +58,11 @@ The `--json` flag controls **output format only** — without it the CLI renders
 | `borgiq flowruns interrupt` | `<flowrunId>` | |
 | `borgiq flowrun-jobs test-run` | `--canvas`, `--actor-id`, `--publish` flags | |
 | `borgiq flowrun-jobs re-run` | `--job-id` flag | |
-| `borgiq flowrun-jobs runtime-data` | `<jobId>`, `--root-path` flag | |
+| `borgiq flowrun-jobs runtime-data` | `<jobId>`, `--root-path` flag | `ctx`, `trigger` (trigger actors' jobs) or `inputs` (agent/MCP tool-call jobs); the API rejects `request` and `user` |
 | `borgiq flowrun-jobs ai-timeline` | `<jobId>` | |
 | `borgiq flowrun-jobs source-message` | `<jobId>` | |
 | `borgiq flowrun-results summaries` | `--job-id` flag | |
-| `borgiq flowrun-results data` | `<resultId>` | |
+| `borgiq flowrun-results data` | `<resultId>` | Fails against the current API, which requires a `rootPath` query the CLI does not send |
 | `borgiq flowrun-messages list` | `--canvas`, `--flowrun-id`, `--actor-id` flags | |
 | `borgiq flowrun-messages data` | `<messageId>` | |
 
@@ -99,8 +99,7 @@ The same actor configuration fields exist in two different representations depen
 | `configuration.codeDir` | `Array<{ path, content }>` — JSON array | No | `Array<{ path, content }>` — JSON array (**not** a YAML string) | No |
 | `configuration.code` | `string` — plain string | No | `string` — plain string | No |
 | `configuration.connection` | `{ type?: string \| string[], key? }` — JSON object | No | `{ type?: string \| string[], key? }` — JSON object | No |
-| `configuration.webhookTriggerKey` | `string` — plain string | No | `string` — plain string | No |
-| `configuration.webhookAuthorizationLevel` | `"public"` or `"apps"` | No | `"public"` or `"apps"` | No |
+| `configuration.webhook` | `{ triggerKey?, authorizationLevel?, allowedMethods?, responseTimeout?, enabled? }` — JSON object; `authorizationLevel` is `public`, `apps`, `apiKey` or `appsAndApiKey` | No | same JSON object (**not** a YAML string) | No |
 | `configuration.aiAgentToolActorIds` | `string[]` — string array | No | `string[]` — string array | No |
 | `schemas.inputs` | `any` — JSON object | No | `string` — YAML string | No |
 | `schemas.outputs` | `any` — JSON object | No | `string` — YAML string | No |
@@ -234,7 +233,7 @@ Zod schema: `CanvasCreateWithDataInputSchema` with `ExportedCanvasDataSchema` fo
 
 ### update-data body
 
-Wraps the canvas data in a `{ canvas, mode }` envelope:
+The `--file` holds only the canvas data (`{ schemaVersion, actors }`). The CLI sends it to the API wrapped in a `{ canvas, mode }` envelope, taking `mode` from `--mode` — do not wrap the file yourself, or it is wrapped twice. The request body the API receives:
 
 ```json
 {
@@ -444,13 +443,12 @@ The `borgiq canvases export <canvasSlugOrId>` command returns JSON with a `yaml`
 
 The YAML inside the `yaml` field uses the **ExportedCanvasData** format — configuration fields are parsed objects (not YAML strings). The `metadata` section includes canvas metadata (`id`, `slug`, `name`, etc.) and the `data` section contains the actor graph.
 
-To re-import an exported canvas:
+To re-import an exported canvas as a copy, unpack it into a bundle (the `yaml` field is YAML, not JSON, so it cannot go through `jq fromjson`):
 
 ```bash
-# Export and pipe directly to create a duplicate
-borgiq canvases export CANV01abc123def456ghi789jkl012 | \
-  jq '{ name: "Copy of Flow", slug: "copy-of-flow", messageTTLInDays: 7, data: (.yaml | fromjson).data }' | \
-  borgiq canvases create-with-data --json
+borgiq canvases export CANV01abc123def456ghi789jkl012 --json | borgiq bundle unpack - ./copy.borgiq-canvas
+# Set a new canvas.name and canvas.slug in ./copy.borgiq-canvas/canvas.yaml, then:
+borgiq bundle push ./copy.borgiq-canvas --create
 ```
 
 ---
