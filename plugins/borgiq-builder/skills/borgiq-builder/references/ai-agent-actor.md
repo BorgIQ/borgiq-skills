@@ -244,8 +244,6 @@ Validation rules enforced before the session starts:
 - `env` keys matching a reserved name (case-insensitive) are rejected.
 - A wired tool actor whose `msgVar` collides (case-insensitively) with a built-in tool name (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, plus `code_execution` while `enableCodeExecution` is on) is rejected — rename the tool actor.
 
-`bash` and Code Execution scripts also see `BORGIQ_EGRESS_CLIENT_IP` next to `env`. It is for APIs that want the caller's IP address in the request, such as Namecheap's `ClientIp`. Its value is a token, the variable's own name, which BorgIQ's egress proxy replaces with the address the request leaves from, in the URL, a header or a text body. It is not replaced in a binary body, once transformed (base64, hashing, a signature the script computes), or in a non-HTTP connection.
-
 ## Built-in Tools
 
 The agent always has (subject to `allowedTools`/`disallowedTools`) seven built-in tools that operate on its private session workspace, plus `code_execution` when `enableCodeExecution` is set:
