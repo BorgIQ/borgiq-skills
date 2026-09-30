@@ -19,7 +19,7 @@ BorgIQ uses standard JSON Schema (draft 7 / 2020-12) with one local convention: 
 |---|---|---|---|
 | **AiActor `outputSchema`** | Tells the LLM what JSON to produce | The model itself, via constrained decoding | Keep tight — every `required` field is something the model must produce. Use enums to constrain. |
 | **AiAgentActor tool `schemas.inputs`** | Declares what each tool accepts; the agent reads this to choose tools | The agent, when selecting and invoking tools | Field `description` is read by the LLM — write it like docs the model will actually use. |
-| **CollectionActor item schema** | Shape of stored items, queries, indexes | CollectionActor at `putItem` / `updateItem`; reads validate on retrieval | Design for query patterns *first*, not just current data shape. Plan key strategy upfront. |
+| **CollectionActor item schema** | Shape of stored items, queries, indexes | **Nothing** — collections have no schema; any JSON `value` is stored | Design for query patterns *first*, not just current data shape. Plan key strategy upfront. |
 | **CallableTriggerActor `schemas.inputs`** | Input contract of a sub-flow — the payload callers must send | **Nothing at runtime** — the editor generates the CallFlowActor payload form from it; the payload passes into the sub-flow unvalidated | The sub-flow's function signature. Mirror in `configuration.inputs`; keep the caller `payload`, this schema, and downstream `msg.*` reads in lockstep by discipline — drift fails silently, not fast. |
 | **CallableResponseActor response schema** | Output contract of a sub-flow | CallFlowActor when consuming the response | Parents depend on this. Enums + clear types reduce caller surprise. |
 | **Actor-level `schemas.inputs`** | Reusable input interface for any actor | Framework at wire-in | Mirrors what `inputs:` declares; enables templatization and UI generation. |
@@ -38,10 +38,10 @@ BorgIQ uses standard JSON Schema (draft 7 / 2020-12) with one local convention: 
 
 ## Schema design principles — storage (CollectionActor)
 
-1. **Model for query patterns, not just current data.** Before designing the schema, list every read pattern. Add label fields, sort prefixes, and TTL where needed. A schema that satisfies writes but doesn't support reads is a redesign waiting to happen.
-2. **Plan partition / sort key strategy upfront.** Keys are lexicographically sorted. Hierarchical keys (`user:U001:profile`, `user:U001:session:S123`) enable cheap prefix scans.
+1. **Model for query patterns, not just current data.** Before designing the schema, list every read pattern. Add labels (a separate `labels` map, not `value` fields), key prefixes, and TTL where needed. A schema that satisfies writes but doesn't support reads is a redesign waiting to happen.
+2. **Plan the key strategy upfront.** The platform owns the partition key; your `key` is the sort key, lexicographically sorted. Hierarchical keys (`user:U001:profile`, `user:U001:session:S123`) enable cheap prefix scans.
 3. **Flat top-level fields for partial updates.** `updateItem` replaces an entire top-level field if it's an object. Keep mutable fields flat.
-4. **TTL for ephemeral data.** Set `ttl: <seconds>` on session tokens, callback IDs, transient state.
+4. **TTL for ephemeral data.** Set `options.ttl: <seconds>` on `putItem` for session tokens, callback IDs, transient state (a top-level `ttl` is dropped).
 5. **Denormalize for read efficiency.** A query that needs name + email + status should find them in one item, not three.
 
 ## Storage / API contract checklist — collection-backed apps
@@ -92,14 +92,16 @@ schemas:
     required: [query]
 ```
 
-**Collection item — flat, denormalized, query-friendly:**
+**Collection item — flat, denormalized, query-friendly** (`putItem` fields):
 ```yaml
+key: user:user-001
 value:
-  userId: user-001
   email: alice@example.com
   firstName: Alice
-  status: active           # label query: status=active
+  status: active           # value field: not queryable
   lastLogin: 2026-03-19T10:00:00Z
+labels:
+  status: active           # queryable: expression active, options.label status
 ```
 
 **`$ref` for a shared shape:**
@@ -142,8 +144,8 @@ status:
 |---|---|
 | [`references/ai-actor.md`](../borgiq-builder/references/ai-actor.md) | `outputSchema` examples, structured output patterns for code/HTML generation |
 | [`references/ai-agent-actor.md`](../borgiq-builder/references/ai-agent-actor.md) | Tool input schemas, `${{aiInput}}` pattern |
-| [`references/collection-actor.md`](../borgiq-builder/references/collection-actor.md) | Item schema patterns, queue/index designs, key strategies |
-| [`references/collection-api.md`](../borgiq-builder/references/collection-api.md) | DynamoDB mapping, concurrent updates, nested-object replacement behavior |
+| [`references/collection-actor.md`](../borgiq-builder/references/collection-actor.md) | CollectionActor YAML actions, examples |
+| [`references/collection-api.md`](../borgiq-builder/references/collection-api.md) | Key design, labels, options, queue pattern, concurrent updates, nested-object replacement |
 | [`references/callable-response-actor.md`](../borgiq-builder/references/callable-response-actor.md) | Sub-flow response schema contracts |
 
 ## When to hand off to other spokes

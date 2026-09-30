@@ -81,7 +81,7 @@ Details worth designing around:
 - **A never-appended stream gets a 15-minute grace.** Before the first record, the deadline is `createdAt + max(idleTtlSeconds, 15 min)`, so a flow that creates a stream in one actor and appends in a later one (behind an AI call or a retry) does not lose the stream in between. After the first append the idle TTL applies untouched.
 - **`expiresAt` and `lastActivityAt` in list responses are hints**, refreshed asynchronously — treat them as approximate. `getStreamInfo` reads the tail live from storage and is the truth.
 - **Deletion is hard.** No tombstone, no undo, no confirmation. An expired stream returns `STREAM_NOT_FOUND` (404) from every request surface; an open tail on it is closed, and the 404 arrives on the reconnect.
-- **Streams must be created before use.** An append to a slug that was never created — or that has expired — fails with `STREAM_NOT_FOUND`; nothing auto-creates. Provision streams the way you provision collections (see [collection-migrations.md](collection-migrations.md)), and use `persistent: true` for anything an app depends on.
+- **Streams must be created before use.** An append to a slug that was never created — or that has expired — fails with `STREAM_NOT_FOUND`; nothing auto-creates. Provision streams the way you provision collections (see [collection-migrations.md](collection-migrations.md#provisioning-streams)), and use `persistent: true` for anything an app depends on.
 
 ## Cursors
 
@@ -340,7 +340,7 @@ The cheap "is there anything new?" probe. It reads the tail **live** from storag
 
 ## Reading a Stream: one page at a time
 
-`readStream` deliberately emits **a page, never the stream**. Every read made from actor code — StreamActor, DenoActor, or PythonActor, since all three go through the same runtime endpoint — is budgeted against the workspace's message-size limit (`maxMessageAndSignalPayloadSizeInKiloBytes`, 64 KB by default), so a 10,000-record stream never becomes a 10,000-record flowrun message. `maxBytes` can lower that budget, never raise it. A single record larger than the budget fails the read with `RECORD_EXCEEDS_MESSAGE_BUDGET` rather than being silently truncated — raise the workspace limit, or read over the REST route (`GET …/records`), whose only bound is `maxBytes` up to 1 MiB.
+`readStream` deliberately emits **a page, never the stream**. Every read made from actor code — StreamActor, DenoActor, or PythonActor, since all three go through the same runtime endpoint — is budgeted against the workspace's message soft maximum size (`softMaxMessagePayloadSizeInKiloBytes`, 64 KB by default), so a 10,000-record stream never becomes a 10,000-record flowrun message. `maxBytes` can lower that budget, never raise it. A single record larger than the budget fails the read with `RECORD_EXCEEDS_MESSAGE_BUDGET` rather than being silently truncated — raise the workspace limit, or read over the REST route (`GET …/records`), whose only bound is `maxBytes` up to 1 MiB.
 
 The consumer loop is always the same:
 
@@ -349,7 +349,7 @@ The consumer loop is always the same:
 3. Process `records`; persist `nextCursor` **after** processing succeeds (at-least-once) or before (at-most-once) — your choice, made explicit.
 4. If `hasMore`, go to 2 with the new `nextCursor`. Otherwise you are caught up until the next run.
 
-On a canvas, step 4 is an edge from the StreamActor back into itself (or into a RouterActor that checks `hasMore`); across flowruns, step 1 and 3 are a Collection `getItem`/`putItem` or a DataStore `get`/`set`. See [Patterns](#patterns).
+On a canvas, step 4 is an edge from the StreamActor back into itself (or into a RouterActor that checks `hasMore`); across flowruns, step 1 and 3 are a Collection `getItem`/`putItem` (with `options.overwrite: true`) or a DataStore `get`/`set`. See [Patterns](#patterns).
 
 ## SDK Interface (DenoActor / PythonActor)
 
@@ -407,7 +407,7 @@ const info = await streamsApi<{ tailCursor: string }>({ action: "getStreamInfo",
 if (info.tailCursor === (await loadCursor())) return; // nothing new
 ```
 
-`loadCursor`/`saveCursor` are yours — typically a Collection item keyed `cursor:order-events` (see [collection-api.md](collection-api.md)).
+`loadCursor`/`saveCursor` are yours — typically a Collection item keyed `cursor:order-events`, saved with `putItem` + `overwrite: true` (see [collection-api.md](collection-api.md)).
 
 ### Python
 
@@ -632,7 +632,7 @@ Each `records[]` entry is `{ cursor, timestamp, payload }` — `timestamp` is th
 
 ### Resumable consumer (cursor in a Collection)
 
-A ScheduledTriggerActor runs every few minutes; the flow reads `cursor:<stream>` from the app's collection, `readStream`s from it, processes the page, and writes `nextCursor` back. Persisting the cursor *after* processing gives at-least-once delivery — make the processing idempotent (a Collection `putItem` keyed by something in the payload is the usual way).
+A ScheduledTriggerActor runs every few minutes; the flow reads `cursor:<stream>` from the app's collection, `readStream`s from it, processes the page, and writes `nextCursor` back. Persisting the cursor *after* processing gives at-least-once delivery — make the processing idempotent (a Collection `putItem` keyed by something in the payload is the usual way; being create-only, it fails a replay with `ITEM_ALREADY_EXISTS` — treat that as done).
 
 ### Cheap change detection
 

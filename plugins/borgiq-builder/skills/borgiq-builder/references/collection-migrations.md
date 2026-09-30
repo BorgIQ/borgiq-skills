@@ -13,6 +13,7 @@ Treat this exactly like database migrations in a normal app: an **idempotent mig
 - [Idempotency — the core requirement](#idempotency--the-core-requirement)
 - [The migration manager pattern](#the-migration-manager-pattern)
 - [Worked example: a migration manager UniversalTriggerActor (manual invoke)](#worked-example-a-migration-manager-universaltriggeractor-manual-invoke)
+- [Provisioning streams](#provisioning-streams)
 - [Wiring and running migrations](#wiring-and-running-migrations)
 - [Splitting migrations](#splitting-migrations)
 - [Common mistakes](#common-mistakes)
@@ -229,6 +230,45 @@ actors:
 
 > The ledger check (`getItem` on the `$migration:<id>` key) is the primary idempotency guard; the per-call "already exists" handling is the belt-and-suspenders backup for a migration that failed midway and re-runs. Because `$meta` is written last, a run that fails midway leaves the previous manifest (and its `schemaVersion`) in place — app code checking for pending migrations keeps refusing until the re-run succeeds.
 
+## Provisioning streams
+
+Streams are not implicit either: `appendData` or `readStream` on a slug that was never created — or that expired — fails with `STREAM_NOT_FOUND` (404). A stream with neither `persistent: true` nor `idleTtlSeconds` is hard-deleted one hour after its last append, so a stream the app or a scheduled consumer depends on must be created **`persistent: true`** by the same migration runner (see [stream-actor.md](stream-actor.md)).
+
+Ensure streams on **every** invoke, next to `ensureCollection` and outside the ledger: a stream deleted since the last run is then recreated (empty). `createStream` on a taken slug fails with `STREAM_ALREADY_EXISTS` (409) and leaves that stream's lifecycle unchanged, so on that error call `editMetadata` with `persistent: true` in case it was created without it. Add to the worked example:
+
+```typescript
+async function streamsApi<T = unknown>(body: Record<string, unknown>): Promise<T> {
+  const res = await biqApi("/streams", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json()) as { ok: boolean; value: T; error?: { code: string; message: string } };
+  if (!json.ok) {
+    const err = new Error(json.error?.message || "Stream action failed");
+    (err as any).code = json.error?.code;
+    throw err;
+  }
+  return json.value;
+}
+
+// createStream that treats "already exists" as success, and converges the lifecycle.
+async function ensureStream(slug: string, name: string): Promise<void> {
+  try {
+    await streamsApi({ action: "createStream", slug, name, persistent: true });
+  } catch (e) {
+    if ((e as any).code !== "STREAM_ALREADY_EXISTS") throw e;
+    await streamsApi({ action: "editMetadata", stream: slug, persistent: true });
+  }
+}
+
+// In receive(), right after ensureCollection(...):
+await ensureStream("task-activity", "Task activity");
+```
+
+- Slugs match `^[a-z0-9][a-z0-9_-]{0,63}$`; a workspace holds at most 100 streams (`STREAM_LIMIT_EXCEEDED`, 409).
+- Provision only fixed-slug streams the app always needs. Per-run or per-session streams (`run-<id>`) are created by the flow that uses them, with an `idleTtlSeconds`, and are not a migration's job.
+
 ## Wiring and running migrations
 
 The migration manager **is** the trigger (a UniversalTriggerActor), so you don't wire a separate trigger to it — you **fire it with the `manual` trigger type**:
@@ -250,7 +290,7 @@ Because every step is idempotent, re-running is always safe — that is the whol
 
 ## Common mistakes
 
-1. **One collection per entity type.** Provisioning `app-users`, `app-orders`, `app-comments`, `app-meta`, … for a single app. Model every entity type in the app's **one** collection with key prefixes (`user:`, `order:`, `comment:`, `meta:`) — see [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design). Extra collections are only justified by a security boundary or an explicit user request.
+1. **One collection per entity type.** Provisioning `app-users`, `app-orders`, `app-comments`, `app-meta`, … for a single app. Model every entity type in the app's **one** collection with key prefixes (`user:`, `order:`, `comment:`) and a `$meta` manifest — see [collection-api.md → Single-Collection Design](collection-api.md#single-collection-design). Extra collections are only justified by a security boundary or an explicit user request.
 2. **Assuming `putItem` auto-creates the collection.** It does not — you get `COLLECTION_NOT_FOUND`. Always provision with `createCollection` first.
 3. **Non-idempotent migrations.** A bare `createCollection` throws `COLLECTION_ALREADY_EXISTS` on the second run and aborts the whole flow. Swallow it (or check `listCollections` first).
 4. **Mishandling seed re-runs.** `putItem` is create-only by default, so a re-run seed throws `ITEM_ALREADY_EXISTS` — and the wrong fix is passing `overwrite: true`, which makes every deploy reset user-edited rows. The right fix: keep the create-only default and treat `ITEM_ALREADY_EXISTS` as success.

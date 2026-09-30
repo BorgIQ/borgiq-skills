@@ -14,7 +14,6 @@ For full API documentation including actions, parameters, DynamoDB behavior, con
 
 - [Configuration Structure](#configuration-structure)
 - [Actions Summary](#actions-summary)
-- [Event System](#event-system)
 - [Complete Examples](#complete-examples)
 - [Use Cases](#use-cases)
 - [Workflow Patterns](#workflow-patterns)
@@ -65,9 +64,9 @@ All actions are configured via the `action` field in `configuration.options`. Fo
 | `listCollections` | List all collections | [Details](collection-api.md#listcollections) |
 | `updateCollection` | Update collection metadata/labels | [Details](collection-api.md#updatecollection) |
 | `deleteCollection` | Delete a collection | [Details](collection-api.md#deletecollection) |
-| `putItem` | Store or replace an item (full replace) | [Details](collection-api.md#putitem) |
+| `putItem` | Create an item. Create-only: an existing key fails with `ITEM_ALREADY_EXISTS` unless `options.overwrite: true`, which replaces the whole item | [Details](collection-api.md#putitem) |
 | `getItem` | Retrieve an item by key | [Details](collection-api.md#getitem) |
-| `updateItem` | Partially update an item (shallow field merge) | [Details](collection-api.md#updateitem) |
+| `updateItem` | Partially update an existing item (shallow field merge); a missing key fails with `ITEM_DOES_NOT_EXIST` | [Details](collection-api.md#updateitem) |
 | `deleteItem` | Delete one or more items | [Details](collection-api.md#deleteitem) |
 | `query` | Query items by key/label with pagination | [Details](collection-api.md#query) |
 | `batchGetItem` | Read up to 100 items | [Details](collection-api.md#batchgetitem) |
@@ -80,55 +79,6 @@ All actions are configured via the `action` field in `configuration.options`. Fo
 - [Concurrent Update Patterns](collection-api.md#concurrent-update-patterns) — safe patterns for parallel workflows
 - [DynamoDB Mapping Reference](collection-api.md#dynamodb-mapping-reference) — how each action maps to DynamoDB, nested object behavior
 - [Error Codes](collection-api.md#error-codes) — API error codes and meanings
-
-## Event System
-
-Item changes emit events that can be consumed by BorgIQ workflow triggers (via DynamoDB Streams).
-
-### Event Types
-
-| Event | Trigger |
-|-------|---------|
-| `created` | New item inserted (first `putItem`) |
-| `updated` | Existing item modified |
-| `deleted` | Item removed via `deleteItem` or TTL |
-
-### Event Payload
-
-```json
-{
-  "name": "updated",
-  "collection": "products",
-  "key": "productId-12345",
-  "item": {
-    "collection": "products",
-    "key": "productId-12345",
-    "value": { "name": "Widget Pro", "price": 34.99 },
-    "createdAt": "2025-01-15T10:30:00.000Z",
-    "updatedAt": "2025-01-15T12:00:00.000Z",
-    "labels": { "category": "electronics", "status": "active" }
-  },
-  "previous": {
-    "value": { "name": "Widget Pro", "price": 29.99 },
-    "updatedAt": "2025-01-15T10:30:00.000Z"
-  }
-}
-```
-
-### Event Filtering
-
-```
-*                         → all events on all items
-created                   → all created events
-*:users                   → all events in "users" collection
-created:users:jane*       → created events in "users" where key starts with "jane"
-```
-
-### Event Ordering
-
-- Events are processed in order within a collection (same partition)
-- Handlers across different partitions may execute in parallel
-- On handler failure: exponential backoff retry for up to 24 hours, then dropped
 
 ---
 
@@ -241,9 +191,13 @@ actors:
     edges: {}
 ```
 
+`updateItem` needs an existing item: the first call for a new hour fails with `ITEM_DOES_NOT_EXIST`. Put a create-only `putItem` (`value: { count: 0 }`, `continueOnError: true`) in front of it; once the item exists that write fails harmlessly with `ITEM_ALREADY_EXISTS` and the increment runs.
+
 ### CRUD Operations for Web App
 
-**Create / Update an item:**
+A WebhookTriggerActor emits `body` and `queryParams` (there are no path params), so ids for GET and DELETE come from the query string.
+
+**Create an item** (create-only: an existing `productId` fails with `ITEM_ALREADY_EXISTS`):
 ```yaml
 configuration:
   options:
@@ -260,13 +214,15 @@ configuration:
       meta: true
 ```
 
+**Replace an item:** the same `putItem` with `overwrite: true` under `options`. To change only some fields, use `updateItem` instead.
+
 **Read a single item:**
 ```yaml
 configuration:
   options:
     action: getItem
     collection: products
-    key: ${{ msg.webhook.params.productId }}
+    key: ${{ msg.webhook.queryParams.productId }}
     options:
       meta: true
 ```
@@ -277,20 +233,20 @@ configuration:
   options:
     action: deleteItem
     collection: products
-    keys: ${{ msg.webhook.params.productId }}
+    keys: ${{ msg.webhook.queryParams.productId }}
 ```
 
-**List items (query):**
+**List items by label (query):** `options.label` names the label; `expression` matches its value.
 ```yaml
 configuration:
   options:
     action: query
     collection: products
-    expression: ""
+    expression: ${{ msg.webhook.queryParams.category }}
     options:
+      label: category
       limit: 25
       meta: true
-      label: ${{ msg.webhook.query.category }}
 ```
 
 ---
@@ -301,11 +257,11 @@ configuration:
 |----------|--------|
 | Store callback tokens for async workflows | `putItem` |
 | Retrieve data by key | `getItem` |
-| Track state across workflow runs | `putItem` / `getItem` |
+| Track state across workflow runs | `putItem` with `options.overwrite: true` / `getItem` |
 | Rate limiting / counting | `updateItem` with `atomicCounters` |
 | List or search stored items | `query` |
 | Clean up old data | `deleteItem` |
-| Temporary data with auto-expiry | `putItem` with `ttl` |
+| Temporary data with auto-expiry | `putItem` with `options.ttl` |
 | Bulk import data | `batchWriteItem` |
 | Fetch multiple items at once | `batchGetItem` |
 | Atomic multi-item updates (e.g., transfers) | `transactWrite` |
@@ -335,9 +291,9 @@ EmailReplyTrigger -> CollectionActor (getItem) -> RouterActor -> NotifyCallbackT
 ### Pattern 2: Rate Limiting
 
 ```
-Trigger -> CollectionActor (updateItem + atomicCounters) -> RouterActor -> [Continue or Block]
-                                                                |
-                                                    [Check if count > limit]
+Trigger -> CollectionActor (putItem {count: 0}, continueOnError) -> CollectionActor (updateItem + atomicCounters) -> RouterActor -> [Continue or Block]
+                                                                                                                          |
+                                                                                                              [Check if count > limit]
 ```
 
 ### Pattern 3: CRUD Web Application
@@ -348,16 +304,18 @@ WebhookTrigger -> RouterActor -> CollectionActor (per action) -> WebhookResponse
           [Route by HTTP method:
            POST   -> putItem (create)
            GET    -> getItem or query (read/list)
-           PUT    -> putItem (update)
+           PUT    -> putItem with overwrite: true (replace) or updateItem (partial)
            DELETE -> deleteItem (delete)]
 ```
+
+A route that only reads or writes a collection and returns JSON fits in one webhook-enabled UniversalTriggerActor instead — see [Universal Trigger vs Webhook Trigger](../SKILL.md#universal-trigger-vs-webhook-trigger-http-endpoints).
 
 ### Pattern 4: Background Job Queue
 
 ```
 Trigger -> CollectionActor (putItem) -> [enqueue message with status=pending]
 
-ScheduledTrigger -> CollectionActor (query label=pending) -> CollectionActor (updateItem + condition) -> [process] -> CollectionActor (updateItem status=completed)
+ScheduledTrigger -> CollectionActor (query status label = pending) -> CollectionActor (updateItem + conditions) -> [process] -> CollectionActor (updateItem status=completed)
                                                                        |
                                                           [Claim with condition to prevent double-processing]
 ```

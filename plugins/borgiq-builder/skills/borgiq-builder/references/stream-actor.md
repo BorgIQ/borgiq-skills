@@ -4,7 +4,7 @@ StreamActor is a **Task Actor** that provides YAML-based access to the [Stream A
 
 For full API documentation including every action's parameters, cursor semantics, lifecycle, the SDK helpers (Deno/Python), the REST routes, tailing over SSE, error codes and limits, see [stream-api.md](stream-api.md).
 
-> **Streams must be created before use** — an `appendData` or `readStream` against a slug that was never created (or that has expired) fails with `STREAM_NOT_FOUND`. Nothing auto-creates a stream. Provision streams the same way you provision collections, in an idempotent migration step (see [collection-migrations.md](collection-migrations.md)).
+> **Streams must be created before use** — an `appendData` or `readStream` against a slug that was never created (or that has expired) fails with `STREAM_NOT_FOUND`. Nothing auto-creates a stream. Provision streams the same way you provision collections, in an idempotent migration step (see [collection-migrations.md](collection-migrations.md#provisioning-streams)).
 
 > **A stream expires unless you say otherwise** — with neither `idleTtlSeconds` nor `persistent: true`, a stream is hard-deleted **one hour** after its last append, records and all. Set `persistent: true` for anything an app or a scheduled consumer depends on; use a TTL (60 s – 30 days) for scratch logs. The two are mutually exclusive. See [Lifecycle](stream-api.md#lifecycle-ttl-and-persistence).
 
@@ -373,7 +373,7 @@ Producers only append. Consumers are separate flows that read from a cursor. Bec
 
 ```
 ScheduledTrigger → Collection getItem (cursor) → StreamActor getStreamInfo → Router (moved?)
-  → StreamActor readStream → process → Collection putItem (nextCursor)
+  → StreamActor readStream → process → Collection putItem (nextCursor, overwrite: true)
 ```
 
 The `getStreamInfo` gate is what makes a one-minute schedule affordable: most ticks end after one cheap probe. Persist the cursor after processing for at-least-once, before for at-most-once — and say which in the actor description.
@@ -398,7 +398,7 @@ Slug from the lower-cased flow-run id (`ctx.flowrun.id.toLowerCase()`) — ids c
 
 ### Pattern 5: Provisioning
 
-Add a `createStream` (`persistent: true`) step to the app's migration runner, alongside its `createCollection`, and swallow `STREAM_ALREADY_EXISTS` on re-runs — see [collection-migrations.md](collection-migrations.md). A stream-backed app without a provisioning step works in the dev workspace where the stream was hand-created and then 404s in production.
+Add a `createStream` (`persistent: true`) step to the app's migration runner, alongside its `createCollection`, and swallow `STREAM_ALREADY_EXISTS` on re-runs — see [collection-migrations.md](collection-migrations.md#provisioning-streams). A stream-backed app without a provisioning step works in the dev workspace where the stream was hand-created and then 404s in production.
 
 ---
 

@@ -102,7 +102,7 @@ A shared collection has a discoverability problem that a one-entity collection d
 |-----|---------|-----------|
 | `$meta` | **Required.** The collection manifest: app name, applied `schemaVersion`, and the `entities` index of every key prefix in the collection | Migration runner, at the end of **every** invoke, with `overwrite: true` |
 | `$migration:<id>` | Migration ledger — one row per applied migration | Migration runner |
-| `$counter:<name>` | Atomic counters (`updateItem` + `atomicCounters`), e.g. `$counter:ticketNumber` | App code |
+| `$counter:<name>` | Atomic counters (`updateItem` + `atomicCounters`), e.g. `$counter:ticketNumber` | Seeded at 0 by the migration runner (`updateItem` cannot create it); incremented by app code |
 | `$<anything-else>` | Other operational singletons (locks, cursors, cached config) | App code |
 
 `$` rows are **never entity data** and never appear in entity prefix queries (`ticket:*`), so they cost nothing at read time.
@@ -164,7 +164,7 @@ A collection has at most **15 label slots** (`MAX_LABEL_SLOTS`), shared by every
 - **It matches how the platform is built.** Single-table design keeps related data co-located and readable in one round trip. A collection is one partition key in a table that is already shared by every workspace, so "one collection per entity" buys no schema, index, or isolation benefit — it only fragments the data across partition keys you then have to provision and discover separately.
 - **Transactions and batch operations stay natural.** `transactWrite` across a ticket and its activity row, or `batchGetItem` for a ticket plus its assignee, address one collection with different key prefixes.
 - **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)). The `$meta` manifest it writes is the single place that says what the collection contains.
-- **Collection budget.** The API reference lists a per-workspace collection limit (100, plan-configurable). Even where it is not binding, an app that burns six slots for one logical database is waste.
+- **Collection count.** An app that uses six collections for one logical database multiplies provisioning, manifests, and discovery for no benefit.
 
 ### Capacity model: what one collection carries
 
@@ -186,7 +186,7 @@ A collection is one DynamoDB partition key, so it inherits DynamoDB's per-partit
 2. **Label only what you query by.** Every label is a GSI write. The slot cap is 15, but declare only the two or three labels the UI actually filters on; use key prefixes and ranges for everything else.
 3. **Don't funnel every action into one hot item.** A `$counter:ticketNumber` hit per *create* is fine (hundreds/s). A per-request `updateItem` on one shared singleton (a global "last activity" row, a `$meta` you touch from app code) is not — keep per-user state in `user:<id>` rows, and leave `$meta` to the migration runner.
 
-**When you actually outgrow it:** sustained writes approaching ~1,000 KB/s on one collection for minutes at a time (observed as `THROUGHPUT_EXCEEDED` (429) on writes — distinct from `RATE_LIMITED`, which is the platform's per-org request cap). Then shard **by collection** — `ticketing-0` … `ticketing-3` chosen by a hash of the entity id, or move the single hottest entity type into its own collection — and give each shard its own `$meta`. That is the only throughput reason to have more than one collection per app, and the [Queue Pattern](#queue-pattern-using-collections) is the documented instance of it.
+**When you actually outgrow it:** sustained writes approaching ~1,000 KB/s on one collection for minutes at a time (observed as `THROUGHPUT_EXCEEDED` (429) on writes). Then shard **by collection** — `ticketing-0` … `ticketing-3` chosen by a hash of the entity id, or move the single hottest entity type into its own collection — and give each shard its own `$meta`. That is the only throughput reason to have more than one collection per app, and the [Queue Pattern](#queue-pattern-using-collections) is the documented instance of it.
 
 **Read-after-write:** because reads are eventually consistent, don't write and immediately `getItem` the same key to "confirm" — use the `{ key, value }` the write returns. Use `conditions` for correctness under concurrency and `transactGet` when a consistent multi-item snapshot matters.
 
@@ -233,10 +233,13 @@ configuration:
   "slug": "callback-tokens",
   "name": "Callback Tokens",
   "description": "Stores callback tokens keyed by thread ID",
-  "labels": ["email", "async"],
-  "createdAt": "2026-03-19T10:00:00.000Z"
+  "labels": ["email", "async", null, null, null, null, null, null, null, null, null, null, null, null, null],
+  "createdAt": "2026-03-19T10:00:00.000Z",
+  "updatedAt": "2026-03-19T10:00:00.000Z"
 }
 ```
+
+`labels` holds the 15 label slots in order: `null` is unused, `{ name, deletedAt }` is a label still being removed.
 
 ---
 
@@ -249,7 +252,7 @@ Lists all collections with pagination.
 |--------|------|----------|-------------|
 | `action` | `"listCollections"` | Yes | Must be `listCollections` |
 | `options.startKey` | string | No | Pagination start key from a previous result |
-| `options.limit` | number (1-100) | No | Number of collections to return (default: 50) |
+| `options.limit` | number (1-100) | No | Maximum collections per page (default: 100). Collections being deleted are skipped, so a page can hold fewer |
 
 **Example:**
 ```yaml
@@ -263,24 +266,22 @@ configuration:
 **Emitted Message:**
 ```json
 {
-  "collections": [
+  "items": [
     {
       "slug": "callback-tokens",
       "name": "Callback Tokens",
       "description": "Stores callback tokens keyed by thread ID",
-      "labels": ["email", "async"],
-      "createdAt": "2026-03-19T10:00:00.000Z"
-    },
-    {
-      "slug": "user-preferences",
-      "name": "User Preferences",
-      "labels": [],
-      "createdAt": "2026-03-18T08:30:00.000Z"
+      "labels": ["email", "async", null, null, null, null, null, null, null, null, null, null, null, null, null],
+      "createdAt": "2026-03-19T10:00:00.000Z",
+      "updatedAt": "2026-03-19T10:00:00.000Z"
     }
   ],
-  "lastKey": "user-preferences"
+  "lastKey": "callback-tokens",
+  "count": 1
 }
 ```
+
+`lastKey` (a slug) is present when more collections remain; pass it back as `options.startKey`.
 
 ---
 
@@ -294,7 +295,7 @@ Updates a collection's name, description, or labels.
 | `action` | `"updateCollection"` | Yes | Must be `updateCollection` |
 | `slug` | string | Yes | Slug of the collection to update |
 | `name` | string | No | New display name |
-| `description` | string \| null | No | New description, or `null` to remove |
+| `description` | string | No | New description; an empty string clears it (`null` is rejected) |
 | `addLabels` | array of strings | No | Labels to add |
 | `removeLabels` | array of strings | No | Labels to remove |
 
@@ -311,13 +312,14 @@ configuration:
       - async
 ```
 
-**Emitted Message:**
+**Emitted Message** (the removed `async` slot stays reserved until its cleanup finishes; `production` takes the first free slot):
 ```json
 {
   "slug": "callback-tokens",
   "name": "Callback Tokens",
   "description": "Stores callback tokens for async email workflows",
-  "labels": ["email", "production"],
+  "labels": ["email", { "name": "async", "deletedAt": "2026-03-19T12:00:00.000Z" }, "production", null, null, null, null, null, null, null, null, null, null, null, null],
+  "createdAt": "2026-03-19T10:00:00.000Z",
   "updatedAt": "2026-03-19T12:00:00.000Z"
 }
 ```
@@ -326,7 +328,7 @@ configuration:
 
 ### deleteCollection
 
-Deletes a collection and all its items.
+Marks a collection for deletion; a background job deletes its items. Item actions on the slug then fail with `COLLECTION_NOT_FOUND`, and re-creating it fails with `COLLECTION_DELETING` until cleanup finishes.
 
 **Options:**
 | Option | Type | Required | Description |
@@ -346,7 +348,7 @@ configuration:
 ```json
 {
   "slug": "old-tokens",
-  "deletedAt": "2026-03-19T14:00:00.000Z"
+  "status": "deleting"
 }
 ```
 
@@ -365,9 +367,9 @@ Stores a value under a key in a collection. **Create-only by default**: `overwri
 | `collection` | string | Yes | The collection to put the item into |
 | `key` | string | Yes | The key for the item (max 256 chars, must not contain `#`) |
 | `value` | any | Yes | The value to store |
-| `labels` | record\<string, string \| null\> | No | Optional labels for the item |
-| `ttl` | number \| string \| null | No | Optional time-to-live (seconds as number, ISO-8601 string, or null to remove) |
-| `options.overwrite` | boolean | No | Whether to overwrite existing items (default: `false` — an existing key fails with `ITEM_ALREADY_EXISTS`) |
+| `labels` | record\<string, string \| null\> | No | Optional labels for the item. Each label must be declared on the collection |
+| `options.ttl` | number \| string | No | Expiry: seconds from now (a number at or above the current epoch time is an absolute epoch timestamp) or an ISO-8601 string. Only here: a top-level `ttl` is dropped and the item never expires |
+| `options.overwrite` | boolean | No | Whether to overwrite existing items (default: `false` — an existing key fails with `ITEM_ALREADY_EXISTS`). An overwrite replaces the whole item, including its labels, TTL, and `createdAt` |
 | `options.created` | integer | No | Epoch seconds for created-timestamp integrity check (use with `overwrite: true`) |
 | `options.meta` | boolean | No | Whether to include metadata in the result |
 | `conditions` | record\<string, unknown\> | No | Conditional expressions for the put operation (applies to data fields only, not labels) |
@@ -397,8 +399,8 @@ configuration:
     labels:
       type: user-session
       region: us-east-1
-    ttl: 86400
     options:
+      ttl: 86400
       meta: true
 ```
 
@@ -445,7 +447,7 @@ Retrieves a single item by key. Returns `null` if the item does not exist.
 | `collection` | string | Yes | The collection to get the item from |
 | `key` | string | Yes | The key of the item to get |
 | `options.meta` | boolean | No | Whether to include metadata in the result |
-| `options.label` | string | No | Filter by label |
+| `options.label` | string | No | Look up by label instead of key: returns one item whose value for this label equals `key` |
 
 **Example:**
 ```yaml
@@ -476,7 +478,7 @@ null
 
 ### updateItem
 
-Partially updates an existing item's value, labels, TTL, or atomically increments counters.
+Partially updates an existing item's value or labels, or atomically increments counters. It does not create items: `value` fields or `atomicCounters` on a missing key fail with `ITEM_DOES_NOT_EXIST` (404), so `putItem` first. It cannot set a TTL (a `ttl` field is dropped).
 
 **Options:**
 | Option | Type | Required | Description |
@@ -486,7 +488,6 @@ Partially updates an existing item's value, labels, TTL, or atomically increment
 | `key` | string | Yes | The key of the item to update |
 | `value` | record\<string, any\> | No | Partial value fields to merge into the existing value |
 | `labels` | record\<string, string \| null\> | No | Labels to update (null to remove a label) |
-| `ttl` | number \| string \| null | No | Time-to-live to set (null to remove) |
 | `options.meta` | boolean | No | Whether to include metadata in the result |
 | `options.removeNulls` | boolean | No | Remove fields set to `null` (default: `true`) |
 | `conditions` | record\<string, unknown\> | No | Conditional expressions (applies to data fields only, not labels). See [Condition Expressions](#condition-expressions) |
@@ -510,7 +511,7 @@ configuration:
   options:
     action: updateItem
     collection: rate-limits
-    key: api-calls-${{ Q.dateFns.format(Q.now(), 'yyyy-MM-dd-HH') }}
+    key: api-calls-${{ Q.dateFns.format(Q.now(), 'yyyy-MM-dd-HH') }}   # must already exist (putItem it first)
     atomicCounters:
       count: 1
     options:
@@ -557,7 +558,7 @@ Deletes one or more items by key.
 | `action` | `"deleteItem"` | Yes | Must be `deleteItem` |
 | `collection` | string | Yes | The collection to delete items from |
 | `keys` | string \| array of strings | Yes | A single key or array of keys to delete (max 25) |
-| `conditions` | record\<string, unknown\> | No | Conditional expressions (applies to data fields only, not labels) |
+| `conditions` | record\<string, unknown\> | No | Conditional expressions (applies to data fields only, not labels). Applied only when deleting one key; ignored for several |
 
 **Example (single key):**
 ```yaml
@@ -580,10 +581,14 @@ configuration:
       - key-3
 ```
 
-**Emitted Message:**
+**Emitted Message** — every requested key, including keys that did not exist:
 ```json
 {
-  "deleted": 3
+  "deleted": [
+    { "collection": "temp-data", "key": "key-1" },
+    { "collection": "temp-data", "key": "key-2" },
+    { "collection": "temp-data", "key": "key-3" }
+  ]
 }
 ```
 
@@ -602,7 +607,7 @@ Queries items in a collection using an expression with support for pagination, l
 | `options.limit` | number (1-1000) | No | Maximum number of items to return (default: 100) |
 | `options.startKey` | record\<string, string\> | No | Pagination start key from a previous result's `lastKey` |
 | `options.meta` | boolean | No | Whether to include metadata in results |
-| `options.label` | string | No | Filter by label |
+| `options.label` | string | No | Query this label's index instead of the key: `expression` then matches the label value (see [Query by Label](#query-by-label-gsi)) |
 | `options.reverse` | boolean | No | Whether to reverse the sort order |
 
 **Example:**
@@ -611,7 +616,7 @@ configuration:
   options:
     action: query
     collection: callback-tokens
-    expression: gmail-
+    expression: gmail-*
     options:
       limit: 50
       meta: true
@@ -628,7 +633,6 @@ configuration:
         "createdAt": "2026-03-19T10:00:00.000Z"
       },
       "collection": "callback-tokens",
-      "labels": {},
       "createdAt": "2026-03-19T10:00:00.000Z",
       "updatedAt": "2026-03-19T10:00:00.000Z"
     },
@@ -639,14 +643,12 @@ configuration:
         "createdAt": "2026-03-19T09:30:00.000Z"
       },
       "collection": "callback-tokens",
-      "labels": {},
       "createdAt": "2026-03-19T09:30:00.000Z",
       "updatedAt": "2026-03-19T09:30:00.000Z"
     }
   ],
   "lastKey": {
-    "pk": "...",
-    "sk": "..."
+    "SK": "gmail-thread456"
   },
   "count": 2
 }
@@ -822,13 +824,13 @@ configuration:
       balance: ">= 100"
 ```
 
-**Complex condition with OR:**
+**Complex condition with OR** (replaces an existing order only if the stored one matches; on a key with no item every comparison is false, so the write fails with `CONDITION_FAILED`):
 ```yaml
 configuration:
   options:
     action: putItem
     collection: orders
-    key: order-${{ Q.ulid() }}
+    key: order-${{ msg.trigger.body.orderId }}
     value:
       status: processing
     conditions:
@@ -847,7 +849,7 @@ configuration:
 
 ## Concurrent Update Patterns
 
-> **Warning: Do NOT use `getItem` → modify → `putItem` in parallel workflows.** BorgIQ runs downstream actors concurrently. If two actors read the same item, modify it, and write it back, one update will silently overwrite the other.
+> **Warning: Do NOT use `getItem` → modify → `putItem` (`overwrite: true`) in parallel workflows.** BorgIQ runs downstream actors concurrently. If two actors read the same item, modify it, and write it back, one update will silently overwrite the other.
 
 ```
 Actor A: getItem → reads { count: 5 }
@@ -860,7 +862,7 @@ Use the patterns below instead.
 
 ### Pattern 1: Partial Updates with `updateItem`
 
-When parallel actors update **different fields** of the same item, `updateItem` merges safely — each write only touches its own fields.
+When parallel actors update **different fields** of the same existing item, `updateItem` merges safely — each write only touches its own fields. Create the item (`putItem`) before the parallel branches start; `updateItem` does not create it.
 
 ```yaml
 # Actor A: updates field "serviceA_status"
@@ -903,6 +905,8 @@ configuration:
       totalProcessed: 1
       errors: ${{ inputs.hasError ? 1 : 0 }}
 ```
+
+The item must exist: the first write of each day fails with `ITEM_DOES_NOT_EXIST`. Precede it with a create-only `putItem` of zeroed fields (`continueOnError: true`), which fails harmlessly with `ITEM_ALREADY_EXISTS` once the item exists.
 
 Equivalent inline syntax using `$add`:
 
@@ -955,21 +959,22 @@ export default async function receive(req: Request): Promise<Response> {
       version: current.version + 1,
     };
 
-    // 3. Write with version condition
-    const result = await collectionsApi({
-      action: "updateItem",
-      collection: "aggregated-status",
-      key: req.inputs.taskId,
-      value: updated,
-      conditions: current.version === 0
-        ? { version: "not_exists" }  // First write
-        : { version: `= ${current.version}` },
-    });
+    // 3. Write with a version check. The first write is a create-only putItem:
+    //    updateItem cannot create an item (ITEM_DOES_NOT_EXIST).
+    const result = current.version === 0
+      ? await collectionsApi({ action: "putItem", collection: "aggregated-status", key: req.inputs.taskId, value: updated })
+      : await collectionsApi({
+          action: "updateItem",
+          collection: "aggregated-status",
+          key: req.inputs.taskId,
+          value: updated,
+          conditions: { version: `= ${current.version}` },
+        });
 
     if (result.ok) return { results: updated };
 
-    // 4. Conflict — retry with fresh data
-    if (result.error?.code === "CONDITION_FAILED") continue;
+    // 4. Conflict — retry with fresh data (ITEM_ALREADY_EXISTS: another run created it first)
+    if (result.error?.code === "CONDITION_FAILED" || result.error?.code === "ITEM_ALREADY_EXISTS") continue;
     throw new Error(`Collection API error: ${JSON.stringify(result.error)}`);
   }
 
@@ -1008,7 +1013,7 @@ configuration:
 | Parallel numeric aggregation (counts, totals) | `atomicCounters` / `$add` | CollectionActor |
 | Read-modify-write with conflict detection + retry | `conditions` + retry loop | DenoActor/PythonActor via `biqApi` |
 | Multi-item atomic update (all-or-nothing) | `transactWrite` with conditions | CollectionActor |
-| Last-write-wins (data loss acceptable) | `putItem` without conditions | CollectionActor |
+| Last-write-wins (data loss acceptable) | `putItem` with `options.overwrite: true` and no conditions | CollectionActor |
 
 ---
 
@@ -1049,7 +1054,6 @@ configuration:
       "key": "user:001",
       "value": { "name": "Alice", "email": "alice@example.com" },
       "collection": "crm",
-      "labels": {},
       "createdAt": "2026-03-18T08:00:00.000Z",
       "updatedAt": "2026-03-19T10:00:00.000Z"
     },
@@ -1058,7 +1062,6 @@ configuration:
       "key": "pref:001",
       "value": { "theme": "dark", "language": "en" },
       "collection": "crm",
-      "labels": {},
       "createdAt": "2026-03-18T08:00:00.000Z",
       "updatedAt": "2026-03-18T08:00:00.000Z"
     }
@@ -1072,13 +1075,13 @@ Items that are not found are returned as `null` in the corresponding array posit
 
 ### batchWriteItem
 
-Writes and/or deletes multiple items across one or more collections in a single operation.
+Writes and/or deletes multiple items across one or more collections in a single operation. A `put` here always replaces an existing item with the same key: there is no create-only check and no `overwrite` flag.
 
 **Options:**
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `action` | `"batchWriteItem"` | Yes | Must be `batchWriteItem` |
-| `items` | array | Yes | Items to write, up to 25. Each item has: `operation` (`"put"` or `"delete"`), `collection`, `key`, and optionally `value` (required for put), `ttl`, `labels` |
+| `items` | array | Yes | Items to write, up to 25. Each item has: `operation` (`"put"` or `"delete"`), `collection`, `key`, and optionally `value` (required for put), `ttl` (top-level on each item, same forms as `putItem`'s `options.ttl`), `labels` |
 | `options.meta` | boolean | No | Whether to include metadata in results |
 
 **Example:**
@@ -1168,7 +1171,8 @@ configuration:
       "key": "account-receiver",
       "value": { "balance": 200, "name": "Bob" }
     }
-  ]
+  ],
+  "count": 2
 }
 ```
 
@@ -1184,7 +1188,7 @@ Writes, updates, deletes, or checks multiple items atomically. The entire transa
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `action` | `"transactWrite"` | Yes | Must be `transactWrite` |
-| `items` | array | Yes | Items to transact, up to 100. Each item has: `operation` (`"put"`, `"update"`, `"delete"`, `"check"`), `collection`, `key`, and optionally `value`, `labels`, `ttl`, `conditions`, `atomicCounters` |
+| `items` | array | Yes | Items to transact, up to 100. Each item has: `operation` (`"put"`, `"update"`, `"delete"`, `"check"`), `collection`, `key`, and optionally `value`, `labels`, `conditions`, `atomicCounters`, and `options` (`ttl` and `overwrite`, for puts). A `put` is create-only unless it has `options.overwrite: true` or `conditions`; an `update` that sets `value` fields or counters needs an existing item |
 | `options.idempotencyKey` | string | No | Idempotency key to prevent duplicate transactions |
 
 **Example:**
@@ -1199,8 +1203,7 @@ configuration:
         atomicCounters:
           balance: -100
         conditions:
-          balance:
-            $gte: 100
+          balance: ">= 100"
       - operation: update
         collection: accounts
         key: account-receiver
@@ -1233,22 +1236,22 @@ Collections can be accessed programmatically from DenoActor code via `biqApi`. T
 
 ### API Helper Pattern
 
-All collection operations go through `POST /collections` with an `action` field in the request body. The HTTP response is always `{ ok: boolean, value: T, error?: { code, message } }`, but `T` varies per action:
+All collection operations go through `POST /collections` with an `action` field in the request body. The HTTP response is `{ ok: boolean, value: T, error?: { code, message } }` (except the schema and 500 errors in [Error Codes](#error-codes)), and `T` varies per action:
 
 | Action | Return type (`T`) |
 |--------|------------------|
-| `createCollection` | `{ slug, name, description?, labels, createdAt }` |
-| `listCollections` | `{ collections: [{ slug, name, description?, labels, createdAt }], lastKey? }` |
-| `updateCollection` | `{ slug, name, description?, labels, updatedAt }` |
-| `deleteCollection` | `{ slug, deletedAt }` |
+| `createCollection` | `{ slug, name, description?, labels, createdAt, updatedAt }` (`labels`: 15 slots, `null` when unused) |
+| `listCollections` | `{ items: [{ slug, name, description?, labels, createdAt, updatedAt }], lastKey?, count }` |
+| `updateCollection` | `{ slug, name, description?, labels, createdAt, updatedAt }` |
+| `deleteCollection` | `{ slug, status: "deleting" }` |
 | `putItem` | `{ key, value }` (+ `collection, labels, createdAt, updatedAt, ttl` when `meta: true`) |
 | `getItem` | `{ key, value }` (+ meta fields) **or `null` if not found** |
 | `updateItem` | `{ key, value }` (+ meta fields) |
-| `deleteItem` | `{ deleted: number }` |
+| `deleteItem` | `{ deleted: [{ collection, key }] }` |
 | `query` | `{ items: [{ key, value, ...meta? }], count, lastKey? }` |
 | `batchGetItem` | `{ items: [{ key, value, ...meta? } \| null] }` |
 | `batchWriteItem` | `{ processed, items?, deleted? }` |
-| `transactGet` | `{ items: [{ key, value, ...meta? } \| null] }` |
+| `transactGet` | `{ items: [{ key, value, ...meta? } \| null], count }` |
 | `transactWrite` | `{ processed }` |
 
 ```typescript
@@ -1261,9 +1264,10 @@ type CollectionMeta = {
   slug: string;
   name: string;
   description?: string;
-  labels: string[];
+  /** 15 label slots in order: null = unused; { name, deletedAt } = being removed. */
+  labels: (string | null | { name: string; deletedAt: string })[];
   createdAt: string;
-  updatedAt?: string;
+  updatedAt: string;
 };
 
 /** An item envelope. `V` is the item's `value` shape. Meta fields present only with `options.meta: true`. */
@@ -1280,14 +1284,14 @@ type CollectionItem<V = unknown> = {
 // ---- Per-action result types ----
 
 type CreateCollectionResult = CollectionMeta;
-type ListCollectionsResult  = { collections: CollectionMeta[]; lastKey?: string };
+type ListCollectionsResult  = { items: CollectionMeta[]; lastKey?: string; count: number };
 type UpdateCollectionResult = CollectionMeta;
-type DeleteCollectionResult = { slug: string; deletedAt: string };
+type DeleteCollectionResult = { slug: string; status: "deleting" };
 
 type PutItemResult<V = unknown>    = CollectionItem<V>;
 type GetItemResult<V = unknown>    = CollectionItem<V> | null;
 type UpdateItemResult<V = unknown> = CollectionItem<V>;
-type DeleteItemResult              = { deleted: number };
+type DeleteItemResult              = { deleted: Array<{ collection: string; key: string }> };
 
 type QueryResult<V = unknown> = {
   items: CollectionItem<V>[];
@@ -1301,7 +1305,7 @@ type BatchWriteItemResult<V = unknown> = {
   items?: CollectionItem<V>[];
   deleted?: Array<{ collection: string; key: string }>;
 };
-type TransactGetResult<V = unknown> = { items: (CollectionItem<V> | null)[] };
+type TransactGetResult<V = unknown> = { items: (CollectionItem<V> | null)[]; count: number };
 type TransactWriteResult            = { processed: number };
 
 // ---- Helper ----
@@ -1407,7 +1411,7 @@ await collectionsApi({
   labels: { status: "sale" },
 });
 
-// updateItem — atomic counter via $add shorthand
+// updateItem — atomic counter via $add shorthand (the item must already exist)
 await collectionsApi({
   action: "updateItem",
   collection: "metrics",
@@ -1551,18 +1555,18 @@ Different collection operations return different response shapes. This is critic
 
 | Action | Response Shape | Top-level Fields |
 |--------|---------------|-----------------|
-| `createCollection` | Object | `slug`, `name`, `description?`, `labels`, `createdAt` |
-| `listCollections` | Object with array | `collections[]`, `lastKey?` |
-| `updateCollection` | Object | `slug`, `name`, `description?`, `labels`, `updatedAt` |
-| `deleteCollection` | Object | `slug`, `deletedAt` |
+| `createCollection` | Object | `slug`, `name`, `description?`, `labels`, `createdAt`, `updatedAt` |
+| `listCollections` | Object with array | `items[]`, `lastKey?`, `count` |
+| `updateCollection` | Object | `slug`, `name`, `description?`, `labels`, `createdAt`, `updatedAt` |
+| `deleteCollection` | Object | `slug`, `status` (`"deleting"`) |
 | `putItem` | Object | `key`, `value`, + meta fields when `meta: true` |
 | `getItem` | Object **or `null`** | `key`, `value`, + meta fields when `meta: true`; **entire response is `null` if not found** |
 | `updateItem` | Object | `key`, `value`, + meta fields when `meta: true` |
-| `deleteItem` | Object | `deleted` (count) |
+| `deleteItem` | Object with array | `deleted[]` (`{ collection, key }` per requested key) |
 | `query` | Object with array | `items[]`, `count`, `lastKey?` |
 | `batchGetItem` | Object with array | `items[]` (nulls for missing items) |
 | `batchWriteItem` | Object with arrays | `processed`, `items[]?`, `deleted[]?` |
-| `transactGet` | Object with array | `items[]` (nulls for missing items) |
+| `transactGet` | Object with array | `items[]` (nulls for missing items), `count` |
 | `transactWrite` | Object | `processed` |
 
 ### Downstream Access Patterns
@@ -1601,16 +1605,16 @@ hasMore: ${{ !Q.isNil(msg.query_results.lastKey) }}
 startKey: ${{ msg.query_results.lastKey }}
 ```
 
-**listCollections** (returns `collections` array):
+**listCollections** (returns `items` array):
 ```yaml
 # Access collection list
-firstSlug: ${{ msg.list_result.collections[0].slug }}
+firstSlug: ${{ msg.list_result.items[0].slug }}
 hasMore: ${{ !Q.isNil(msg.list_result.lastKey) }}
 ```
 
-**deleteItem** (returns count only):
+**deleteItem** (returns the requested keys):
 ```yaml
-deletedCount: ${{ msg.delete_result.deleted }}
+deletedCount: ${{ msg.delete_result.deleted.length }}
 ```
 
 **batchGetItem / transactGet** (returns `items` array, `null` for missing):
@@ -1644,22 +1648,20 @@ const queryResult = await collectionsApi({ action: "query", collection: "product
 // queryResult is: { items: [...], count: 5, lastKey?: {...} }
 
 const listResult = await collectionsApi({ action: "listCollections" });
-// listResult is: { collections: [...], lastKey?: "..." }
+// listResult is: { items: [...], lastKey?: "...", count: 1 }
 ```
 
 ---
 
 ## Error Codes
 
+A request that breaks the request schema (unknown `action`, key with `#` or over 256 characters, bad slug, empty `expression`, non-string condition value, a limit or item count over its maximum) gets HTTP 400 `{ status, message: "Input validation error!", details }` with **no `code`**: a CollectionActor fails with a generic 400. Every other failure is `{ ok: false, error: { code, message } }`:
+
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `INVALID_KEY` | 400 | Key format is invalid or contains `#` |
-| `INVALID_ACTION` | 400 | Unknown action |
 | `INVALID_EXPRESSION` | 400 | Malformed query expression |
-| `INVALID_LABEL` | 400 | Label name not defined in collection schema |
-| `INVALID_COLLECTION_SLUG` | 400 | Collection slug format is invalid |
-| `BATCH_LIMIT_EXCEEDED` | 400 | More than 25 items in batch write or 100 in batch get |
-| `QUERY_LIMIT_EXCEEDED` | 400 | Limit exceeds 1000 |
+| `INVALID_CONDITION` | 400 | Malformed condition (empty, bad operator spacing such as `">=5"`, bad `between`/`in`/`size` syntax) |
+| `INVALID_LABEL` | 400 | Label name is not declared on the collection, or is being removed |
 | `LABEL_LIMIT_EXCEEDED` | 400 | Adding labels would exceed 15 active labels (`MAX_LABEL_SLOTS`). A collection created before the limit was raised from 5 keeps its original slot count until an operator runs the widen migration — hitting this at 5 on an older collection means that migration has not run yet |
 | `LABEL_NOT_FOUND` | 400 | Label name does not exist in collection |
 | `LABEL_DELETING` | 409 | Label is already being deleted |
@@ -1668,15 +1670,21 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | `COLLECTION_DELETING` | 409 | Collection is being deleted |
 | `CONDITION_FAILED` | 409 | Conditional write check failed |
 | `ITEM_ALREADY_EXISTS` | 409 | `putItem` with `overwrite: false` (the default) and item exists |
-| `ITEM_DOES_NOT_EXIST` | 404 | Item referenced does not exist |
+| `ITEM_DOES_NOT_EXIST` | 404 | `updateItem` set `value` fields or counters on a key with no item |
 | `CREATED_MISMATCH` | 409 | Created timestamp integrity check failed |
-| `TRANSACTION_FAILED` | 409 | One or more transaction items failed |
+| `TRANSACTION_FAILED` | 409 | One or more transaction items failed (for example a condition, or a create-only `put` on an existing key); `error.cancellationReasons` gives the per-item code |
 | `TRANSACTION_CONFLICT` | 409 | Concurrent transaction conflict |
-| `TRANSACTION_LIMIT_EXCEEDED` | 400 | More than 100 items in a transaction |
 | `TRANSACTION_DUPLICATE_ITEM` | 400 | Same collection+key appears more than once in a transaction |
-| `RATE_LIMITED` | 429 | Too many requests for this org/workspace |
+| `TRANSACTION_IN_PROGRESS` | 409 | A transaction with this `idempotencyKey` is still running |
+| `IDEMPOTENCY_MISMATCH` | 400 | An `idempotencyKey` was reused with different items |
+| `ITEM_TOO_LARGE` | 400 | Item exceeds 400 KB |
+| `EXPRESSION_TOO_LONG` / `EXPRESSION_LIMIT` | 400 | Conditions or updates too large, or too many attribute names/values |
+| `VALIDATION_ERROR` | 400 | Storage rejected the write (for example an empty-string label value) |
+| `SERIALIZATION_ERROR` | 400 | Value cannot be stored |
 | `THROUGHPUT_EXCEEDED` | 429 | DynamoDB throttled the partition (a collection's per-partition capacity, see the [capacity model](#capacity-model-what-one-collection-carries)); retry after a brief delay |
-| `RESULT_TOO_LARGE` | 413 | Query result exceeds 1MB |
+| `CONCURRENT_LIMIT` | 429 | Too many concurrent operations; retry after a brief delay |
+| (none) | 500 | Unexpected server error; the body is a plain message string, not the envelope |
+| `STORAGE_UNAVAILABLE` / `STORAGE_ERROR` | 503 | Storage temporarily unavailable; retry with backoff |
 
 ---
 
@@ -1685,19 +1693,17 @@ const listResult = await collectionsApi({ action: "listCollections" });
 | Field | Constraint |
 |-------|-----------|
 | Collection slug | 1-128 bytes, regex `/^[a-z0-9_-]+$/`, must not start with `__` |
-| Item key | 1-256 bytes (UTF-8), any characters except `#` |
+| Item key | 1-256 characters, any characters except `#` |
 | Label name | 1-64 chars, regex `/^[a-zA-Z0-9_-]+$/` |
-| Label value | Any string or `null` |
+| Label value | Non-empty string, or `null` to remove the label (an empty string fails with `VALIDATION_ERROR`) |
 | Labels per collection | Max 15 (`MAX_LABEL_SLOTS`; one GSI per slot, `GSI-L1`…`GSI-L15`) |
 | Query limit | 1-1000 (default 100) |
 | Batch get size | Max 100 items |
 | Batch write size | Max 25 items |
 | Transaction size | Max 100 items |
 | Transaction data | Max 4 MB aggregate |
-| Max conditions per operation | 20 |
 | Max item size | 400 KB (DynamoDB limit) |
 | Idempotency key | Max 36 chars, 10-minute window |
-| Max collections per workspace | 100 (configurable per plan) |
 
 ---
 
@@ -1711,73 +1717,64 @@ CollectionActor supports queue semantics by leveraging DynamoDB's lexicographic 
 - **Key format:** `{priority}:{timestamp}:{ulid}` — priority prefix enables priority queues (`0` = high, `1` = normal, `2` = low), timestamp ensures FIFO within priority, ULID guarantees uniqueness
   - Example: `1:2025-03-20T10:30:00.000Z:01HQXYZ`
 - **Labels:** `status` (pending/processing/completed/failed/dead), `consumer` (which worker claimed it), `type` (message type for routing)
-- **Value structure:**
+- **Value structure** at enqueue. Later steps add `claimedAt`, `timeoutAt`, `completedAt` and `error`; never store them as `null`, because `claimedAt: not_exists` treats a stored `null` as existing and the claim always fails.
 
 ```json
 {
   "payload": { "..." },
   "enqueuedAt": "2025-03-20T10:30:00.000Z",
   "attempts": 0,
-  "maxAttempts": 3,
-  "claimedAt": null,
-  "timeoutAt": null,
-  "completedAt": null,
-  "error": null
+  "maxAttempts": 3
 }
 ```
 
+Below, each snippet is a CollectionActor `configuration` with its `msgVar` in a comment. Conditions test value fields (`claimedAt`, `timeoutAt`), never labels such as `status`.
+
 ### Enqueue
 
-Use `putItem` with `overwrite: false` — the ULID in the key guarantees uniqueness:
+Use `putItem` (create-only by default) — the ULID in the key guarantees uniqueness:
 
 ```yaml
-actor:
-  type: CollectionActor
+# msgVar: enqueue_job
+configuration:
   options:
     action: putItem
     collection: queue-emails
-    key: "1:${{ new Date().toISOString() }}:${{ crypto.randomUUID().replace(/-/g, '').substring(0, 26) }}"
+    key: "1:${{ new Date().toISOString() }}:${{ Q.ulid() }}"
     value:
       payload: ${{ msg }}
       enqueuedAt: ${{ new Date().toISOString() }}
       attempts: 0
       maxAttempts: 3
-      claimedAt: null
-      timeoutAt: null
-      completedAt: null
-      error: null
     labels:
       status: pending
       type: welcome-email
-    options:
-      overwrite: false
 ```
 
 ### Dequeue (Claim)
 
 No atomic "pop" — use a two-step **query + conditional update**:
 
-1. **Query** by label `status=pending` (with `limit: 1`) to find the next message
-2. **updateItem** with condition to atomically claim it — if another worker already claimed it, the condition fails (`CONDITION_FAILED`) and you retry with the next message
+1. **Query** the `status` label for `pending` with `limit: 1`; route on `count > 0` before claiming.
+2. **updateItem** with condition `claimedAt: not_exists` to atomically claim it — if another worker already claimed it, the condition fails (`CONDITION_FAILED`) and you retry with the next message. Set `continueOnError: true` on this actor so a lost race does not fail the run.
 
 ```yaml
-# Step 1: Query for pending messages
-actor:
-  type: CollectionActor
+# Step 1 — msgVar: next_job
+configuration:
   options:
     action: query
     collection: queue-emails
-    expression: "*"
-    label: status=pending
-    limit: 1
+    expression: pending      # the label value
+    options:
+      label: status          # the label name
+      limit: 1
 
-# Step 2: Claim the message with conditional update
-actor:
-  type: CollectionActor
+# Step 2 — msgVar: claim_job
+configuration:
   options:
     action: updateItem
     collection: queue-emails
-    key: ${{ msg.items[0].key }}
+    key: ${{ msg.next_job.items[0].key }}
     value:
       claimedAt: ${{ new Date().toISOString() }}
       timeoutAt: ${{ new Date(Date.now() + 300000).toISOString() }}
@@ -1785,63 +1782,61 @@ actor:
         "$add": 1
     labels:
       status: processing
-      consumer: ${{ actor.id }}
-    condition:
+      consumer: ${{ ctx.flowrun.id }}
+    conditions:
       claimedAt: not_exists
 ```
 
 ### Complete
 
 ```yaml
-actor:
-  type: CollectionActor
+# msgVar: complete_job
+configuration:
   options:
     action: updateItem
     collection: queue-emails
-    key: ${{ msg.key }}
+    key: ${{ msg.claim_job.key }}
     value:
       completedAt: ${{ new Date().toISOString() }}
     labels:
       status: completed
-    condition:
+    conditions:
       claimedAt: exists
 ```
 
 ### Fail + Retry / Dead Letter
 
-Check the attempt count — either re-enqueue (reset to pending) or dead-letter:
+Check the attempt count — either re-enqueue (reset to pending) or dead-letter. `err.send_email` is the failed processing actor's error (it has `continueOnError: true`):
 
 ```yaml
-# Retry (attempts < maxAttempts) — release claim, reset to pending
-actor:
-  type: CollectionActor
+# Retry (attempts < maxAttempts) — release the claim, reset to pending. null removes a field or label.
+configuration:
   options:
     action: updateItem
     collection: queue-emails
-    key: ${{ msg.key }}
+    key: ${{ msg.claim_job.key }}
     value:
       claimedAt: null
       timeoutAt: null
-      error: ${{ msg.errorMessage }}
+      error: ${{ err.send_email.message }}
     labels:
       status: pending
-      consumer: ""
-    condition:
-      status: processing
+      consumer: null
+    conditions:
+      claimedAt: exists
 
 # Dead-letter (attempts >= maxAttempts)
-actor:
-  type: CollectionActor
+configuration:
   options:
     action: updateItem
     collection: queue-emails
-    key: ${{ msg.key }}
+    key: ${{ msg.claim_job.key }}
     value:
-      error: ${{ msg.errorMessage }}
+      error: ${{ err.send_email.message }}
     labels:
       status: dead
-    condition:
-      status: processing
+    conditions:
+      claimedAt: exists
 ```
 
 ### Visibility Timeout Reaper
@@ -1850,32 +1845,31 @@ A scheduled workflow that reclaims stale `processing` messages whose timeout has
 
 ```yaml
 # ScheduledTrigger runs every 5 minutes
-# Step 1: Query processing messages
-actor:
-  type: CollectionActor
+# Step 1 — msgVar: in_flight: query processing messages
+configuration:
   options:
     action: query
     collection: queue-emails
-    expression: "*"
-    label: status=processing
-    limit: 50
+    expression: processing
+    options:
+      label: status
+      limit: 50
 
-# Step 2: For each stale message (timeoutAt < now), reset to pending
-# Use a DenoActor to check timeoutAt and conditionally update
-actor:
-  type: CollectionActor
+# Step 2 — split msg.in_flight.items (split msgVar: stale, emitKey: item), then release each
+# message whose timeout passed. CONDITION_FAILED = not stale yet: set continueOnError: true.
+configuration:
   options:
     action: updateItem
     collection: queue-emails
-    key: ${{ msg.key }}
+    key: ${{ msg.stale.item.key }}
     value:
       claimedAt: null
       timeoutAt: null
     labels:
       status: pending
-      consumer: ""
-    condition:
-      claimedAt: exists
+      consumer: null
+    conditions:
+      timeoutAt: "< ${{ new Date().toISOString() }}"
 ```
 
 ### When This Works Well
@@ -1889,7 +1883,7 @@ This pattern fits moderate-throughput background job queues — email sending, w
 | **GSI eventual consistency** | A just-enqueued message might not appear in a label query for a few hundred milliseconds | Acceptable for most workloads; not suitable for sub-100ms latency requirements |
 | **No atomic pop** | Two workers can query the same message; one will win the conditional update, the other retries | The retry loop is cheap — conditional writes are fast |
 | **Hot partition** | A single high-volume queue concentrates writes on one PK | Shard across multiple collections (`queue-emails-0` through `queue-emails-3`) and round-robin consumers |
-| **Completed message cleanup** | Completed messages accumulate | Use TTL on completion (`ttl: 86400`) or a periodic cleanup job |
+| **Completed message cleanup** | Completed messages accumulate | `updateItem` cannot set a TTL: give each message an `options.ttl` at enqueue that outlasts its processing, or delete completed messages in a periodic cleanup job |
 | **Ordering guarantees** | FIFO within a priority tier, but the claim pattern means strict ordering isn't guaranteed under concurrency | If strict ordering matters, use a single consumer or add sequence numbers with conditional checks |
 
 ---
@@ -1902,14 +1896,14 @@ Each CollectionActor action maps to a specific DynamoDB operation. Understanding
 
 | Action | DynamoDB Command | Behavior |
 |--------|------------------|----------|
-| `putItem` | `PutCommand` | **Full item replacement.** Overwrites the entire item including all fields. |
+| `putItem` | `PutCommand` | **Create-only by default** (`ITEM_ALREADY_EXISTS` on an existing key). With `options.overwrite: true`, replaces the entire item: value, labels, TTL, and `createdAt`. |
 | `getItem` | `GetCommand` (or `QueryCommand` if label specified) | **Eventually consistent read** (DynamoDB default; the platform does not set `ConsistentRead`). Returns the full item or null. |
-| `updateItem` | `UpdateCommand` with `UpdateExpression` | **Shallow field-level merge.** Only specified top-level fields are updated; unmentioned fields are preserved. |
+| `updateItem` | `UpdateCommand` with `UpdateExpression` | **Shallow field-level merge on an existing item.** Only specified top-level fields are updated; unmentioned fields are preserved. Setting fields or counters on a missing key fails with `ITEM_DOES_NOT_EXIST`. |
 | `deleteItem` (single key) | `DeleteCommand` | Deletes one item. Supports conditions. |
-| `deleteItem` (multiple keys) | `BatchWriteCommand` | Deletes up to 25 items per batch. **No conditions support.** |
+| `deleteItem` (multiple keys) | `BatchWriteCommand` | Deletes up to 25 items per batch. **No conditions support** — `conditions` are ignored. |
 | `query` | `QueryCommand` | Reads items by key prefix, range, or exact match. Supports pagination. |
 | `batchGetItem` | `BatchGetCommand` | Reads up to 100 items in one call. Auto-chunks at 100. |
-| `batchWriteItem` | `BatchWriteCommand` | Writes up to 25 items per batch (put or delete). **No conditions, no atomic counters.** |
+| `batchWriteItem` | `BatchWriteCommand` | Writes up to 25 items per batch (put or delete). **No conditions, no atomic counters; a put replaces any existing item.** |
 | `transactWrite` | `TransactWriteCommand` | Up to 100 items in one atomic transaction. Supports put, update, delete, and condition checks. |
 | `transactGet` | `TransactGetCommand` | Up to 100 items in one consistent read. |
 
@@ -1945,12 +1939,12 @@ Each CollectionActor action maps to a specific DynamoDB operation. Understanding
 
 | Behavior | `putItem` | `updateItem` |
 |----------|-----------|--------------|
-| DynamoDB operation | `PutCommand` (full replace) | `UpdateCommand` (field-level SET/REMOVE) |
-| Unmentioned fields | **Deleted** (full replace) | **Preserved** (only listed fields change) |
+| DynamoDB operation | `PutCommand` (create, or full replace with `overwrite: true`) | `UpdateCommand` (field-level SET/REMOVE) |
+| Unmentioned fields | **Deleted** on an overwrite (full replace) | **Preserved** (only listed fields change) |
 | Nested objects | Stored as-is | Replaces entire top-level field |
 | Atomic counters | Not supported | Supported (`atomicCounters` and `$add`) |
 | Null values | Stored as null | Removed from item (when `removeNulls: true`, which is the default) |
-| Default behavior | Fails if item exists (use `overwrite: true` to allow) | Creates item if it doesn't exist |
+| Default behavior | Fails if item exists (use `overwrite: true` to allow) | Fails with `ITEM_DOES_NOT_EXIST` if the item doesn't exist |
 | Conditions | Supported | Supported |
 
 ### Atomic Counter Implementation
@@ -1962,7 +1956,7 @@ SET #_data.#d_count = if_not_exists(#_data.#d_count, :zero) + :increment
 ```
 
 This means:
-- If the field doesn't exist, it's initialized to 0 then incremented
+- If the field doesn't exist, it's initialized to 0 then incremented — on an existing item; a missing item fails with `ITEM_DOES_NOT_EXIST`
 - The increment is atomic — concurrent increments from parallel actors all apply correctly
 - Negative values work for decrements: `atomicCounters: { balance: -100 }`
 
@@ -1989,7 +1983,7 @@ Each dot-separated segment maps to a DynamoDB expression attribute name:
 | Operation | Max items per call | Conditions | Atomic counters |
 |-----------|--------------------|------------|-----------------|
 | `batchGetItem` | 100 | N/A (read) | N/A |
-| `batchWriteItem` | 25 | No | No |
+| `batchWriteItem` | 25 | No (puts always overwrite) | No |
 | `transactWrite` | 100 | Yes (per item) | Yes (in update ops) |
 | `transactGet` | 100 | N/A (read) | N/A |
 | `deleteItem` (batch) | 25 per batch | No | N/A |
