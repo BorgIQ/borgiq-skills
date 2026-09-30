@@ -151,7 +151,7 @@ Subscription is per event rather than a single on/off flag because the event voc
 
 ### Interpolatable options (`configuration.options`)
 
-Deno runtime fields live at the root — identical to DenoActor (see [deno-actor.md → Options Reference](deno-actor.md#options-reference)): `emitArrayAsSingleMessage`, `allowNet`, `allowNetList`, `denyNetList`, `allowFs`, `env`.
+Deno runtime fields live at the root — identical to DenoActor (see [deno-actor.md → Options](deno-actor.md#options)): `emitArrayAsSingleMessage`, `allowNet`, `allowNetList`, `denyNetList`, `allowFs`, `env`.
 
 Webhook response behavior is nested under `webhook:` — shared with the standalone WebhookTriggerActor (see [webhook-trigger-actor.md](webhook-trigger-actor.md#options-reference)): `respondImmediately`, `emitRawBody`, `response.statusCode` / `response.headers` / `response.body`. These may use `${{ }}` expressions; `trigger` is in scope (see [context.md → trigger](context.md#trigger)).
 
@@ -185,7 +185,7 @@ Full definitions: [typescript/actorSchemas/trigger/universalTrigger.md](typescri
 
 ## Code Files
 
-The trigger's source is a project tree in `configuration.codeDir` — a list of `{path, content}` files with the required entrypoint `main.ts` at its root, plus any helper files you add. The rules are the DenoActor's, which this trigger shares: relative imports between your own files (extension included), no imports leaving the tree, no interpolation of `codeDir`, and the reserved filenames `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, `shared/…`, `node_modules/…`. See [deno-actor.md → Code Files](deno-actor.md#code-files) for the full contract, limits, and editing surfaces.
+The trigger's source is a project tree in `configuration.codeDir` — a list of `{path, content}` files with the required entrypoint `main.ts` at its root, plus any helper files you add. The rules are the DenoActor's, which this trigger shares: relative imports between your own files (extension included), no imports leaving the tree, no interpolation of `codeDir`, and the reserved filenames `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, `shared/…`, `node_modules/…`. See [code-actor-runtime.md → Source files](code-actor-runtime.md#source-files-codedir) for the full contract, limits, and editing surfaces.
 
 Splitting per trigger source is the common shape:
 
@@ -270,7 +270,7 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
 
 ## Emitted Message
 
-The result schema is `z.any()` — downstream actors see whatever the code returns as `results`, under `msg.<msgVar>`. The DenoActor emit semantics apply (see [deno-actor.md → Return Values](deno-actor.md#return-values)):
+The result schema is `z.any()` — downstream actors see whatever the code returns as `results`, under `msg.<msgVar>`. The DenoActor emit semantics apply (see [code-actor-runtime.md → What gets emitted](code-actor-runtime.md#what-gets-emitted)):
 
 - An array emits **one** message holding the array by default (`emitArrayAsSingleMessage: true`); set `emitArrayAsSingleMessage: false` to emit one message per item
 - `results: undefined` (or omitted) or an empty array emits **nothing** — useful for respond-only webhook handling or filtering out uninteresting fires
@@ -407,7 +407,7 @@ switch (req.trigger.scope) {
 
 ## Memory
 
-Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on the user's behalf. Notably, `lastTriggeredAt` is **not** tracked automatically: persist it yourself via `req.memory.ltm` → `Response.memory` (as in the [Code Template](#code-template)) after enabling LTM in advanced settings. The value-in/value-out rules are the DenoActor's (see [deno-actor.md → Memory Types](deno-actor.md#memory-types)): each half you return is **shallow-merged** into the stored half, so keys you leave out keep their values, and a key is cleared only by returning it as `null`. Returning a non-empty `ltm`/`stm` requires `enableLTM`/`enableSTM`; by default LTM is capped at 1 KB and STM at 4 KB.
+Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on the user's behalf. Notably, `lastTriggeredAt` is **not** tracked automatically: persist it yourself via `req.memory.ltm` → `Response.memory` (as in the [Code Template](#code-template)) after enabling LTM in advanced settings. The value-in/value-out rules are the DenoActor's (see [code-actor-runtime.md → Memory](code-actor-runtime.md#memory)): each half you return is **shallow-merged** into the stored half, so keys you leave out keep their values, and a key is cleared only by returning it as `null`. Returning a non-empty `ltm`/`stm` requires `enableLTM`/`enableSTM`; by default LTM is capped at 1 KB and STM at 4 KB.
 
 ## Common Mistakes
 

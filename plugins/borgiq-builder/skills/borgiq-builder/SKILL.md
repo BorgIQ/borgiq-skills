@@ -316,7 +316,7 @@ All triggers emit a message accessible to downstream actors via `msg.<trigger_ms
 - **UniversalTriggerActor**: Emits whatever `results` the user code returns (free-form; `results: undefined` emits nothing)
 - **CallableTriggerActor**: Emits the payload passed by the parent flow
 
-**Important:** When a task requires multiple HTTP requests stitched together, use a **DenoActor** or **PythonActor** instead of chaining multiple HttpRequestActors. See [multi-api-examples.md](references/multi-api-examples.md) for TypeScript and Python examples.
+**Important:** When a task requires multiple HTTP requests stitched together, use a **DenoActor** or **PythonActor** instead of chaining multiple HttpRequestActors. Examples: [deno-actor.md](references/deno-actor.md#examples), [python-actor.md](references/python-actor.md#examples).
 
 ## Common Actor Structure
 
@@ -521,7 +521,7 @@ configuration:
 - Exactly one entry must be the **entrypoint**: `main.ts` for the three Deno-family types, `main.py` for PythonActor. Everything else is yours to arrange in folders.
 - Import your own files relatively — `./lib/format.ts` in Deno (extension included), `from lib.format import format` in Python (packages need `__init__.py`).
 - `${{ }}` inside source is literal text, never an expression: pass runtime values through `configuration.inputs` and read `req.inputs`.
-- Some filenames are reserved by the runtime, and the tree is capped at 200 files / 1 MiB. Per-type details: [deno-actor.md → Code Files](references/deno-actor.md#code-files), [python-actor.md → Code Files](references/python-actor.md#code-files), [universal-trigger-actor.md → Code Files](references/universal-trigger-actor.md#code-files). In a canvas bundle the same tree is real files under the actor's `code/` directory ([canvas-bundles.md](references/cli/canvas-bundles.md#code-actor-project-trees)).
+- Some filenames are reserved by the runtime, and the tree is capped at 200 files / 1 MiB. Per-type details: [code-actor-runtime.md → Source files](references/code-actor-runtime.md#source-files-codedir). In a canvas bundle the same tree is real files under the actor's `code/` directory ([canvas-bundles.md](references/cli/canvas-bundles.md#code-actor-project-trees)).
 - **Deno-family imports may not leave the actor's own files, and this is enforced** (not for
   PythonActor). A relative import that escapes the actor's tree fails when the actor loads — the
   error tells the user that the actor imports something outside its own code directory, and (on a
@@ -621,7 +621,7 @@ error; return only the half you use. Enabling a store also **serializes** the
 actor's message processing — one message at a time **within a flowrun** for STM,
 and **across all flowruns** for LTM — so read-modify-write is race-free. (LTM
 additionally roots the actor's temp-file directory at the actor scope so files
-persist across runs within the same warm container; see [deno-actor.md → LTM and File Persistence](references/deno-actor.md).)
+persist across runs within the same warm container; see [code-actor-runtime.md → Temporary files](references/code-actor-runtime.md#temporary-files).)
 
 ### Clean-code rules
 
@@ -631,7 +631,7 @@ persist across runs within the same warm container; see [deno-actor.md → LTM a
 4. **Read with optional chaining + default** — `req.memory?.ltm?.cursor ?? 0`; each store is empty on first use.
 5. **Keep payloads small** — LTM is capped at **1 KB** and STM at **4 KB** per actor by default, measured as JSON after the merge (workspace settings → **Actors** → *Max LTM (KB)* / *Max STM (KB)*). Over a cap, the run fails with `MemoryExceedAllowedSize` (not retried) and no memory change is saved. Store IDs/cursors, not whole datasets.
 
-See [deno-actor.md → Memory Types](references/deno-actor.md#memory-types) for the
+See [code-actor-runtime.md → Memory](references/code-actor-runtime.md#memory) for the
 full reference and the LTM cursor example.
 
 ## Authentication
@@ -643,7 +643,7 @@ full reference and the LTM cursor example.
 | Single auth source | `connection` | `auth: ${{ connection.auth }}` with `connection: { key: my-connection }` |
 | Multiple auth sources | `credentials` with `source: connection` | Access via `credentials['name'].auth` in code |
 
-See [auth-types.md](references/auth-types.md) for authentication type details and [flow-consolidation.md](references/flow-consolidation.md) for multi-connection patterns.
+See [auth-types.md](references/auth-types.md) for authentication type details and [code-actor-runtime.md](references/code-actor-runtime.md#credentials-and-connections) for multi-connection patterns.
 
 ## Actor ID, Validation, and Post-Processing
 
@@ -704,7 +704,7 @@ When building complex automations, consider splitting into multiple actors:
 
 First plan the workflow in a flowchart or sequence diagram. Then build the actors one by one. Use subagents to build the actors, to reduce the complexity of the main agent. Provide enough context to the subagents to build the actors.
 
-**Converting flows to single actors:** When asked to consolidate a flow into a single actor, always use DenoActor. See [flow-consolidation.md](references/flow-consolidation.md) for connection handling patterns (single connection vs multiple connections via secrets).
+**Converting flows to single actors:** When asked to consolidate a flow into a single actor, always use DenoActor. See [code-actor-runtime.md](references/code-actor-runtime.md#consolidating-a-flow-into-one-actor) for connection handling patterns (single connection vs multiple connections via secrets).
 
 ### Sub-flow input contracts
 
