@@ -388,6 +388,24 @@ options:
   method: GET
 ```
 
+### Stating BorgIQ's IP Address
+
+Some APIs want the caller's IP address in the request itself, such as Namecheap's `ClientIp`. Write the literal `BORGIQ_EGRESS_CLIENT_IP` where the API asks, in the URL, a query parameter, a header or the body. BorgIQ's egress proxy replaces it with the address the request leaves from, one of the published addresses (Org settings → Network):
+
+```yaml
+options:
+  url: https://api.namecheap.com/xml.response
+  method: GET
+  queryParams:
+    ApiUser: ${{ inputs.apiUser }}
+    ApiKey: ${{ credentials.NAMECHEAP_API_KEY }}
+    UserName: ${{ inputs.apiUser }}
+    Command: namecheap.domains.getList
+    ClientIp: BORGIQ_EGRESS_CLIENT_IP
+```
+
+It is not replaced in a binary or multipart body, or in the body of a plain `http://` request. An AWS SigV4 or OAuth1 request that carries it is signed by the proxy after the address is filled in. It is BorgIQ's address, not your customer's: do not use it where an API asks for the end user's IP.
+
 ## Input Schemas
 
 Define input schemas for validation and UI generation:
