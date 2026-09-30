@@ -241,11 +241,12 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
         // signal: Signal.webhookRespond({ statusCode: 200, body: { ok: true } }),
       };
     case "schedule": {
-      // Enable LTM in advanced settings if you want to remember the previous fire.
+      // To remember the previous fire, set `enableLTM: true` on the actor and add to the return:
+      //   memory: { ltm: { ...req.memory.ltm, lastTriggeredAt: req.trigger.triggeredAt } }
+      // Returning a non-empty `ltm` while LTM is disabled fails the run.
       const prev = (req.memory.ltm.lastTriggeredAt as string) ?? null;
       return {
         results: { source: "schedule", triggeredAt: req.trigger.triggeredAt, lastTriggeredAt: prev },
-        memory: { stm: req.memory.stm, ltm: { ...req.memory.ltm, lastTriggeredAt: req.trigger.triggeredAt } },
       };
     }
     case "lifecycle":
@@ -271,8 +272,8 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
 
 The result schema is `z.any()` — downstream actors see whatever the code returns as `results`, under `msg.<msgVar>`. The DenoActor emit semantics apply (see [deno-actor.md → Return Values](deno-actor.md#return-values)):
 
-- An array emits one message per item unless `emitArrayAsSingleMessage: true` (the default)
-- `results: undefined` (or omitted) emits **nothing** — useful for respond-only webhook handling or filtering out uninteresting fires
+- An array emits **one** message holding the array by default (`emitArrayAsSingleMessage: true`); set `emitArrayAsSingleMessage: false` to emit one message per item
+- `results: undefined` (or omitted) or an empty array emits **nothing** — useful for respond-only webhook handling or filtering out uninteresting fires
 
 ## Responding to Webhook Firings
 
@@ -406,7 +407,7 @@ switch (req.trigger.scope) {
 
 ## Memory
 
-Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on the user's behalf. Notably, `lastTriggeredAt` is **not** tracked automatically: persist it yourself via `req.memory.ltm` → `Response.memory` (as in the [Code Template](#code-template)) after enabling LTM in advanced settings. The value-in/value-out rules are the DenoActor's (see [deno-actor.md → Memory Types](deno-actor.md#memory-types)): the returned `memory` **replaces** the stored value, so spread the previous object to avoid dropping keys.
+Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on the user's behalf. Notably, `lastTriggeredAt` is **not** tracked automatically: persist it yourself via `req.memory.ltm` → `Response.memory` (as in the [Code Template](#code-template)) after enabling LTM in advanced settings. The value-in/value-out rules are the DenoActor's (see [deno-actor.md → Memory Types](deno-actor.md#memory-types)): each half you return is **shallow-merged** into the stored half, so keys you leave out keep their values, and a key is cleared only by returning it as `null`. Returning a non-empty `ltm`/`stm` requires `enableLTM`/`enableSTM`; by default LTM is capped at 1 KB and STM at 4 KB.
 
 ## Common Mistakes
 
@@ -415,7 +416,7 @@ Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on
 3. **Expecting `lastTriggeredAt` automatically** — it's only present if your code persisted it to LTM on a previous fire.
 4. **Typing the entry point as `Request`** — use `TriggerRequest`, otherwise `req.trigger` is not typed.
 5. **Missing `triggerKey` with `webhook.enabled: true`** — the webhook URL will not work without it.
-6. **Returning partial `memory`** — `Response.memory` replaces the stored value; spread `req.memory.stm` / `req.memory.ltm` to keep existing keys.
+6. **Clearing a memory key by leaving it out** — `Response.memory` is shallow-merged into the stored value, so an omitted key keeps its old value. Return the key as `null` to clear it (as the handler in [Cleaning Up on Delete](#cleaning-up-on-delete) does with `hookId: null`).
 7. **A non-idempotent `on-delete` handler** — delivery will be at-least-once, and a hand run can be repeated. Treat "already removed" on the remote side as success and clear the saved id from LTM once released.
 8. **Relying on `on-delete` to clean up today** — nothing fires it automatically yet, in any workspace: deleting a canvas, a workspace or an organization, or deploying a canvas without the actor, does not run it (that comes with a later platform release). Test the handler by hand with **Run onDelete** in a development workspace — the run carries `manual: true` and `scope: 'actor'`, and nothing is deleted — and remove external registrations yourself before deleting until then.
 9. **Treating `scope: 'actor'` as a hand run** — check `manual`. A deploy that removes the actor will also send `scope: 'actor'`, without `manual`, and that removal is real.

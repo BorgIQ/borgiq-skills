@@ -529,18 +529,19 @@ configuration:
 ```
 
 - Exactly one entry must be the **entrypoint**: `main.ts` for the three Deno-family types, `main.py` for PythonActor. Everything else is yours to arrange in folders.
-- Import your own files relatively — `./lib/format.ts` in Deno (extension included), `from lib.format import format` in Python (packages need `__init__.py`). Imports may not leave the actor's own files.
+- Import your own files relatively — `./lib/format.ts` in Deno (extension included), `from lib.format import format` in Python (packages need `__init__.py`).
 - `${{ }}` inside source is literal text, never an expression: pass runtime values through `configuration.inputs` and read `req.inputs`.
 - Some filenames are reserved by the runtime, and the tree is capped at 200 files / 1 MiB. Per-type details: [deno-actor.md → Code Files](references/deno-actor.md#code-files), [python-actor.md → Code Files](references/python-actor.md#code-files), [universal-trigger-actor.md → Code Files](references/universal-trigger-actor.md#code-files). In a canvas bundle the same tree is real files under the actor's `code/` directory ([canvas-bundles.md](references/cli/canvas-bundles.md#code-actor-project-trees)).
-- **Imports may not leave the actor's own files, and this is enforced.** A relative import that
-  escapes the actor's tree fails when the actor loads — the error tells the user that the actor
-  imports something outside its own code directory, and (on a deployed workspace) the build names the
-  specifier. Use relative imports between your own files, `@borgiq/actors`, `npm:`/`jsr:`/`node:`
-  packages, or an approved `https:` host.
+- **Deno-family imports may not leave the actor's own files, and this is enforced** (not for
+  PythonActor). A relative import that escapes the actor's tree fails when the actor loads — the
+  error tells the user that the actor imports something outside its own code directory, and (on a
+  deployed workspace) the build names the specifier. Use relative imports between your own files,
+  `@borgiq/actors`, `npm:`/`jsr:`/`node:` packages, or an approved `https:` host.
 - **Pin `npm:` and `jsr:` versions exactly** — `npm:escape-html@1.0.3`, never bare or a `^` range. On
   a deployed workspace a build resolves each specifier once and every run uses that resolution, so an
-  unpinned specifier makes what you get depend on when the canvas was last built.
-- Actors written before multi-file support carry a single `configuration.code` string instead. They keep running and convert on the next save; write `codeDir` for anything new, and never set both fields.
+  unpinned specifier makes what you get depend on when the canvas was last built. Deno refuses
+  versions published under 7 days ago (`minimumDependencyAge: P7D`): pin one at least a week old.
+- **Never write `configuration.code`** (legacy single-string source): the runtime reads only `codeDir`, and an actor without a `codeDir` entrypoint cannot run (`canvases validate` reports it).
 
 (ReactAppTriggerActor also uses `configuration.codeDir`, for a whole Vite project — see the `borgiq-react-app-builder` spoke. AppTriggerActor keeps `configuration.options.html` / `.css` / `.script`.)
 
@@ -572,21 +573,20 @@ Memory is **not** a mutable global. You **read** the current state from
 `req.memory`, and **persist** changes by **returning** a `memory` object in the
 `Response`. There is no other way to write it.
 
-**Whatever you return for a half becomes the new stored value of that half — it
-replaces, it does not merge.** Return `memory: { ltm: { cursor: 5 } }` and the
-stored LTM becomes *exactly* `{ cursor: 5 }`; any other LTM key you held before is
-gone. So always return the **complete** state you want to keep:
+**The runtime shallow-merges each half you return into the stored half.** Return
+`memory: { ltm: { cursor: 5 } }` and the stored LTM gets `cursor: 5` while every
+other LTM key keeps its value. Each top-level key you return replaces that key's
+whole value; nested objects are not merged.
 
-- **Read-modify-write: spread the prior half, then set your keys.** Build the next
-  snapshot from `req.memory` so existing keys survive —
+- **Read-modify-write: spread the prior half, then set your keys** —
   `memory: { ltm: { ...req.memory?.ltm, cursor: 5 } }`. The spread is undefined-safe
   (an empty store spreads to nothing), so no `?? {}` guard is needed.
-- **The two halves are independent.** `memory: { ltm }` replaces LTM and leaves STM
-  untouched (and vice versa) — you only overwrite the half you actually return.
+- **The two halves are independent.** `memory: { ltm }` merges into LTM and leaves
+  STM untouched (and vice versa).
 - **Omit `memory` entirely to change nothing.** `return { results }` persists no
   memory; both halves keep their stored values.
-- **To clear a key, just don't include it** in the half you return (it's a replace,
-  so omission drops it). To clear a whole half, return it empty: `{ ltm: {} }`.
+- **To clear a key, return it as `null`**: `memory: { ltm: { checkpoint: null } }`; it then reads as
+  `null`. Omitting the key, a TypeScript `undefined` (dropped in transit) and `{ ltm: {} }` change nothing.
 
 ```typescript
 import type { Request, Response } from "@borgiq/actors";
@@ -597,8 +597,8 @@ export default async function receive(req: Request): Promise<Response> {
 
   // ...do work...
 
-  // WRITE — return the FULL LTM you want stored (spread the old, set the new).
-  // Returning bare `{ cursor: ... }` would drop every other LTM key.
+  // WRITE — return the keys you set; the store merges them into the stored LTM.
+  // Clear a key with `null`: memory: { ltm: { cursor: null } }.
   return {
     results: { lastCursor },
     memory: { ltm: { ...req.memory?.ltm, cursor: lastCursor + 1 } },
@@ -626,20 +626,20 @@ enableSTM: true   # required to write req.memory.stm
 enableLTM: true   # required to write req.memory.ltm
 ```
 
-This is another reason to return **only** the half you use — echoing back the
-other, unenabled half trips this error. Enabling a store also **serializes** the
+A store that is not enabled arrives as `{}`, so only a non-empty half trips this
+error; return only the half you use. Enabling a store also **serializes** the
 actor's message processing — one message at a time **within a flowrun** for STM,
 and **across all flowruns** for LTM — so read-modify-write is race-free. (LTM
 additionally roots the actor's temp-file directory at the actor scope so files
-persist across runs; see [deno-actor.md → LTM and File Persistence](references/deno-actor.md).)
+persist across runs within the same warm container; see [deno-actor.md → LTM and File Persistence](references/deno-actor.md).)
 
 ### Clean-code rules
 
 1. **Default to STM; reach for LTM only for state that must survive the run.** STM is auto-reclaimed when the flowrun ends; LTM lives until overwritten.
-2. **Return only the half you mutated** (`memory: { ltm }` or `memory: { stm }`); omit `memory` to persist nothing. The half you return replaces the stored value; the half you omit is left as-is.
-3. **Return the full half — spread the prior state, then set your keys.** `memory: { ltm: { ...req.memory?.ltm, cursor } }` (spread is undefined-safe). What you return *replaces* the stored half, so a bare `{ cursor }` drops every other key; clear a key by omitting it from the snapshot.
+2. **Return only the half you mutated** (`memory: { ltm }` or `memory: { stm }`); omit `memory` to persist nothing. The half you return is merged into the stored value; the half you omit is left as-is.
+3. **Spread the prior state, then set your keys.** `memory: { ltm: { ...req.memory?.ltm, cursor } }` (spread is undefined-safe). The store merges, so omitting a key never clears it: **clear a key by returning it as `null`** (`{ ltm: { checkpoint: null } }`).
 4. **Read with optional chaining + default** — `req.memory?.ltm?.cursor ?? 0`; each store is empty on first use.
-5. **Keep payloads small** — STM and LTM each have a size cap (`MAX_STM_PAYLOAD_SIZE` / `MAX_LTM_PAYLOAD_SIZE`). Store IDs/cursors, not whole datasets.
+5. **Keep payloads small** — LTM is capped at **1 KB** and STM at **4 KB** per actor by default, measured as JSON after the merge (workspace settings → **Actors** → *Max LTM (KB)* / *Max STM (KB)*). Over a cap, the run fails with `MemoryExceedAllowedSize` (not retried) and no memory change is saved. Store IDs/cursors, not whole datasets.
 
 See [deno-actor.md → Memory Types](references/deno-actor.md#memory-types) for the
 full reference and the LTM cursor example.

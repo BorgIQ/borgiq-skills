@@ -35,10 +35,10 @@ Python Actors run inside **AWS Lambda** with the following constraints:
 | Constraint | Value | Notes |
 |------------|-------|-------|
 | Maximum timeout | 15 minutes | Absolute limit, cannot be exceeded |
-| Configurable timeout | Varies | Set per workspace via `pythonActorTimeoutInSeconds` |
+| Configurable timeout | Varies | The runtime's *Deno actor timeout* (workspace settings → Runtimes, 3–780 s) applies to PythonActor too; code cannot read it from `req.ctx` |
 | Memory | Configurable | Set in Lambda configuration |
 | Ephemeral storage | Temp directory | Limited, cleared between invocations |
-| Python version | 3.11+ | Managed by UV package manager |
+| Python version | 3.11 (exactly) | Managed by UV package manager; syntax or packages that need 3.12+ fail |
 
 **Critical Implication:** All long-running operations must be designed as **pausable and resumable**. Never assume an operation will complete in a single invocation.
 
@@ -264,7 +264,7 @@ actors:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `emitArrayAsSingleMessage` | boolean | true | Emit array as single message instead of multiple messages |
-| `dependencies` | string[] | [] | Python packages to install (e.g., `["pandas>=2.0.0", "numpy>=1.24.0"]`) |
+| `dependencies` | string[] | [] | Python packages to install, each pinned with `==` (e.g., `["pandas==2.2.3", "numpy==2.1.3"]`) |
 | `env` | object[] | [] | Environment variables for the runtime |
 
 ## TypeScript Schema Definition
@@ -378,7 +378,7 @@ Editing surfaces:
 - **Direct document / batch payload:** the `configuration.codeDir` list itself, as shown above. It is a structured array in both formats, not a YAML string.
 - **Web editor:** the actor's Code page shows a file tree beside the editor; the right-hand panel on the canvas edits the entrypoint inline. The **AI code assist works on the selected file only** — it cannot see sibling files, so prompt it per file and wire the pieces together yourself.
 
-An actor written before multi-file support carries a single `configuration.code` string. It keeps running, and saving it from the editor (or pushing it from a bundle) converts it to a one-entry `codeDir`. Never set both fields.
+Never write `configuration.code` (the legacy single-string source). The runtime reads only `codeDir`; an actor that has `code` and no `main.py` in `codeDir` cannot run, and `canvases validate` reports the missing entrypoint.
 
 ## Code Template
 
@@ -402,7 +402,8 @@ def receive(req: Request) -> Response:
     print('Processing started')
 
     return Response(
-        # `results` is emitted as msg.ActorName downstream (list => one message per item).
+        # `results` is emitted as msg.ActorName downstream (a list is ONE message unless
+        # options.emitArrayAsSingleMessage is false; None emits a null message).
         results={'result': 'data'},
         # Return memory to persist it; omit to leave it unchanged.
         memory=req.memory,
@@ -413,8 +414,8 @@ def receive(req: Request) -> Response:
 ```
 
 **Return-value notes:**
-- `results=None` (or omitting `results`) emits **no** message downstream.
-- `results=[a, b]` emits one message per item (unless `emitArrayAsSingleMessage: true`).
+- `results=None` (or omitting `results`) emits a `null` message downstream. To emit **no** message, return `results=[]`.
+- `results=[a, b]` emits **one** message holding the list. It emits one message per item only when `options.emitArrayAsSingleMessage` is `false` (the default is `true`).
 - `raise RetryableError()` re-invokes the actor with the same message; all other exceptions are permanent.
 
 ## Logging
@@ -442,7 +443,7 @@ class Request:
     memory: Dict[str, Any]          # {"stm": {...}, "ltm": {...}} (value-in)
 
 class Response:
-    results: Any                    # emitted as msg.ActorName (list => one message per item)
+    results: Any                    # emitted as msg.ActorName (a list is one message unless emitArrayAsSingleMessage is false; None emits null)
     memory: Optional[Dict[str, Any]]  # {"stm": ..., "ltm": ...} to persist; omit to leave unchanged
     signal: Optional[Any]           # one of signal.webhook_respond / callable_response / delay_until
     error: Optional[Dict[str, Any]]  # {"message": str, "retryable": bool} to fail explicitly
@@ -466,6 +467,11 @@ class Response:
 ## Memory Types
 
 Memory is **value-in / value-out**. Read the incoming state from `req.memory`, and **return `memory` in your `Response` to persist it**. If you omit `memory` from the response, the stored memory is left unchanged.
+
+- **Each half you return is shallow-merged into the stored half:** a top-level key you return replaces that key's value, and a key you leave out keeps its stored value.
+- **Clear a key by setting it to `None`** (stored as `null`); a key removed with `pop`/`del` keeps its stored value. A cleared key stays present, so `.get('key', default)` returns `None`, not `default`.
+- **Size caps:** LTM **1 KB** and STM **4 KB** per actor by default, measured as JSON after the merge (workspace settings → Actors → *Max LTM (KB)* / *Max STM (KB)*). Over a cap, the run fails with `MemoryExceedAllowedSize` (not retried) and no memory change is saved.
+- Writing a half requires `enableSTM: true` / `enableLTM: true`; a half that is not enabled arrives as `{}`.
 
 ### Short-Term Memory (STM)
 
@@ -533,6 +539,8 @@ options:
 **Dependency Format:**
 - Exact version (**required for security**): `pandas==2.2.3`
 - Avoid — bare name (`pandas`), open range (`pandas>=2.0.0`), or bounded range (`pandas>=2.0.0,<3.0.0`): all resolve non-deterministically.
+
+**`requests` is always installed:** the runtime adds `requests>=2.31.0` to every PythonActor, so you do not need to list it. If you pin it yourself, pin 2.31.0 or later.
 
 **Note:** UV provides significantly faster dependency installation compared to pip, reducing cold start times.
 
@@ -655,7 +663,7 @@ def receive(req: Request) -> Response:
 | `/assets/{key}` | PUT | Update an asset |
 | `/assets/{key}` | DELETE | Delete an asset |
 | `/secrets` | GET | Get secrets — decrypted when Sent to runtime, a proxy placeholder when Server-side |
-| `/connections/{key}` | GET | Get connection credentials — sensitive fields are proxy placeholders when Server-side |
+| `/connections/{key}` | GET | Get the actor's own connection (`configuration.connection.key`; any other key gets 403) — sensitive fields are proxy placeholders when Server-side |
 | `/publicKey` | GET | Get workspace public key (for encrypting sensitive data) |
 | `/sendEmail` | POST | Send an email |
 | `/interfaces/status` | PUT | Update interface status display |
@@ -676,10 +684,11 @@ The Collection API provides structured, persistent storage organized into named 
 from borgiq import Request, Response, biq_api
 
 def receive(req: Request) -> Response:
-    # putItem — full replace
+    # putItem — creates the item; an existing key fails with ITEM_ALREADY_EXISTS.
+    # options.overwrite replaces the whole item; options.ttl: seconds from now (or an epoch / ISO date)
     biq_api('/collections', method='POST', json={
         'action': 'putItem', 'collection': 'my-col', 'key': 'k1',
-        'value': {'name': 'Alice'}
+        'value': {'name': 'Alice'}, 'options': {'overwrite': True, 'ttl': 3600}
     })
 
     # getItem — eventually consistent read (returns None if missing)
@@ -687,21 +696,22 @@ def receive(req: Request) -> Response:
         'action': 'getItem', 'collection': 'my-col', 'key': 'k1'
     }).json()
 
-    # updateItem — shallow field merge (only listed fields change)
+    # updateItem — shallow field merge (only listed fields change);
+    # never creates: a missing key fails with ITEM_DOES_NOT_EXIST
     biq_api('/collections', method='POST', json={
         'action': 'updateItem', 'collection': 'my-col', 'key': 'k1',
         'value': {'email': 'new@email.com'}
     })
 
-    # updateItem with atomic counter
+    # updateItem with atomic counter (the item must exist)
     biq_api('/collections', method='POST', json={
         'action': 'updateItem', 'collection': 'my-col', 'key': 'k1',
         'atomicCounters': {'visits': 1}
     })
 
-    # query — prefix search
+    # query — prefix search on the key (`expression`, not `key`)
     results = biq_api('/collections', method='POST', json={
-        'action': 'query', 'collection': 'my-col', 'key': 'user:*'
+        'action': 'query', 'collection': 'my-col', 'expression': 'user:*'
     }).json()
 
     return Response(results=results.get('value', {}))
@@ -841,7 +851,7 @@ An actor returns at most one signal via `Response.signal`. The constructors avai
 |-------------|---------|-----------|
 | `signal.webhook_respond(...)` | Respond to a pending webhook request | `status_code: int, headers: dict = None, body: Any = None` |
 | `signal.callable_response(...)` | Respond to a pending callable/subflow request | `payload: dict, throw_error: bool = None` |
-| `signal.delay_until(...)` | Delay message emission until a time | `delay_until: str` (ISO 8601) |
+| `signal.delay_until(...)` | Delay message emission until a time | `when: str` (ISO 8601), passed positionally: `signal.delay_until(iso)` |
 
 > Other orchestrator signal types (`callFlow`, `waitForCallbackToken`, `notifyCallbackToken`, the `interface*` family, `ai`, `aiAgent`) are driven by their dedicated actors / the MessageProcessorActor, not set from Python code.
 
@@ -856,7 +866,7 @@ def receive(req: Request) -> Response:
     delay_until = (datetime.now() + timedelta(minutes=1)).isoformat()
     return Response(
         results={'queued': True},
-        signal=signal.delay_until(delay_until=delay_until),
+        signal=signal.delay_until(delay_until),
     )
 ```
 
@@ -886,12 +896,7 @@ Access runtime information via `req.ctx`:
 ```python
 ctx = {
     'org': {'id': str, 'name': str},
-    'workspace': {
-        'id': str,
-        'slug': str,
-        'name': str,
-        'pythonActorTimeoutInSeconds': int,
-    },
+    'workspace': {'id': str, 'slug': str, 'name': str},
     'canvas': {'id': str, 'slug': str, 'name': str},  # + webhookTriggers / interfaceTriggers / appTriggers
     'actor': {'id': str, 'type': str, 'name': str, 'msgVar': str},
     'flowrun': {'id': str, 'createdAt': str},
@@ -914,71 +919,59 @@ The `results` field of the returned `Response` becomes available as `msg.actor_m
 | Return | Behavior |
 |--------|----------|
 | `Response(results={'data': ...})` | Emit dict as message |
-| `Response(results=[item1, item2])` | Emit multiple messages (one per item) |
-| `Response(results=None)` or `Response()` | Do NOT emit any message |
+| `Response(results=[item1, item2])` | Emit **one** message holding the list (one message per item only with `emitArrayAsSingleMessage: false`) |
+| `Response(results=None)` or `Response()` | Emit a `null` message |
+| `Response(results=[])` | Do NOT emit any message |
 | `Response(results=..., memory=...)` | Emit message AND persist memory |
 
 ### Emitting Arrays
 
-By default, returning a list under `results` emits multiple messages. To emit as single message:
+By default (`emitArrayAsSingleMessage: true`), returning a list under `results` emits one message holding the whole list. To emit one message per item:
 
 ```yaml
 options:
-  emitArrayAsSingleMessage: true
+  emitArrayAsSingleMessage: false
 ```
 
 ## Examples
 
 ### Basic Example: Execute Shell Commands
 
+Run a CLI tool with an argument list, never `shell=True` on an input: with a list, each input is one argument and is never parsed as shell syntax. Put `--` before input values so a value starting with `-` cannot become an option.
+
 ```python
-from typing import Any
-import subprocess
 import os
+import subprocess
+import tempfile
 from borgiq import Request, Response
 
 def receive(req: Request) -> Response:
-    """Execute shell commands using system binaries."""
+    """Shallow-clone a repository and list its top-level files."""
 
-    cmd = req.inputs.get('cmd', '').strip()
+    repo_url = req.inputs.get('repoUrl', '').strip()
+    if not repo_url.startswith('https://'):
+        raise ValueError("inputs.repoUrl must be an https:// URL")
 
-    if not cmd:
-        raise ValueError("No command provided in inputs.cmd")
+    # The actor process does not inherit the image's environment: set PATH for the tools you call.
+    env = os.environ.copy()
+    env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + env.get('PATH', '')
+    # When outbound HTTPS goes through the BorgIQ egress proxy, SSL_CERT_FILE is a CA bundle that trusts it.
+    if env.get('SSL_CERT_FILE'):
+        env['GIT_SSL_CAINFO'] = env['SSL_CERT_FILE']
 
-    try:
-        # Set up environment with proper PATH
-        env = os.environ.copy()
-        env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + env.get('PATH', '')
-
-        # Execute the command
+    with tempfile.TemporaryDirectory(prefix='repo_') as work_dir:
         result = subprocess.run(
-            cmd,
-            shell=True,
+            ['git', 'clone', '--depth', '1', '--', repo_url, work_dir],
             capture_output=True,
             text=True,
-            timeout=300,
-            env=env
+            timeout=120,
+            env=env,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
+        files = sorted(os.listdir(work_dir))
 
-        output = result.stdout
-        if result.stderr:
-            output += "\n" + result.stderr if output else result.stderr
-
-        return Response(results={
-            "output": output.strip() if output else "",
-            "command": cmd,
-            "returnCode": result.returncode,
-            "success": result.returncode == 0
-        })
-
-    except subprocess.TimeoutExpired:
-        return Response(results={
-            "output": "",
-            "error": f"Command timed out after 300 seconds: {cmd}",
-            "command": cmd,
-            "returnCode": -1,
-            "success": False
-        })
+    return Response(results={'repoUrl': repo_url, 'files': files})
 ```
 
 ### LTM Example: Track Last Invocation
@@ -1005,7 +998,8 @@ import requests
 from datetime import datetime, timedelta
 from borgiq import Request, Response, RetryableError
 
-MAX_PROCESSED_EVENTS = 300
+# LTM is capped at 1 KB by default (the whole stored LTM, as JSON): keep only a few recent IDs.
+MAX_PROCESSED_EVENTS = 15
 
 def receive(req: Request) -> Response:
     token = req.connection.get('auth', {}).get('values', {}).get('token')
@@ -1201,8 +1195,9 @@ def receive(req: Request) -> Response:
 
         process_item(working_data[i])
 
-    # Complete - clear checkpoint
-    req.memory['ltm'].pop('checkpoint', None)
+    # Complete - clear checkpoint. The returned ltm is merged into the stored one, so a
+    # popped key would survive: set it to None (stored as null) instead.
+    req.memory['ltm']['checkpoint'] = None
     return Response(results={'status': 'complete', 'totalProcessed': len(working_data)}, memory=req.memory)
 ```
 
@@ -1273,9 +1268,9 @@ def receive(req: Request) -> Response:
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         }
 
-    # Clear checkpoint on completion
+    # Clear checkpoint on completion: set it to None (a popped key would survive the merge)
     if not results['hasMore']:
-        req.memory['ltm'].pop('checkpoint', None)
+        req.memory['ltm']['checkpoint'] = None
         print('Processing complete, checkpoint cleared')
 
     return Response(results=results, memory=req.memory)
@@ -1423,8 +1418,11 @@ with zipfile.ZipFile('archive.zip', 'r') as zip_ref:
     zip_ref.extractall('output_dir')
 
 # Acceptable - use CLI tools when no native alternative exists
+# (argument list, `--` before the input, a tempfile directory rather than a hard-coded /tmp path)
 import subprocess
-result = subprocess.run(['git', 'clone', repo_url, '/tmp/repo'], capture_output=True, text=True, check=True)
+import tempfile
+repo_dir = tempfile.mkdtemp(prefix='repo_')
+result = subprocess.run(['git', 'clone', '--', repo_url, repo_dir], capture_output=True, text=True, check=True)
 ```
 
 **Common operations with native alternatives (prefer these):**
