@@ -1,777 +1,212 @@
-# BorgIQ CLI Reference
+# BorgIQ CLI
 
-Use the `borgiq` CLI to deploy workflows to the platform, trigger flows, monitor execution, and debug failures — all from the command line.
+How to drive BorgIQ from a shell with the `borgiq` CLI (`@borgiq/cli`): which version a command needs, the conventions
+every command shares, what each command group is for, starting from a template or a recipe, and what common errors
+mean. Flags and examples for any command come from `borgiq <command> --help`.
 
-> **Expanded documentation:** For detailed examples, data format specifications, scaffolding scripts, and troubleshooting, see the [CLI Documentation](cli/) directory:
-> - [Canvas Bundles](cli/canvas-bundles.md) — preferred filesystem workflow, layout, sync/conflicts, and lifecycle commands
-> - [Command Reference with Examples](cli/cli-command-reference.md) — every command with realistic examples and expected output
-> - [Data Formats (JSON schemas, YAML strings)](cli/cli-data-formats.md) — which commands accept which JSON schema and field types
-> - [Setup & Scaffolding Scripts](cli/cli-setup-scripts.md) — generate properly-structured JSON input files
-> - [Troubleshooting Guide](cli/cli-troubleshooting.md) — common errors and fixes
+## Contents
 
-> **Environment check:** This reference requires shell access (Claude Code, terminal). In environments without a terminal (Claude.ai projects, Claude API without shell tools), skip this reference — use the standard generate-only workflow and present YAML to the user for manual deployment via the BorgIQ web UI.
->
-> To detect: run `borgiq auth status`. If it succeeds, use this CLI workflow. If the command is not found or fails, fall back to generate-only mode.
+- [Before you start](#before-you-start)
+- [CLI versions](#cli-versions)
+- [Conventions](#conventions)
+- [Command map](#command-map)
+- [Workspace resources](#workspace-resources)
+- [Start from a template](#start-from-a-template)
+- [Start from a recipe](#start-from-a-recipe)
+- [Errors](#errors)
 
-> **Canvas identifiers:** Commands shown with `<canvasSlugOrId>` accept either the canvas slug (e.g. `my-flow`) or its ULID (e.g. `CANV01…`). The two execution commands — `triggers run` and `flowrun-jobs test-run` — still require the ULID; a slug is not accepted there. The canonical flag is `--canvas`; the old `--canvas-id` keeps working as a deprecated alias.
+## Before you start
 
-## Canvas bundles
+- **No shell?** Skip the CLI. Write one `metadata` + `actors` document for the user to deploy in the BorgIQ web UI, and
+  say it is unvalidated ([validation.md](validation.md#no-shell)).
+- **Install:** `npm install -g @borgiq/cli`.
+- **Auth is the user's job.** Run `borgiq auth status`. If it fails, ask the user to run `borgiq auth login`, which
+  stores the token in `~/.config/borgiq/config.json` (owner-only). Never ask for a token, and never read that file or
+  environment variables that hold tokens.
+- **Build in a bundle** ([cli/canvas-bundles.md](cli/canvas-bundles.md)). Direct documents and batch payloads
+  ([cli/cli-data-formats.md](cli/cli-data-formats.md)) are only for when a bundle is not possible.
+- **Run, monitor, debug:** [flowrun-job-states.md](flowrun-job-states.md). **Deployed workspaces** run the last build,
+  not the pushed code: [deployment.md](deployment.md).
 
-The canvas bundle is the default way to build and edit canvases: actor configuration lives in parsed-object `actor.yaml` files, code in native files under `code/` (a project tree, entrypoint plus helpers, for the actors that run code), the graph in `canvas.yaml`, and push/pull synchronize with three-way sync (a per-actor content-hash + edit-version baseline in `sync.actors`). Direct export documents and CanvasActor batch payloads are the fallback for environments without shell access or bundle support.
+## CLI versions
+
+Check the version with `borgiq --version`, and one command with `borgiq help <command>`, which exits non-zero when
+the command is missing (`borgiq <command> --help` exits 0 either way, so it is no check):
 
 ```bash
 borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
-# New canvas: init -> edit -> validate -> create
-borgiq bundle init ./my-flow.borgiq-canvas --name "My Flow" --slug my-flow
-borgiq bundle validate ./my-flow.borgiq-canvas --strict
-borgiq bundle push ./my-flow.borgiq-canvas --create --auto-layout
-
-# Existing canvas: pull -> edit -> validate -> preview -> push
-borgiq bundle pull <canvasSlugOrId> ./my-flow.borgiq-canvas
-borgiq bundle validate ./my-flow.borgiq-canvas --strict
-borgiq bundle push ./my-flow.borgiq-canvas --dry-run
-borgiq bundle push ./my-flow.borgiq-canvas   # add --auto-layout when actors were added, removed, or rewired
 ```
-
-Read [Canvas Bundles](cli/canvas-bundles.md) before hand-editing the layout. It defines the three-edit rule, the `codeDir` contract — including the [project tree](cli/canvas-bundles.md#code-actor-project-trees) that Deno, Deno Test, Universal Trigger, and Python actors keep under `code/`, with its required `main.ts` / `main.py` entrypoint and reserved filenames — root graph ownership, incremental sync verdicts, and conflict recovery. Bundle commands need `@borgiq/cli` ≥ 0.8.0 (see [CLI versions](#cli-versions)). If the command is unavailable, use the direct document/batch workflow below.
-
-## Setup
-
-**Install:**
-
-```bash
-npm install -g @borgiq/cli
-```
-
-### CLI versions
-
-Check the version with `borgiq --version`, or one command with `borgiq help <command>`, which exits non-zero when the command is missing (`borgiq <command> --help` exits 0 either way).
 
 | Commands | Need `@borgiq/cli` |
 |---|---|
+| `generate`, `validate` | ≥ 0.6.0 |
 | `bundle` (`init`, `pull`, `push`, `pack`, `unpack`, `validate`), `scaffold` | ≥ 0.8.0 |
 | `bundle build` (react-app builds) | ≥ 0.9.0 |
 | Multi-file `code/` trees with `main.ts` / `main.py` entrypoints | ≥ 0.10.0 |
 | `workspaces deployment`, `canvases runtime-build`, `bundle push --runtime-build`, canvas builds in `bundle build` | ≥ 0.11.0 |
 | `ai-providers`, `canvas-actors app-url` / `thumbnail`, the bundle's `README.md` and `thumbnail.<ext>` files | ≥ 0.12.0 |
-| `recipes` | ≥ 0.13.0 — check with `borgiq help recipes` before using it |
+| `recipes` | ≥ 0.13.0; npm may still serve 0.12.0, so always check with `borgiq help recipes` |
 
-**Authentication — user handles this, not the AI agent:**
+Upgrade with `npm install -g @borgiq/cli`. If that is not possible, fall back: no `bundle` → direct documents; no
+`recipes` → templates.
 
-The user must run `borgiq auth login` before starting the AI agent session. This stores the API token securely in `~/.config/borgiq/config.json` (owner-only permissions). The AI agent then uses `borgiq` commands without ever seeing or handling the token.
+## Conventions
 
-```bash
-# User runs this before starting the AI agent session
-borgiq auth login
-```
+- **Output.** A table on a terminal; JSON when piped or with `--json`. Pass `--json` whenever you parse output. It sets
+  the output format only, never how input is read. In JSON mode an error goes to stderr as
+  `{ "error": { code, status, details, … } }`.
+- **Input.** `--file <path>` reads JSON, or YAML when the name ends in `.yaml`/`.yml`. `--file -` and a pipe read stdin
+  as YAML (which includes JSON). With nothing piped on a terminal, the command fails at once instead of waiting.
+- **Canvases.** A `<canvas>` argument and `--canvas` take the slug or the ULID, except in `triggers run` and
+  `flowrun-jobs test-run`, which need the ULID (`metadata.id` from `borgiq canvases get <slug> --json`). `--canvas-id`
+  is a deprecated alias of `--canvas`.
+- **Org and workspace.** `--org` and `--workspace` (slug or ID) override the logged-in defaults.
+- **Lists.** `--page`, `--page-size` (at most 100) and `--all` (every page). Never hand-roll a page loop.
+- **IDs.** Mint every ID with `borgiq generate` (offline). Formats: [validation.md](validation.md).
+- **Deletes** ask first; `-y`/`--yes` (alias `--force`) skips the prompt.
+- **Exit codes.** 0 success · 1 other · 2 usage (bad flags or input, HTTP 400/422) · 3 auth (401) · 4 forbidden (403) ·
+  5 not found (404) · 6 conflict (409) · 7 rate limited (429) · 8 server (5xx) · 9 network.
 
-**Important:**
-- Do NOT ask the user for their API token — they authenticate via `borgiq auth login` themselves
-- Do NOT read `~/.config/borgiq/config.json` or environment variables containing tokens
-- Just run `borgiq` commands — authentication is handled transparently by the CLI
-- If a command returns a 401 error, tell the user to run `borgiq auth login` to reconfigure
+## Command map
 
-**Verify the CLI is authenticated:**
+| Group | Use it for |
+|---|---|
+| `auth` | `status` checks the login; `login` is the user's |
+| `orgs list`, `workspaces list` | Slugs for `--org` / `--workspace` |
+| `workspaces deployment`, `canvases runtime-build*` | Deployed workspaces and canvas builds ([deployment.md](deployment.md)) |
+| `actors list`, `actors schema <Type> [--action <a>]` | Actor types; a type's options schema, default options and memory flags, source ports, connection support and `code` block (`language`, `entrypoint`, `multiFile`) |
+| `templates`, `recipes` | [Start from a template](#start-from-a-template), [Start from a recipe](#start-from-a-recipe) |
+| `bundle` | Build and sync a canvas as files ([cli/canvas-bundles.md](cli/canvas-bundles.md)) |
+| `generate`, `validate` | IDs and msgVars; check a `metadata` + `actors` document ([validation.md](validation.md)) |
+| `scaffold actor\|actor-from-template\|canvas\|batch` | Direct-path payloads: an actor from its type's schema (fetched from the API), a template as an actor, actors wrapped for `create-with-data` or `batch` ([cli/cli-data-formats.md](cli/cli-data-formats.md)) |
+| `canvases` | `list`; `get` (`--include-data` adds the actors); `create`; `update` (metadata; `--readme-file` replaces the README, an empty file clears it); `delete`; `export`; `validate` (server-side, [validation.md](validation.md)); `layout` (auto-arranges the actors; `--source-actor-id` only what is downstream of them); `create-with-data`, `update-data`, `verify-import` ([cli/cli-data-formats.md](cli/cli-data-formats.md)) |
+| `canvas-actors` | Without a bundle: `list` (`--actor-type`, `--is-active`, `--search`), `get`, `flow` (an actor plus everything downstream), `verify` (options against the type's schema, nothing saved), `create`, `update`, `delete`, `batch` |
+| `canvas-actors app-url`, `canvas-actors thumbnail set\|get\|rm` | An App or React App actor's thumbnail. `app-url` prints only the served URL (`--json`: `{ actorId, src }`; needs `app:use`); `thumbnail set` returns the stored `{ fileId }`; `get` prints `{ actorId, fileId, mimeType, sizeInBytes }`, never the image. Capture and limits: the `borgiq-react-app-builder` skill, *App thumbnail* |
+| `connections`, `secrets`, `assets` | [Workspace resources](#workspace-resources) |
+| `ai-providers` | AI providers and usable model references ([custom-ai-providers.md](custom-ai-providers.md#cli-output-and-errors)) |
+| `tokens` | Personal access tokens ([api-tokens.md](api-tokens.md)) |
+| `triggers run`, `flowruns`, `flowrun-jobs`, `flowrun-results`, `flowrun-messages` | Run, monitor and debug ([flowrun-job-states.md](flowrun-job-states.md)) |
 
-```bash
-borgiq auth status
-```
+## Workspace resources
 
-If this fails, instruct the user: "Please run `borgiq auth login` to authenticate before continuing."
-
----
-
-## Step 1: Discover Environment
-
-Before building a workflow, discover the orgs, workspaces, and resources available.
-
-### List orgs and workspaces
-
-```bash
-borgiq orgs list
-borgiq workspaces list --org my-org
-```
-
-### List existing canvases
-
-```bash
-borgiq canvases list
-```
-
-### Get a canvas with its full flow data
-
-```bash
-borgiq canvases get <canvasSlugOrId> --include-data --json
-```
-
----
-
-## Step 2: Discover Actor Types
-
-### List all available actor types
+Actors name connections, secrets and assets by key. Check each key exists before you write or deploy it:
 
 ```bash
-borgiq actors list
+borgiq connections list --json    # key and type of each connection
+borgiq connections types --json   # connection types the workspace offers (gmail, slack-oauth2, github-oauth2, …)
+borgiq secrets list --json        # keys only, never values
+borgiq assets list --json         # files, images and documents
 ```
 
-### Get configuration schema for a specific actor type
+A connection goes in `configuration.connection: { key, type }`, where `type` is one exact connection-type name or a
+non-empty array of them ([Typed Connections](http-request-actor.md#typed-connections)); a secret in
+`configuration.credentials.<name>.workspaceKey`. If one is missing, give the user the exact key to create under
+**Workspace Settings > Connections > Add Connection** (e.g. Gmail OAuth2) or **Workspace Settings > Secrets > Add
+Secret**.
+
+## Start from a template
+
+A template is a published single-actor configuration ("Send Slack message", "GitHub: open issue") from BorgIQ or your
+org or workspace. Search before hand-building an integration actor. A template suits one integration step you want
+to keep updatable: its actor keeps a `template` stamp.
 
 ```bash
-borgiq actors schema HttpRequestActor --json
-borgiq actors schema DenoActor --json
+borgiq templates apps --search slack --json                    # app ids (TAPP…)
+borgiq templates list --search "send email" --type TASK --json # name/description/tags; --type TASK|TRIGGER, repeatable
+borgiq templates list --app-id TAPP… --all --json
+borgiq templates get ATMP… --json                              # adds `actor`, an ExportedCanvasActor (object shape)
 ```
 
-The schema response shows required fields, supported connections, source ports, and feature flags. Use this to understand what configuration an actor needs before generating YAML.
-
-### Browse the template catalog (faster than building from scratch)
-
-Templates are pre-built actor configurations published by BorgIQ (and optionally your org/workspace) — e.g. "Send Slack message", "GitHub: open issue", "OpenAI: chat completion". When a template matches what the user is asking for, prefer fetching and adapting it over hand-building an actor.
+`list` returns `{ total, data }`, metadata only, 25 per page by default. **In a bundle**, write `actor` as the new
+`actor.yaml` with the [bundle fixups](cli/canvas-bundles.md#templates-and-the-starter-limitation). **On the direct
+path**, `canvas-actors create` and `batch` want YAML-string configuration, so convert it:
 
 ```bash
-# Search by name, description, or tags
-borgiq templates list --search slack --json
-borgiq templates list --search "send email" --type TASK --json
-
-# Filter by type (TASK or TRIGGER) — repeatable for either-or
-borgiq templates list --type TRIGGER --json
-borgiq templates list --type TASK --type TRIGGER --json
-
-# Discover template app ids, then filter to one integration
-borgiq templates apps --search slack --json
-borgiq templates list --app-id TAPP01kd6gqghj04j8765nnqyp09a --json
+ACTOR_ID=$(borgiq templates get ATMP… --json \
+  | borgiq scaffold actor-from-template --name "Notify #ops on deploy" --output actor.json --print-id)
+borgiq canvas-actors create "$CANVAS_ID" "$ACTOR_ID" --file actor.json --json
 ```
 
-**Pagination** — the list endpoint paginates the standard way (`--page` / `--page-size`, default `25`, max `100`). The JSON envelope is `{ total, data }`, so in `--json` mode you can detect more pages:
+`scaffold actor-from-template` does what the web editor does when a template is dropped on a canvas: YAML strings for
+the `configuration` and `schemas` fields, a fresh actor id, a msgVar from `--name` (default: the template's name), a
+fresh top-level `webhookTriggerKey`, and the `template: { id, version, appName }` provenance. It never replaces
+`configuration.webhook.triggerKey` (mint one with `borgiq generate id webhooktriggerkey`), never checks the msgVar
+against the canvas, and wires no edges, credentials, secrets or `inputs` values: set those with `canvas-actors
+update`. Flags: `--file` (default stdin), `--name`, `--output`, `--print-id` (prints only the id, on stdout). For a
+batch, pipe its JSON (no `--output` or `--print-id`) into `borgiq scaffold batch --output ops.json`, then
+`borgiq canvas-actors batch <canvas> --file ops.json`.
+
+## Start from a recipe
+
+Recipes need CLI ≥ 0.13.0:
+`borgiq help recipes >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"`. Without them, build from
+templates.
+
+A **recipe** is a saved starting point BorgIQ publishes: one task actor (`TASK`, e.g. an AI agent with its tools
+attached), one trigger (`TRIGGER`), a whole flow (`FLOW`, trigger → steps) or a trigger-less chain (`SEGMENT`). Use
+one when the ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an
+agent with memory"). It is **not versioned and not linked back**: the added actors are ordinary canvas actors that
+nothing updates (a step that came from a template keeps its own `template` stamp).
+
+**Wiring.** The entry is the actor an incoming edge attaches to; the exit is the actor and port an outgoing edge
+leaves from; either is `null` when absent. `FLOW` and `SEGMENT` have both. A `TASK` or `TRIGGER` has what its actor
+has: a trigger never has an entry, a webhook trigger has an exit, an MCP server (a `TRIGGER` with its tools) has
+neither. `--after` needs a `TASK` or `SEGMENT` with an entry, `--into-edge` one with an entry and an exit; a `FLOW` or
+`TRIGGER` is always added unwired. The whole recipe always lands.
 
 ```bash
-borgiq --json templates list --search slack --page-size 25 \
-  | jq '{total, pages: ((.total / 25) | ceil)}'
+borgiq recipes list --kind TASK --has-entry --json   # --kind TASK|TRIGGER|FLOW|SEGMENT; --app-id, --has-exit, --search
+borgiq recipes apps --json                           # apps that hold recipes (one with only recipes is not in templates apps)
+borgiq recipes get RCPE… --json | jq '{name, kind, entry, exit, settings}'
+borgiq recipes add RCPE… --canvas "$CANVAS_ID" --after ACTR… --settings settings.yaml --json   # --after ACTR…:SPRTdone000 names the port
+borgiq recipes add RCPE… --canvas "$CANVAS_ID" --into-edge EDGE… --json
+borgiq recipes add RCPE… --canvas "$CANVAS_ID" --x 0 --y 800 --json                           # unwired, at a position
 ```
 
-To loop through every match:
+`list` items are metadata: `id`, `kind`, `name`, `description`, `actorCount`, `apps` (a recipe can be in several),
+`settingsCount`, `entry`, `exit` and tags; an unknown `--kind` is a `400`. `--x`/`--y` place the entry actor (or,
+without one, the top-left actor); by default the recipe lands below everything on the canvas.
 
-```bash
-PAGE=1; PAGE_SIZE=100
-while :; do
-  RESP=$(borgiq --json templates list --search slack --page "$PAGE" --page-size "$PAGE_SIZE")
-  echo "$RESP" | jq -c '.data[]'
-  GOT=$(echo "$RESP" | jq '.data | length')
-  TOTAL=$(echo "$RESP" | jq '.total')
-  [[ $((PAGE * PAGE_SIZE)) -ge $TOTAL || $GOT -lt $PAGE_SIZE ]] && break
-  PAGE=$((PAGE + 1))
-done
-```
-
-The `list` envelope is **metadata only**. To get the actor definition, fetch the template by id:
-
-```bash
-borgiq templates get ATMP01kd6gqghj04j8765nnqyp09a --json
-```
-
-The returned object includes an `actor` field carrying the full `ExportedCanvasActor` payload — drop this into `canvas-actors create` / `batch` (remember to convert config fields to YAML strings per the [data formats reference](cli/cli-data-formats.md)) instead of writing the actor from scratch.
-
-**End-to-end pattern — search, pick, instantiate:**
-
-The YAML-string conversion is handled by `borgiq scaffold actor-from-template` (see [cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template](cli/cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template)), which mirrors the platform's `importActor()` and also generates a fresh actor id and msgVar, replaces a top-level `webhookTriggerKey` when the template carries one, and adds the `template: { id, version, appName }` provenance:
-
-```bash
-# 1. Find a template
-borgiq --json templates list --search "send slack" --type TASK \
-  | jq '.data[] | {id, name, appName}'
-
-# 2. Convert in one pipe and capture the generated actor id (--print-id prints only the id, on stdout;
-#    the actor JSON goes to --output)
-ACTOR_ID=$(borgiq templates get ATMP01kd6gqghj04j8765nnqyp09a --json \
-  | borgiq scaffold actor-from-template \
-      --name "Notify #ops on deploy" \
-      --output outputs/notify-ops-actor.json \
-      --print-id)
-
-# 3. Create the actor in the canvas
-borgiq canvas-actors create "$CANVAS_ID" "$ACTOR_ID" \
-  --file outputs/notify-ops-actor.json --json
-```
-
-For batch mode: pipe the converter's JSON (omit `--output` and `--print-id`) into `borgiq scaffold batch --output ops.json`, which wraps it in the operations envelope for `borgiq canvas-actors batch <canvas> --file ops.json`. `actor-from-template` does **not** wire credentials, secrets, or `inputs` values — apply those via a follow-up `canvas-actors update`.
-
-See [cli-command-reference.md#template-commands](cli/cli-command-reference.md#template-commands) for the full flag list and example outputs.
-
-### Start from a recipe (a multi-actor starting point)
-
-Recipes need `@borgiq/cli` ≥ 0.13.0. Check first: `borgiq help recipes >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"`. If the installed CLI has no `recipes` command and cannot be upgraded, build the flow from templates instead.
-
-A **recipe** is a saved starting point BorgIQ publishes: a single task actor (`TASK`, e.g. an AI agent with its tools already attached), a single trigger (`TRIGGER`), a whole flow (`FLOW`, trigger → steps), or a flow segment (`SEGMENT`, a trigger-less chain). Unlike a template it is **not versioned and not linked back** — once added, the actors are the user's and nothing updates them (a step inside that came from a template keeps its own `template` stamp). Prefer a recipe over hand-building when the user's ask is a multi-actor pattern ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"); prefer a template for one integration step you want to keep updatable.
-
-A recipe's **entry** is the actor an incoming edge attaches to, its **exit** the actor and port an outgoing edge leaves from; either is `null` when the recipe has none. `FLOW` and `SEGMENT` recipes always have both; a `TASK` or `TRIGGER` has only what its actor has — a trigger never has an entry, a webhook trigger has an exit, an MCP server (a `TRIGGER` with its tools) has neither. That decides the wiring: `--after` takes a `TASK` or `SEGMENT` with an entry, `--into-edge` one that also has an exit, and a `FLOW` or `TRIGGER` is always added unwired (the API refuses the rest with a `400`). The whole recipe always lands. Its **settings** — connection groups (by connection type), credential groups (by key/type/source) and declared inputs — are the values the user is expected to set.
-
-```bash
-# 1. Browse — by kind (TASK | TRIGGER | FLOW | SEGMENT), app, wiring, or search
-borgiq recipes list --kind SEGMENT --json
-borgiq recipes list --kind TASK --has-entry --json          # what can be wired in after an actor
-borgiq recipes apps --json                                   # the apps that hold recipes
-borgiq recipes list --app-id TAPP01... --json
-
-# 2. Read what it asks for: settings.connections / credentials (each with its groupKey) / inputs, plus entry and exit
-borgiq recipes get RCPE01... --json | jq '{name, kind, entry, exit, settings}'
-
-# 3. Add it — the API instantiates it (fresh ids, settings applied, webhook keys minted, wired in)
-borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --after ACTR01... --settings settings.yaml --json   # from its first output port
-borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --after ACTR01...:SPRTdone000 --json                # or from the one you name
-borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --into-edge EDGE01... --json
-borgiq recipes add RCPE01... --canvas "$CANVAS_ID" --x 0 --y 800 --json   # unwired, at a position
-```
-
-The `--settings` file keys each connection and credential group by the `groupKey` that `recipes get` prints on it (e.g. `slack-bearer|slack-oauth2`, `apiKey||secret`), and inputs by their `key`. A group takes one workspace key for every actor in it, or `{ <recipe actor id>: <key> }` to choose per actor (only actors of that group). The API checks everything before adding anything: keys must exist in the workspace (`borgiq connections list`, `borgiq secrets list`) and a connection must be of its group's type; a value must read as its input's type (`abc` is not a number, `yes` is not a boolean, JSON must parse); an input left out takes its default, and a required input without one must be given. Groups left out stay unset — set them with `canvas-actors update` afterwards. `add` returns `{ actorIds, entryActorId, exitActorId, edgeIds }` (the two ids are `null` for a recipe without an entry or exit); the new actors are ordinary canvas actors from then on.
-
-Do **not** reimplement instantiation from `recipes get` + `canvas-actors batch`: id rewriting inside code and configuration, message-variable collision handling and webhook key minting are the API's job (the thin-client rule).
-
-See [cli-command-reference.md#recipe-commands](cli/cli-command-reference.md#recipe-commands) for the flags.
-
----
-
-## Step 3: Discover Workspace Resources
-
-Before building actor configurations, check what connections, credentials, and assets already exist in the workspace. This determines what `connection.key`, `credentials` keys, and asset references to use in the YAML.
-
-### List connections
-
-```bash
-borgiq connections list --json
-```
-
-### List AI providers and usable models
-
-```bash
-borgiq ai-providers list --json      # built-in credential links + custom providers (slug, connection, catalog, modelCount)
-borgiq ai-providers models --json    # a top-level array of listed model references; `agent` says whether the AI Agent accepts each
-```
-
-Custom providers (Groq, Fireworks, OpenRouter, a self-hosted vLLM, …) show as `provider: custom` with a slug and the effective base URL their requests go to (`connectionMissing: true` means the linked connection was deleted); their models are referenced as `<slug>/<model-id>`. Actors also accept `<provider>/<model-id>` for a built-in provider's unlisted model, which `models` does not enumerate. Requires `@borgiq/cli` >= 0.12.0; see [custom-ai-providers.md](custom-ai-providers.md).
-
-Check if the connection the actor needs already exists. If it does, use its `key` in the actor's `connection` config:
+**Settings.** `recipes get` returns `data.actors` (an ExportedCanvasData actor map), `entry`, `exit` and `settings`:
+`connections[]` (`{ type, label?, actorIds, groupKey }`), `credentials[]` (`{ key, type?, source, label?, actorIds,
+groupKey }`) and `inputs[]` (`{ key, label, type, required?, default?, targets }`). The `actorIds` are recipe-local. The
+`--settings` file (JSON or YAML; `-` reads stdin) keys groups by `groupKey` and inputs by `key`. A group takes one
+workspace key, or `{ <recipe actor id>: <key> }` for chosen actors of that group:
 
 ```yaml
-configuration:
-  connection:
-    key: my-existing-connection
-    type: gmail
+connections:
+  slack-bearer|slack-oauth2: team-slack
+credentials:
+  apiKey||secret: { ACTR…: my-api-key }
+inputs:
+  channel: '#triage'
 ```
 
-`type` also accepts a non-empty array of connection-type names when several are acceptable (e.g. `[github-oauth2, github-pat]`) — see [Typed Connections](http-request-actor.md#typed-connections).
-
-If the connection doesn't exist, instruct the user:
-
-> You need to create a Gmail connection in the workspace with the key `my-gmail`. Go to **Workspace Settings > Connections > Add Connection** and select Gmail OAuth2.
-
-### List connection types
-
-```bash
-borgiq connections types --json
-```
-
-Shows what connection types are available for the workspace (e.g., gmail, slack-oauth2, github-oauth2).
-
-`configuration.connection.type` accepts either one exact connection-type name or a non-empty array of exact names.
-
-### List secrets
-
-```bash
-borgiq secrets list --json
-```
-
-Check if a secret the actor needs exists. If it does, reference it in the actor config:
-
-```yaml
-configuration:
-  credentials:
-    apiKey:
-      workspaceKey: my-openai-key
-```
-
-If the secret doesn't exist, instruct the user:
-
-> You need to create a secret in the workspace with the key `my-openai-key`. Go to **Workspace Settings > Secrets > Add Secret** and add your OpenAI API key.
-
-### List assets
-
-```bash
-borgiq assets list --json
-```
-
-Check if referenced assets (files, images, documents) exist. Assets are referenced by key in actor configurations.
-
----
-
-## Step 4: Deploy a Workflow
-
-After generating and locally validating YAML, deploy it to the platform.
-
-### Preferred: deploy a canvas bundle
-
-For a new bundle:
-
-```bash
-borgiq bundle validate ./my-flow.borgiq-canvas --strict
-borgiq bundle push ./my-flow.borgiq-canvas --create --auto-layout
-```
-
-For an existing canvas pulled into a bundle:
-
-```bash
-borgiq bundle validate ./my-flow.borgiq-canvas --strict
-borgiq bundle push ./my-flow.borgiq-canvas --dry-run
-borgiq bundle push ./my-flow.borgiq-canvas --auto-layout
-```
-
-`bundle push` is incremental by default and refreshes the local bundle after success. Use direct documents or batch operations only when a bundle is not possible: no shell/filesystem access, a CLI without bundle support, or a one-off patch to a canvas nobody maintains locally.
-
-### Direct document and batch workflow
-
-#### Create a new canvas with full flow data
-
-```bash
-borgiq canvases create-with-data --file outputs/my-workflow.yaml --json
-```
-
-Or pipe from stdin:
-
-```bash
-cat outputs/my-workflow.yaml | borgiq canvases create-with-data --json
-```
-
-The request body should include `name`, `slug`, `description`, and `data` (the full actor graph). See the [CLI data formats reference](cli/cli-data-formats.md#create-with-data-body) for the expected JSON structure.
-
-#### Create an empty canvas, then add actors incrementally
-
-```bash
-# Create empty canvas
-borgiq canvases create --name "My Flow" --slug my-flow --json
-
-# Add actors via patch
-borgiq canvas-actors batch <canvasSlugOrId> --file actors-patch.yaml --json
-```
-
-The patch body uses operations: `add`, `update`, `remove`, with per-actor `editVersion` conflict detection. Use it only for a canvas that has no local bundle — once a bundle exists, edit the bundle and `bundle push` instead of patching out of band.
-
-#### Import canvas data (merge, insert, or replace)
-
-```bash
-# Merge (default) — add/update actors from import, leave others untouched
-borgiq canvases update-data <canvasSlugOrId> --file updated-flow.yaml --json
-
-# Insert — generate new IDs for all imported actors, no conflicts
-borgiq canvases update-data <canvasSlugOrId> --file flow-fragment.yaml --mode insert --json
-
-# Replace — replace entire canvas with imported data
-borgiq canvases update-data <canvasSlugOrId> --file full-canvas.yaml --mode replace --json
-```
-
-**Modes:**
-- `merge` (default): Updates existing actors by ID, adds new ones. Other actors are left untouched.
-- `insert`: Generates new actor/edge IDs for all imported actors. Safe for duplicating workflow fragments.
-- `replace`: Full canvas replacement. Returns 409 if the canvas was modified concurrently — re-read and retry.
-
-All modes use per-actor `editVersion` conflict detection and return the same response as `batch`.
-
-#### Update canvas metadata only
-
-```bash
-borgiq canvases update <canvasSlugOrId> --name "New Name" --description "Updated"
-borgiq canvases update <canvasSlugOrId> --readme-file ./README.md   # the canvas's own documentation
-```
-
----
-
-## Step 4b: Manage Individual Actors
-
-For fine-grained actor management without sending the full canvas data.
-
-### List actors in a canvas
-
-```bash
-borgiq canvas-actors list <canvasSlugOrId> --json
-borgiq canvas-actors list <canvasSlugOrId> --actor-type DenoActor --is-active true --json
-borgiq canvas-actors list <canvasSlugOrId> --search "fetch" --json
-```
-
-Filter by `--actor-type`, `--is-active`, and `--search` (name/description). Supports pagination with `--page` and `--page-size`.
-
-### Get a single actor
-
-```bash
-borgiq canvas-actors get <canvasSlugOrId> <actorId> --json
-```
-
-### Get downstream flow from an actor
-
-```bash
-borgiq canvas-actors flow <canvasSlugOrId> <actorId> --json
-```
-
-Returns the specified actor plus all downstream actors reachable by following edges. Useful for understanding what happens after a specific actor.
-
-### Verify actor options
-
-```bash
-echo '{"actorType": "HttpRequestActor", "options": "method: GET\nurl: https://example.com"}' | borgiq canvas-actors verify <canvasSlugOrId> --json
-```
-
-Validates actor options (YAML string) against the type's schema without modifying the canvas. For `RouterActor`/`AiRouterActor`, include `sourcePorts` in the JSON body.
-
-### Create a single actor
-
-```bash
-borgiq canvas-actors create <canvasSlugOrId> <actorId> --file actor-data.json --json
-```
-
-The actor ID is specified as an argument. Generate it client-side using the `ACTR` prefix format.
-
-### Update a single actor
-
-```bash
-borgiq canvas-actors update <canvasSlugOrId> <actorId> --file updates.json --json
-borgiq canvas-actors update <canvasSlugOrId> <actorId> --file updates.json --edit-version 3 --json
-```
-
-Partial update — only include the fields you want to change. Use `--edit-version` for conflict detection.
-
-### Delete a single actor
-
-```bash
-borgiq canvas-actors delete <canvasSlugOrId> <actorId>
-borgiq canvas-actors delete <canvasSlugOrId> <actorId> --edit-version 3
-```
-
-### App thumbnails
-
-Give an App / React App actor its canvas-node and apps-page image: screenshot the served app, then attach it.
-
-```bash
-SRC=$(borgiq canvas-actors app-url <canvasSlugOrId> <actorId>)   # short-lived; needs app:use
-npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=3000 "$SRC" thumbnail.png
-borgiq canvas-actors thumbnail set <canvasSlugOrId> <actorId> thumbnail.png --json
-```
-
-`thumbnail get [--out file]` and `thumbnail rm` complete the set. In a bundle, the image lives beside `actor.yaml` as `thumbnail.<ext>`. See the React app skill's *App thumbnail* section for limits and fallbacks.
-
----
-
-## Step 5: Validate on Server
-
-After deploying, validate the canvas on the server to catch issues that local validation can't detect (missing connections, invalid resource references):
-
-```bash
-borgiq canvases validate <canvasSlugOrId> --json
-```
-
-**Response includes:**
-- `valid: true/false`
-- `errors` — ID format issues, missing config, broken references
-- `warnings` — non-blocking issues (e.g., no trigger actor)
-
-Fix any errors by patching actors and re-validating:
-
-```bash
-borgiq canvas-actors batch <canvasSlugOrId> --file fix-patch.json --json
-borgiq canvases validate <canvasSlugOrId> --json
-```
-
----
-
-## Step 6: Auto-Layout
-
-After creating or modifying a canvas programmatically, auto-arrange actors visually:
-
-```bash
-borgiq canvases layout <canvasSlugOrId> --json
-```
-
-To layout only actors downstream of specific actors (keeping everything else in place):
-
-```bash
-# Single flow
-borgiq canvases layout <canvasSlugOrId> --source-actor-id ACTR01kmka7wqwan6fh6k5hgfpyv59 --json
-
-# Multiple flows
-borgiq canvases layout <canvasSlugOrId> --source-actor-id ACTR01flow1trigger --source-actor-id ACTR01flow2trigger --json
-```
-
----
-
-## Step 7: Execute a Flow
-
-### Manual trigger
-
-Fires the trigger actor you name, with no payload (there is no payload option):
-
-```bash
-borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
-```
-
-Save the returned `flowrun.id` for monitoring. To run with a payload, POST it to a webhook or universal trigger's URL — see [flowrun-job-states.md](flowrun-job-states.md#monitor-a-flow-until-completion).
-
-### Test run a single actor
-
-Test an individual actor using its most recent input data:
-
-```bash
-borgiq flowrun-jobs test-run --canvas <canvasId> --actor-id <actorId> --json
-```
-
-Add `--publish` to also execute downstream actors. Without it, only this actor runs in isolation.
-
-### Re-run a failed job
-
-After fixing an actor's configuration, re-run it with the latest config:
-
-```bash
-borgiq flowrun-jobs re-run --job-id <flowrunJobId> --json
-```
-
----
-
-## Step 8: Monitor Execution
-
-### Poll flowrun status (recommended for agents)
-
-Poll every 2-3 seconds until `state` is `completed` or `user-interrupted`:
-
-```bash
-borgiq flowruns status <flowrunId> --json
-```
-
-**States** (lowercase):
-- `running` — at least one counter > 0
-- `completed` — all counters are zero; this does **not** mean success — check the summary's `errors`
-- `user-interrupted` — manually interrupted
-
-### Get full execution summary
-
-After completion, get a complete picture of what happened:
-
-```bash
-borgiq flowruns summary <flowrunId> --json
-```
-
-Returns `state`, `actors[]` (each with `jobs[]`: `jobId`, `state`, `status`, `error`, `resultId`, timing) and `errors[]` (`actorId`, `actorName`, `jobId`, `error`). The flowrun succeeded only if `errors` is empty.
-
-### Interrupt a running flow
-
-```bash
-borgiq flowruns interrupt <flowrunId>
-```
-
----
-
-## Step 9: Debug Failures
-
-### Find which actors failed
-
-```bash
-borgiq flowruns summary <flowrunId> --json
-# Look at the "errors" array for quick scan of all failures
-```
-
-### Get job result summaries
-
-```bash
-borgiq flowrun-results summaries --job-id <flowrunJobId> --json
-```
-
-Shows status (`success` or `error`), timing, and error metadata.
-
-### Get full job result data
-
-`borgiq flowrun-results data <resultId>` fails against the current API, which requires a `rootPath` query the CLI does not send. Read what a job emitted with [`flowrun-messages`](#view-messages-between-actors) instead.
-
-### Get runtime data (what the actor received)
-
-`--root-path` takes `ctx`, `trigger` or `inputs`; the CLI's help also lists `request` and `user`, which the API rejects:
-
-```bash
-# Run context: org, workspace, canvas, flowrun, trigger, actor ids and names (no configuration or secrets)
-borgiq flowrun-jobs runtime-data <jobId> --root-path ctx --json
-# Trigger event (webhook request, schedule timestamp, …) — trigger actors' jobs only
-borgiq flowrun-jobs runtime-data <jobId> --root-path trigger --json
-# Tool-call input — agent or MCP tool-call jobs only
-borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json
-```
-
-For the data any other job received, read its [source message](#get-source-message-for-a-job).
-
-### View messages between actors
-
-```bash
-# List the messages an actor emitted in a flowrun (the 10 newest)
-borgiq flowrun-messages list --canvas <canvasSlugOrId> --flowrun-id <id> --actor-id <id> --json
-
-# Get the full message payload: { msg, err }, keyed by msgVar — the actor's own output is msg.<msgVar>
-borgiq flowrun-messages data <messageId> --json
-```
-
-### AI agent timeline
-
-For `AiAgentActor` jobs, view the full tool-use timeline:
-
-```bash
-borgiq flowrun-jobs ai-timeline <jobId> --json
-```
-
-### Get source message for a job
-
-See the message a job received:
-
-```bash
-borgiq flowrun-jobs source-message <jobId> --json      # { sourceFlowrunMessage: { id, messageType } }
-borgiq flowrun-messages data <sourceFlowrunMessageId> --json   # the msg.<msgVar> data it received
-```
-
----
-
-## Step 10: Export and Import
-
-### Export a canvas
-
-```bash
-borgiq canvases export <canvasSlugOrId> > canvas-backup.json
-```
-
-### Duplicate a canvas
-
-`canvases create-with-data` does not accept the `{ yaml, errors }` that `canvases export` prints. Unpack the export into a bundle instead:
-
-```bash
-borgiq canvases export <canvasSlugOrId> --json | borgiq bundle unpack - ./copy.borgiq-canvas
-# Edit canvas.name and canvas.slug in ./copy.borgiq-canvas/canvas.yaml — both must be unused in the workspace.
-borgiq bundle push ./copy.borgiq-canvas --create
-```
-
-Actor IDs are kept; they only need to be unique within a canvas.
-
-### Verify import data before creating
-
-```bash
-borgiq canvases verify-import --file import-data.json --json
-```
-
----
-
-## Common Workflows
-
-### Create, Validate, Layout, and Test a Flow
-
-```bash
-# 1. Check available actor types
-borgiq actors list
-
-# 2. Check available connections and secrets
-borgiq connections list --json
-borgiq secrets list --json
-
-# 3. Generate YAML locally (existing skill workflow)
-# ... generate IDs, build YAML, validate locally ...
-
-# 4. Deploy
-borgiq canvases create-with-data --file outputs/my-flow.yaml --json
-# Save the returned canvas ID
-
-# 5. Validate on server
-borgiq canvases validate <canvasSlugOrId> --json
-
-# 6. Auto-layout
-borgiq canvases layout <canvasSlugOrId>
-
-# 7. Trigger
-borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
-# Save the returned flowrun ID
-
-# 8. Monitor (poll until state is no longer running)
-borgiq flowruns status <flowrunId> --json
-
-# 9. Check results (success: errors is empty)
-borgiq flowruns summary <flowrunId> --json
-```
-
-### Debug a Failed Actor
-
-```bash
-# 1. Find failures
-borgiq flowruns summary <flowrunId> --json
-
-# 2. Get error details
-borgiq flowrun-results summaries --job-id <jobId> --json
-
-# 3. See what config is set now
-borgiq canvas-actors get <canvasSlugOrId> <actorId> --json
-
-# 4. See what input data was received
-borgiq flowrun-jobs source-message <jobId> --json
-borgiq flowrun-messages data <sourceFlowrunMessageId> --json
-
-# 5. Fix the actor configuration
-borgiq canvas-actors batch <canvasSlugOrId> --file fix.json --json
-
-# 6. Re-run with fixed config
-borgiq flowrun-jobs re-run --job-id <jobId> --json
-```
-
-### Iterate on a Flow Design
-
-The bundle loop is the default iteration workflow:
-
-```bash
-# 1. Pull once and commit the baseline
-borgiq bundle pull <canvasSlugOrId> ./my-flow.borgiq-canvas
-
-# 2. Edit actor.yaml, code/*, or canvas.yaml; then validate and preview
-borgiq bundle validate ./my-flow.borgiq-canvas --strict
-borgiq bundle push ./my-flow.borgiq-canvas --dry-run
-
-# 3. Commit the intended local change and synchronize
-borgiq bundle push ./my-flow.borgiq-canvas   # add --auto-layout when actors were added, removed, or rewired
-borgiq canvases validate <canvasSlugOrId> --json
-
-# 4. Test, inspect flowruns, edit the bundle, and repeat
-borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
-borgiq flowruns summary <flowrunId> --json
-```
-
-When there is no local bundle, use the direct fallback:
-
-```bash
-# 1. Read current flow
-borgiq canvases get <canvasSlugOrId> --include-data --json
-
-# 2. Modify actors
-borgiq canvas-actors batch <canvasSlugOrId> --file changes.json --json
-
-# 3. Validate
-borgiq canvases validate <canvasSlugOrId> --json
-
-# 4. Re-layout if needed
-borgiq canvases layout <canvasSlugOrId>
-
-# 5. Test
-borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
-
-# 6. Monitor
-borgiq flowruns status <flowrunId> --json
-
-# 7. Check results
-borgiq flowruns summary <flowrunId> --json
-
-# Repeat 2-7 until satisfied
-```
-
----
-
-## Output Format
-
-- **Interactive terminal:** Table output by default
-- **Piped / `--json` flag:** JSON output (machine-readable)
-
-Always use `--json` when parsing output programmatically:
-
-```bash
-borgiq canvases list --json | jq '.data[].id'
-```
+The API checks everything before adding anything: keys must exist in the workspace (`borgiq connections list`,
+`borgiq secrets list`) and match the group's connection type; values must read as their input's type (`abc` is not a
+number, `yes` is not a boolean, JSON must parse); an omitted input takes its default, and a required one without a
+default must be given. Omitted groups stay unset: set them later with `canvas-actors update`. Errors: `400` with
+`details` when a check fails, a group, input or actor id is not the recipe's, or the wiring target is missing or does
+not fit; `403` for an actor type the organization may not use (e.g. `PythonActor` outside a privileged
+organization); `404` for an unknown recipe or canvas; `409` when the actor it wires to changed meanwhile (nothing
+was added; re-read and retry).
+
+`add` returns `{ actorIds, entryActorId, exitActorId, edgeIds }` (`null` ids when there is no entry or exit). The API
+mints the ids and rewrites references to them in code and configuration, mints webhook keys, suffixes colliding
+msgVars and wires the recipe in. Never rebuild a recipe from `recipes get` + `canvas-actors batch`.
+
+## Errors
+
+| Message or status | Exit | Meaning and fix |
+|---|---|---|
+| `401`, or `auth status` fails | 3 | Token missing, expired or revoked: ask the user to run `borgiq auth login` |
+| `403` | 4 | The token lacks a scope, or the user is not a member of that org or workspace. The user creates a token with the scope ([api-tokens.md](api-tokens.md#scopes)) and logs in again |
+| `404` | 5 | Wrong slug or ID, or wrong org/workspace: list first, or pass `--org` / `--workspace` |
+| `409` from `canvas-actors update`/`delete`/`batch` or `update-data --mode replace` | 6 | The canvas changed since you read it (`editVersion`): re-read, reapply, retry with the current `--edit-version`. Bundle conflicts: [canvas-bundles.md](cli/canvas-bundles.md#incremental-sync-and-conflicts) |
+| `400` naming a field, e.g. an object where a YAML string belongs | 2 | Wrong payload shape for the command: [cli-data-formats.md](cli/cli-data-formats.md#common-mistakes) |
+| `429` | 7 | Rate limited per token: wait for `Retry-After` and back off ([api-tokens.md](api-tokens.md#rate-limits-and-errors)) |
+| `Invalid JSON in file: <path>`, `Invalid YAML in file: <path>` | 2 | The file does not parse as its extension says |
+| `Invalid YAML/JSON from stdin.` | 2 | The pipe carried other text (log lines, binary): write the payload to a file and pass `--file` |
+| `Provide input via the file flag or pipe YAML/JSON to stdin.` | 2 | Nothing was piped on a terminal |
+| `unknown command '<name>'` | 1 | The CLI predates the command: [CLI versions](#cli-versions) |
+| `command not found: borgiq` | — | Not installed, or npm's global bin directory is not on `PATH` |

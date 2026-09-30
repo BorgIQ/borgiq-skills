@@ -36,10 +36,10 @@ Build Actors and Triggers that power BorgIQ automation workflows.
 - [Migration from Other Platforms](#migration-from-other-platforms)
 - [Deploying and Testing with the CLI](#deploying-and-testing-with-the-cli)
   - [Canvas Bundles](references/cli/canvas-bundles.md)
-  - [CLI Command Reference](references/cli/cli-command-reference.md)
+  - [CLI Command Map](references/borgiq-cli.md#command-map)
   - [CLI Data Formats](references/cli/cli-data-formats.md)
-  - [CLI Scaffolding Scripts](references/cli/cli-setup-scripts.md)
-  - [CLI Troubleshooting](references/cli/cli-troubleshooting.md)
+  - [CLI Scaffolding](references/borgiq-cli.md#start-from-a-template)
+  - [CLI Errors](references/borgiq-cli.md#errors)
 
 ## BorgIQ Platform Overview
 
@@ -172,7 +172,7 @@ That file is a router: it maps each actor, action, form component and shared typ
 >
 > In a bundle, write the `templates get` actor payload (already ExportedCanvasActor object shape) as `actor.yaml`, apply the [template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation) (fresh actor ID and trigger keys, keep `template` provenance), and complete the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). `scaffold actor-from-template` produces the YAML-string CanvasActor mutation shape for the direct/batch fallback and performs those fixups automatically. Full flow: [Deploying and Testing with the CLI](#deploying-and-testing-with-the-cli).
 >
-> **Multi-actor patterns have recipes.** When the ask is a whole flow or a chain of steps ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"), check `borgiq recipes list --json` before composing actors by hand: `borgiq recipes add <id> --canvas <canvas> [--after <actorId>] --settings <file>` lands the whole recipe with fresh ids, wired in, with the user's connections and inputs applied. Recipes are not versioned and not linked back — the actors are ordinary canvas actors afterwards. See [Start from a recipe](references/borgiq-cli.md#start-from-a-recipe-a-multi-actor-starting-point).
+> **Multi-actor patterns have recipes.** When the ask is a whole flow or a chain of steps ("classify webhook requests and post to Slack", "summarize and notify", "an agent with memory"), check `borgiq recipes list --json` before composing actors by hand: `borgiq recipes add <id> --canvas <canvas> [--after <actorId>] --settings <file>` lands the whole recipe with fresh ids, wired in, with the user's connections and inputs applied. Recipes are not versioned and not linked back — the actors are ordinary canvas actors afterwards. See [Start from a recipe](references/borgiq-cli.md#start-from-a-recipe).
 
 ### Choosing a Task Actor Type
 
@@ -837,7 +837,7 @@ borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
          --name "My instance" --output actor.json --print-id)   # --print-id prints only the id, on stdout
    borgiq canvas-actors create CANV01... "$ACTOR_ID" --file actor.json --json
    ```
-   See [borgiq-cli.md](references/borgiq-cli.md#browse-the-template-catalog-faster-than-building-from-scratch) for the search/paginate pattern and [cli-setup-scripts.md](references/cli/cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template) for the full converter reference.
+   See [borgiq-cli.md](references/borgiq-cli.md#start-from-a-template) for the search/paginate pattern and the full converter reference.
 
 3. **Start the canvas bundle** — This is the `rails new` moment: every canvas is built and maintained as a bundle folder. Initialize a new one, or pull an existing canvas:
    ```bash
@@ -869,7 +869,7 @@ borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
    borgiq canvases layout <canvasSlugOrId>
    ```
 
-8. **Execute** — Trigger the flow and monitor. `triggers run` takes the canvas ID and sends no payload ([to send one](references/flowrun-job-states.md#monitor-a-flow-until-completion)):
+8. **Execute** — Trigger the flow and monitor. `triggers run` takes the canvas ID and sends no payload ([to send one](references/flowrun-job-states.md#run-a-flow)):
    ```bash
    borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json   # flowrun ID: flowrun.id
    borgiq flowruns status <flowrunId> --json    # poll while state is "running"

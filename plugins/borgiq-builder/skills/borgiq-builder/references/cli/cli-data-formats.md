@@ -1,573 +1,228 @@
-# CLI Data Formats Reference
+# Direct documents and batch payloads
 
-This document specifies the exact input and output formats for every BorgIQ CLI command that accepts data.
+The payload shapes for the direct path, which bypasses canvas bundles: `canvases create-with-data` / `update-data`
+documents and `canvas-actors create` / `update` / `batch` bodies. Use it only when a bundle is not possible: a CLI
+without `borgiq bundle` that cannot be upgraded, a one-off patch to a canvas nobody maintains locally, or a document
+for manual deployment when there is no shell. Once a canvas has a local bundle, edit and push the bundle instead
+([canvas-bundles.md](canvas-bundles.md)).
 
-## Input Formats
+## Contents
 
-The CLI accepts both **JSON** and **YAML** files via `--file`. It auto-detects the format by file extension (`.yaml`/`.yml` for YAML, everything else parsed as JSON). Internally, the CLI always sends `Content-Type: application/json` to the API — YAML files are parsed and converted to JSON before sending.
+- [Which command takes which shape](#which-command-takes-which-shape)
+- [Field types](#field-types)
+- [Actor fields](#actor-fields)
+- [create-with-data body](#create-with-data-body)
+- [update-data](#update-data)
+- [canvas-actors bodies](#canvas-actors-bodies)
+- [Verify bodies](#verify-bodies)
+- [Export and duplicate](#export-and-duplicate)
+- [Common mistakes](#common-mistakes)
 
-The `--json` flag controls **output format only** — without it the CLI renders tables for interactive use; with it the CLI outputs machine-readable JSON. It does not affect input parsing.
+## Which command takes which shape
 
----
+`--file` reads JSON, or YAML when the name ends in `.yaml`/`.yml`; stdin is read as YAML. The CLI always sends JSON to
+the API. The same configuration fields take **two different shapes**, and mixing them up is a `400`:
 
-## Master Format Table
+| Command | Body | `options`, `inputs`, `vars`, `outputs`, `credentials`, `error`, `schemas.*` |
+|---|---|---|
+| `canvases create-with-data` | ExportedCanvasData envelope | objects (the parsed shape) |
+| `canvases update-data <canvas>` | ExportedCanvasData canvas data `{ schemaVersion, actors }` | objects |
+| `canvas-actors create <canvas> <actorId>` | CanvasActor, without `id` | **YAML strings** |
+| `canvas-actors update <canvas> <actorId>` | partial CanvasActor | **YAML strings** |
+| `canvas-actors batch <canvas>` | `{ operations: [...] }` | **YAML strings** |
+| `canvas-actors verify <canvas>` | `{ actorType, options, sourcePorts? }` | `options` is a YAML string |
+| `canvases verify-import` | `{ canvas: "<YAML string>" }` | the whole export as one YAML string |
 
-### Commands that accept file input
+The API turns ExportedCanvasData objects into YAML strings before storing them, and stores CanvasActor YAML strings as
+they are (its schemas: `CanvasCreateWithDataInputSchema` with `ExportedCanvasDataSchema`; `CanvasActorSchema`, without
+`id` for create; `CanvasActorsBatchInputSchema` with `ActorOperationSchema`). `borgiq scaffold actor|actor-from-template|canvas|batch` builds correctly shaped payloads
+([borgiq-cli.md](../borgiq-cli.md#command-map)).
 
-| Command | `--file` | JSON Schema | Config fields format |
-|---------|----------|-------------|---------------------|
-| `borgiq canvases create-with-data` | Yes | `ExportedCanvasData` envelope | **JSON objects** |
-| `borgiq canvases update-data` | Yes | `ExportedCanvasData` canvas data (`{ schemaVersion, actors }`); the CLI wraps it as `{ canvas, mode }` | **JSON objects** |
-| `borgiq canvas-actors create` | Yes | `CanvasActorSchema` (without `id`) | **YAML strings** |
-| `borgiq canvas-actors update` | Yes | `CanvasActorSchema` partial (without `id`) | **YAML strings** |
-| `borgiq canvas-actors batch` | Yes | `{ operations: ActorOperation[] }` | **YAML strings** |
-| `borgiq canvas-actors verify` | Yes or stdin | `{ actorType, options, sourcePorts? }` | **YAML string** (`options` only) |
-| `borgiq canvases verify-import` | Yes | `{ canvas: "<YAML string>" }` | **YAML string** (entire export) |
+## Field types
 
-### Commands with no file input
+| Field | ExportedCanvasData | CanvasActor |
+|---|---|---|
+| `configuration.options` | object, optional (omit or `{}`) | YAML string, **required** (`""` allowed) |
+| `configuration.inputs`, `outputs`, `error`, `credentials` | object | YAML string |
+| `configuration.vars` | array | YAML string |
+| `schemas.inputs`, `schemas.outputs` | object (JSON Schema) | YAML string (JSON Schema as YAML) |
+| `configuration.codeDir` | array of `{ path, content }` | the same array, **never** a YAML string |
+| `configuration.connection` | `{ type?: string \| string[], key? }` | the same object |
+| `configuration.webhook` | `{ triggerKey?, authorizationLevel?, allowedMethods?, responseTimeout?, enabled? }`; `authorizationLevel` is `public`, `apps`, `apiKey` or `appsAndApiKey` | the same object |
+| `configuration.aiAgentToolActorIds` | string array | string array |
+| `configuration.code` | legacy single string: never write it | legacy single string: never write it |
 
-| Command | Input | Notes |
-|---------|-------|-------|
-| `borgiq auth login` | Interactive prompt | User handles authentication |
-| `borgiq auth status` | None | |
-| `borgiq orgs list` | None | |
-| `borgiq workspaces list` | `--org` flag | |
-| `borgiq canvases list` | None | |
-| `borgiq canvases get` | `<canvasSlugOrId>`, `--include-data` flag | |
-| `borgiq canvases create` | `--name`, `--slug`, `--description` flags | |
-| `borgiq canvases update` | `<canvasSlugOrId>`, `--name`, `--description` flags | |
-| `borgiq canvases export` | `<canvasSlugOrId>` | Returns `{ yaml, errors }` |
-| `borgiq canvases validate` | `<canvasSlugOrId>` | |
-| `borgiq canvases layout` | `<canvasSlugOrId>`, `--source-actor-id` flag(s) | |
-| `borgiq actors list` | None | |
-| `borgiq actors schema` | `<actorType>` | |
-| `borgiq connections list` | None | |
-| `borgiq connections types` | None | |
-| `borgiq secrets list` | None | |
-| `borgiq assets list` | None | |
-| `borgiq templates list` | `--search`, `--type` (repeatable), `--app-id`, `--page`, `--page-size` flags | Returns `{ total, data }` (metadata only — no `actor` payload) |
-| `borgiq templates get` | `<templateId>` | Returns full template including `actor` (ExportedCanvasActor) |
-| `borgiq templates apps` | `--search`, `--category-id`, `--page`, `--page-size` flags | Use to discover ids for `templates list --app-id` |
-| `borgiq canvas-actors list` | `<canvasSlugOrId>`, filter flags | |
-| `borgiq canvas-actors get` | `<canvasSlugOrId> <actorId>` | |
-| `borgiq canvas-actors flow` | `<canvasSlugOrId> <actorId>` | |
-| `borgiq canvas-actors delete` | `<canvasSlugOrId> <actorId>`, `--edit-version` | |
-| `borgiq triggers run` | `--canvas`, `--actor-id` flags | |
-| `borgiq flowruns status` | `<flowrunId>` | |
-| `borgiq flowruns summary` | `<flowrunId>` | |
-| `borgiq flowruns interrupt` | `<flowrunId>` | |
-| `borgiq flowrun-jobs test-run` | `--canvas`, `--actor-id`, `--publish` flags | |
-| `borgiq flowrun-jobs re-run` | `--job-id` flag | |
-| `borgiq flowrun-jobs runtime-data` | `<jobId>`, `--root-path` flag | `ctx`, `trigger` (trigger actors' jobs) or `inputs` (agent/MCP tool-call jobs); the API rejects `request` and `user` |
-| `borgiq flowrun-jobs ai-timeline` | `<jobId>` | |
-| `borgiq flowrun-jobs source-message` | `<jobId>` | |
-| `borgiq flowrun-results summaries` | `--job-id` flag | |
-| `borgiq flowrun-results data` | `<resultId>` | Fails against the current API, which requires a `rootPath` query the CLI does not send |
-| `borgiq flowrun-messages list` | `--canvas`, `--flowrun-id`, `--actor-id` flags | |
-| `borgiq flowrun-messages data` | `<messageId>` | |
+`codeDir` carries the source of Deno, Deno Test, Universal Trigger, Python and React App actors. For the four code
+actors exactly one entry is the entrypoint (`main.ts`, or `main.py` for Python); see
+[code-actor-runtime.md → Source files](../code-actor-runtime.md#source-files-codedir).
+`configuration.code` is the pre-multi-file shape, and the runtime no longer reads it: an actor with `code` and no
+`codeDir` entrypoint cannot run, and `canvases validate` reports the missing entrypoint. Write `codeDir`, and never
+send both for one actor.
 
----
+## Actor fields
 
-## Common Mistakes
+Every actor carries `type` (a type name), `version` (usually `1`), `name`, `msgVar` (a JSON-safe identifier),
+`description` (`""` allowed), `isActive` (whether it receives and emits messages), `continueOnError` (emit an error
+message instead of stopping: [error-handling.md](../error-handling.md)), `enableLTM` and `enableSTM` (long-term memory,
+canvas-scoped, and short-term memory, flowrun-scoped; each one run at a time), `sourcePorts`
+([ports per type](../edges-and-positioning.md#port-ids)), `configuration`, `schemas` (`{}` allowed), `position`
+(`{ x, y }`, the UI coordinates) and `edges` (outgoing edges keyed by ID, `{}` allowed); all are required. `id` is required too, except in
+a `canvas-actors create` body, where the ID is the command's argument. Optional:
 
-> **CRITICAL: Two JSON schemas, different field types.** The same configuration fields (`options`, `inputs`, `vars`, `outputs`, `credentials`, `error`, `schemas.inputs`, `schemas.outputs`) have **different types** depending on which CLI command you use. Mixing them up causes 400 errors.
+| Field | Meaning |
+|---|---|
+| `showInWorkspaceApps` | List the actor in the workspace apps (default `true`) |
+| `template` | `{ id, version, appName }`: the template it came from |
+| `runtimeSlug` | A runtime other than the canvas's |
+| `icon` | `{ type: "borgiq", value, category: "logos" \| "icons", color?, colorable? }`, `{ type: "svg", value: "<svg…>" }` or `{ type: "url", value: "https://…" }` |
 
-| Mistake | What happens | Fix |
-|---------|-------------|-----|
-| Sending `"options": {"method": "GET"}` (JSON object) to `canvas-actors create` | 400 — expects YAML string | Use `"options": "method: GET"` |
-| Sending `"options": "method: GET"` (YAML string) to `canvases create-with-data` | 400 — expects JSON object | Use `"options": {"method": "GET"}` |
-| Omitting `options` in `canvas-actors create` body | 400 — `options` is required | Always include `"options": "..."` (can be empty string `""`) |
-| Omitting `options` in `create-with-data` body | OK — `options` is optional in ExportedCanvasData | Both `{}` and omitting are valid |
-| Omitting `description` | 400 — `description` is required | Always include `"description": "..."` (can be empty string `""`) |
-| Omitting `timestamp` in batch operations | 400 — `timestamp` is required | Always include `"timestamp": <epoch_ms>` |
-| Using `"id"` in `canvas-actors create` body | Ignored — ID comes from CLI argument | Pass actor ID as CLI arg, omit from JSON body |
+A `borgiq` icon's `value` is a slug from `https://icons.borgiqassets.com/v1/manifest.json`: `logos` are brand logos
+(`…/v1/logos/{slug}/icon-{light|dark}.svg`), `icons` monochrome UI icons (`…/v1/icons/{slug}.svg`). `color` is a hex
+override without `#` (e.g. `"504C97"`, sent as the CDN's `?color=`) for an icon marked `colorable: true`, e.g.
+`{ "type": "borgiq", "value": "arrow-right", "category": "icons", "colorable": true }`.
 
----
+## create-with-data body
 
-## Field Type Summary
-
-The same actor configuration fields exist in two different representations depending on which CLI command (and underlying API endpoint) you use.
-
-| Field path | `ExportedCanvasData` format | Required? | `CanvasActor` format | Required? |
-|-----------|----------------------------|-----------|---------------------|-----------|
-| `configuration.options` | `any` — JSON object | **No** | `string` — YAML string | **Yes** |
-| `configuration.inputs` | `any` — JSON object | No | `string` — YAML string | No |
-| `configuration.vars` | `any[]` — JSON array | No | `string` — YAML string | No |
-| `configuration.outputs` | `any` — JSON object | No | `string` — YAML string | No |
-| `configuration.credentials` | `Record<string, { type?, workspaceKey?, source? }>` — JSON object | No | `string` — YAML string | No |
-| `configuration.error` | `any` — JSON object | No | `string` — YAML string | No |
-| `configuration.codeDir` | `Array<{ path, content }>` — JSON array | No | `Array<{ path, content }>` — JSON array (**not** a YAML string) | No |
-| `configuration.code` | `string` — plain string | No | `string` — plain string | No |
-| `configuration.connection` | `{ type?: string \| string[], key? }` — JSON object | No | `{ type?: string \| string[], key? }` — JSON object | No |
-| `configuration.webhook` | `{ triggerKey?, authorizationLevel?, allowedMethods?, responseTimeout?, enabled? }` — JSON object; `authorizationLevel` is `public`, `apps`, `apiKey` or `appsAndApiKey` | No | same JSON object (**not** a YAML string) | No |
-| `configuration.aiAgentToolActorIds` | `string[]` — string array | No | `string[]` — string array | No |
-| `schemas.inputs` | `any` — JSON object | No | `string` — YAML string | No |
-| `schemas.outputs` | `any` — JSON object | No | `string` — YAML string | No |
-
-**Key difference:** `configuration.options` is **required** in `CanvasActor` format (must be a YAML string, can be `""`) but **optional** in `ExportedCanvasData` format (can be omitted or `{}`).
-
-**`configuration.codeDir` is the same shape in both formats** — a JSON array of `{ path, content }` source files, one entry per file, never a YAML string and never interpolated. It is how Deno, Deno Test, Universal Trigger, Python, and React App actors carry their source. For the four code actors exactly one entry must be the entrypoint (`main.ts`, or `main.py` for Python); see [code-actor-runtime.md → Source files](../code-actor-runtime.md#source-files-codedir). `configuration.code` is the single-string shape those actors used before multi-file support: documents that still carry it keep working, but write `codeDir` for new and edited actors, and never send both fields for the same actor.
-
-**When to use which format:**
-
-- **ExportedCanvasData** (config as JSON objects) — used by `canvases create-with-data` and `canvases update-data`. The API converts these JSON objects to YAML strings via `yamlDump()` before storing.
-- **CanvasActor** (config as YAML strings) — used by `canvas-actors create`, `canvas-actors update`, and `canvas-actors batch`. The API stores these YAML strings as-is.
-
----
-
-## ExportedCanvasData Format
-
-Used by: `borgiq canvases create-with-data --file <path>`, `borgiq canvases update-data <id> --file <path>`
-
-Configuration fields are **JSON objects** (the parsed representation).
-
-### create-with-data body
-
-Zod schema: `CanvasCreateWithDataInputSchema` with `ExportedCanvasDataSchema` for actor data.
-
-```jsonc
-{
-  // --- Canvas metadata ---
-  "name": "My API Flow",                    // REQUIRED  string (2-255 chars)
-  "slug": "my-api-flow",                    // REQUIRED  string (lowercase, numbers, hyphens)
-  "description": "A flow created via CLI",  // optional  string (defaults to "")
-  "tags": "api,automated",                  // optional  string (defaults to "")
-  "messageTTLInDays": 7,                    // REQUIRED  number (1-14)
-  "runtimeSlug": "",                        // optional  string (defaults to "")
-
-  // --- Canvas data ---
-  "data": {
-    "schemaVersion": "1",                   // REQUIRED  string
-    "actors": {
-
-      // ---- Actor 1: ButtonTriggerActor ----
-      "ACTR01kd6gqghj04j8765nnqyp09a3": {
-        "id": "ACTR01kd6gqghj04j8765nnqyp09a3",  // REQUIRED  ACTR + 26-char ULID
-        "type": "ButtonTriggerActor",       // REQUIRED  BIQActorType enum value
-        "version": 1,                       // REQUIRED  number
-        "name": "Manual Trigger",           // REQUIRED  string
-        "msgVar": "manual_trigger",         // REQUIRED  string (JSON-safe identifier)
-        "description": "Starts the flow",   // REQUIRED  string (can be "")
-        "isActive": true,                   // REQUIRED  boolean
-        "continueOnError": false,           // REQUIRED  boolean
-        "enableLTM": false,                 // REQUIRED  boolean
-        "enableSTM": false,                 // REQUIRED  boolean
-        "sourcePorts": [{ "id": "SPRTdefault" }], // REQUIRED  array
-        "schemas": {},                      // REQUIRED  object (can be {})
-        "position": { "x": 0, "y": 0 },    // REQUIRED  { x: number, y: number }
-        "edges": {                          // REQUIRED  object (can be {})
-          "EDGE01kd6gqx5k7tvzs86y40w8etms": {
-            "id": "EDGE01kd6gqx5k7tvzs86y40w8etms",
-            "sourceActorId": "ACTR01kd6gqghj04j8765nnqyp09a3",
-            "sourcePortId": "SPRTdefault",
-            "targetActorId": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl",
-            "targetPortId": "TPRTdefault",
-            "type": "borgiqEdge"
-          }
-        },
-        // --- ExportedCanvasData: config fields are JSON OBJECTS ---
-        "configuration": {                  // REQUIRED  object
-          "options": {}                     // optional  JSON object (can omit entirely)
-        }
-        // optional fields (omitted = use defaults):
-        // "showInWorkspaceApps": true       // defaults to true
-        // "template": { "id": "...", "version": 1, "appName": "..." }
-        // "icon": { "type": "borgiq", "value": "slack", "category": "logos" }
-        // "icon": { "type": "borgiq", "value": "arrow-right", "category": "icons", "colorable": true }
-        // "icon": { "type": "svg", "value": "<svg>...</svg>" }
-        // "icon": { "type": "url", "value": "https://example.com/icon.svg" }
-        // "runtimeSlug": "..."
-      },
-
-      // ---- Actor 2: HttpRequestActor ----
-      "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl": {
-        "id": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl",
-        "type": "HttpRequestActor",
-        "version": 1,
-        "name": "Fetch Customer Data",
-        "msgVar": "fetch_customer_data",
-        "description": "Fetches customer data from the API",
-        "isActive": true,
-        "continueOnError": false,
-        "enableLTM": false,
-        "enableSTM": false,
-        "sourcePorts": [{ "id": "SPRTdefault" }],
-        "schemas": {
-          "inputs": {                       // optional  JSON Schema object
-            "type": "object",
-            "properties": { "customerId": { "type": "string" } },
-            "required": ["customerId"]
-          }
-        },
-        "position": { "x": 0, "y": 200 },
-        "edges": {},
-        // --- ExportedCanvasData: config fields are JSON OBJECTS ---
-        "configuration": {
-          "options": {                      // optional  JSON object (actor-type-specific)
-            "method": "GET",
-            "url": "https://api.example.com/customers/${{ inputs.customerId }}"
-          },
-          "inputs": {                       // optional  JSON object
-            "customerId": "${{ msg.manual_trigger.body.id }}"
-          },
-          "outputs": "${{ results.body }}", // optional  expression string or JSON object
-          "connection": {                   // optional  { type?: string | string[], key? }
-            "type": ["api-key", "bearer-token"],
-            "key": "example-api"
-          }
-          // other optional config fields:
-          // "vars": [{ "myVar": "${{ ... }}" }]   // JSON array
-          // "credentials": { "key": { "workspaceKey": "..." } }
-          // "error": { "if": false }
-          // "codeDir": [{ "path": "main.ts", "content": "..." }]  // Deno/Python/Universal Trigger source files
-          //                                    // (main.py for PythonActor); array in BOTH formats
-          // "webhookTriggerKey": "..."       // for WebhookTriggerActor
-          // "webhookAuthorizationLevel": "public"  // for WebhookTriggerActor
-          // "aiAgentToolActorIds": ["ACTR..."]     // for AiAgentActor
-        }
-      }
-    }
-  }
-}
-```
-
-### update-data body
-
-The `--file` holds only the canvas data (`{ schemaVersion, actors }`). The CLI sends it to the API wrapped in a `{ canvas, mode }` envelope, taking `mode` from `--mode` — do not wrap the file yourself, or it is wrapped twice. The request body the API receives:
+The envelope: `name` (2–255 characters), `slug` (lowercase letters, numbers, hyphens), `messageTTLInDays` (1–14) are
+required; `description`, `tags` and `runtimeSlug` default to `""`. `data` holds `schemaVersion` and `actors`, keyed
+by actor ID, with objects for the configuration fields:
 
 ```json
 {
-  "canvas": {
+  "name": "My API Flow",
+  "slug": "my-api-flow",
+  "messageTTLInDays": 7,
+  "data": {
     "schemaVersion": "1",
     "actors": {
+      "ACTR01kd6gqghj04j8765nnqyp09a3": {
+        "id": "ACTR01kd6gqghj04j8765nnqyp09a3", "type": "ButtonTriggerActor", "version": 1,
+        "name": "Manual Trigger", "msgVar": "manual_trigger", "description": "",
+        "isActive": true, "continueOnError": false, "enableLTM": false, "enableSTM": false,
+        "sourcePorts": [{ "id": "SPRTdefault" }], "schemas": {}, "position": { "x": 0, "y": 0 },
+        "edges": {
+          "EDGE01kd6gqx5k7tvzs86y40w8etms": {
+            "id": "EDGE01kd6gqx5k7tvzs86y40w8etms", "sourceActorId": "ACTR01kd6gqghj04j8765nnqyp09a3",
+            "sourcePortId": "SPRTdefault", "targetActorId": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl",
+            "targetPortId": "TPRTdefault", "type": "borgiqEdge"
+          }
+        },
+        "configuration": { "options": {} }
+      },
       "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl": {
-        "...same ExportedCanvasActor structure as above..."
+        "id": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl", "type": "HttpRequestActor", "version": 1,
+        "name": "Fetch Customer Data", "msgVar": "fetch_customer_data", "description": "",
+        "isActive": true, "continueOnError": false, "enableLTM": false, "enableSTM": false,
+        "sourcePorts": [{ "id": "SPRTdefault" }], "position": { "x": 0, "y": 200 }, "edges": {},
+        "schemas": { "inputs": { "type": "object", "properties": { "customerId": { "type": "string" } } } },
+        "configuration": {
+          "inputs": { "customerId": "${{ msg.manual_trigger.body.id }}" },
+          "options": { "method": "GET", "url": "https://api.example.com/customers/${{ inputs.customerId }}" },
+          "outputs": "${{ results.body }}",
+          "connection": { "type": ["api-key", "bearer-token"], "key": "example-api" }
+        }
       }
     }
-  },
-  "mode": "merge"
-}
-```
-
-**Import modes:**
-- `merge` (default) — add/update actors from import, leave others untouched
-- `insert` — generate new IDs for all imported actors (no conflicts possible)
-- `replace` — replace entire canvas data with import
-
----
-
-## CanvasActor Format
-
-Used by: `borgiq canvas-actors create`, `borgiq canvas-actors update`, `borgiq canvas-actors batch`
-
-Configuration fields are **YAML strings within JSON**.
-
-### canvas-actors create body
-
-Zod schema: `CanvasActorSchema.omit({ id: true })` — the actor ID is passed as a CLI argument, not in the body.
-
-```bash
-borgiq canvas-actors create <canvasSlugOrId> ACTR01kd6gr3vjxm2rs0k8s3fjq4nl --file actor.json --json
-```
-
-```jsonc
-{
-  // --- Actor base fields (all REQUIRED for create) ---
-  "type": "HttpRequestActor",              // REQUIRED  BIQActorType enum value
-  "version": 1,                            // REQUIRED  number
-  "name": "Fetch Customer Data",           // REQUIRED  string
-  "msgVar": "fetch_customer_data",         // REQUIRED  string (JSON-safe identifier)
-  "description": "Fetches customer data",  // REQUIRED  string (can be "")
-  "isActive": true,                        // REQUIRED  boolean
-  "continueOnError": false,                // REQUIRED  boolean
-  "enableLTM": false,                      // REQUIRED  boolean
-  "enableSTM": false,                      // REQUIRED  boolean
-  "sourcePorts": [{ "id": "SPRTdefault" }], // REQUIRED  array
-  "schemas": {},                           // REQUIRED  object (can be {})
-  "position": { "x": 0, "y": 200 },       // REQUIRED  { x: number, y: number }
-  "edges": {},                             // REQUIRED  object (can be {})
-  // "showInWorkspaceApps": true,           // optional  defaults to true
-  // "template": { ... },                   // optional
-  // "icon": { "type": "borgiq", "value": "slack", "category": "logos" },  // optional
-  // "runtimeSlug": "...",                   // optional
-
-  // --- CanvasActor: config fields are YAML STRINGS ---
-  "configuration": {                       // REQUIRED  object
-    "options": "method: GET\nurl: https://api.example.com/customers/${{ inputs.customerId }}",
-                                            // REQUIRED  YAML string (can be "")
-    "inputs": "customerId: ${{ msg.manual_trigger.body.id }}",
-                                            // optional  YAML string
-    "outputs": "${{ results.body }}",       // optional  YAML string
-    "connection": {                         // optional  { type?: string | string[], key? } (NOT a YAML string)
-      "type": ["api-key", "bearer-token"],
-      "key": "example-api"
-    }
-    // other optional config fields:
-    // "vars": "- myVar: ${{ ... }}"         // YAML string
-    // "credentials": "key:\n  workspaceKey: ..."  // YAML string
-    // "error": "if: false"                  // YAML string
-    // "codeDir": [{ "path": "main.ts", "content": "..." }]  // JSON array, NOT a YAML string (Deno/Python/Universal Trigger)
-    // "webhookTriggerKey": "01KD298..."      // plain string (WebhookTriggerActor)
-    // "webhookAuthorizationLevel": "public"  // enum (WebhookTriggerActor)
-    // "aiAgentToolActorIds": ["ACTR..."]     // string array (AiAgentActor)
-  },
-  "schemas": {                             // REQUIRED  object (can be {})
-    "inputs": "type: object\nproperties:\n  customerId:\n    type: string\nrequired:\n  - customerId"
-                                            // optional  YAML string (JSON Schema as YAML)
   }
 }
 ```
 
-### canvas-actors update body
+A generated `metadata` + `actors` document becomes this envelope: validate it with `borgiq validate` first, move
+`metadata.schemaVersion` to `data.schemaVersion`, nest `actors` under `data`, drop `metadata`, and add `name`, `slug`
+and `messageTTLInDays`. `create-with-data --auto-layout` lays the canvas out after creating it. The name and the slug
+must both be unused in the workspace (`400`, "already in use!"), so never run `create-with-data` against an existing
+canvas.
 
-Partial update — only include fields you want to change:
+## update-data
+
+`canvases update-data <canvas> --file <path> [--mode merge|insert|replace]` imports actors into an existing canvas.
+The file holds only the canvas data, `{ schemaVersion, actors }`; the CLI wraps it as `{ canvas, mode }` itself, so a
+file you wrap is wrapped twice.
+
+| Mode | Effect |
+|---|---|
+| `merge` (default) | Updates actors by ID and adds new ones; other actors are untouched |
+| `insert` | New actor and edge IDs for everything imported: safe for duplicating a fragment |
+| `replace` | Replaces the whole canvas data; `409` if the canvas changed meanwhile (re-read and retry) |
+
+Every mode checks each actor's `editVersion` and answers like `batch`.
+
+## canvas-actors bodies
+
+`canvas-actors create <canvas> <actorId> --file actor.json`: a full CanvasActor without `id` (an `id` in the body is
+ignored). Mint the ID with `borgiq generate id actor`. `canvas-actors get` returns actors in this shape, and a canvas
+made empty with `canvases create --name --slug` is filled with `batch`.
 
 ```json
 {
+  "type": "HttpRequestActor", "version": 1, "name": "Fetch Customer Data", "msgVar": "fetch_customer_data",
+  "description": "", "isActive": true, "continueOnError": false, "enableLTM": false, "enableSTM": false,
+  "sourcePorts": [{ "id": "SPRTdefault" }], "position": { "x": 0, "y": 200 }, "edges": {},
   "configuration": {
-    "options": "method: POST\nurl: https://api.example.com/customers\nbody:\n  name: ${{ inputs.name }}"
-  }
+    "options": "method: GET\nurl: https://api.example.com/customers/${{ inputs.customerId }}",
+    "inputs": "customerId: ${{ msg.manual_trigger.body.id }}",
+    "outputs": "${{ results.body }}",
+    "connection": { "type": ["api-key", "bearer-token"], "key": "example-api" }
+  },
+  "schemas": { "inputs": "type: object\nproperties:\n  customerId:\n    type: string" }
 }
 ```
 
-### canvas-actors batch body
+`canvas-actors update <canvas> <actorId> --file updates.json [--edit-version <n>]` takes only the fields that change,
+e.g. `{ "configuration": { "options": "method: POST\nurl: https://api.example.com/customers" } }`.
+`canvas-actors delete <canvas> <actorId> [--edit-version <n>]` removes one. `--edit-version` is the conflict check:
+a stale value answers `409`.
 
-Zod schema: `CanvasActorsBatchInputSchema` with `ActorOperationSchema` per operation.
+`canvas-actors batch <canvas> --file ops.json` applies several operations in one request. Each needs `type` (`add`,
+`update` or `remove`), `actorId` and `timestamp` (epoch milliseconds; omitting it is a `400`). `add` takes a full
+CanvasActor in `data`, `update` a partial one; `editVersion` is optional on `update` and `remove`. The answer is
+`{ processed, appliedOperations: [{ type, actorId, newEditVersion }], conflicts, warnings?, updatedAt }`.
 
 ```jsonc
 {
   "operations": [
-    {
-      // --- "add" operation: requires full CanvasActorSchema in data ---
-      "type": "add",                       // REQUIRED  "add" | "update" | "remove"
-      "actorId": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl", // REQUIRED  ACTR + 26-char ULID
-      "data": {                            // REQUIRED for add  (full CanvasActorSchema)
-        "type": "HttpRequestActor",
-        "version": 1,
-        "name": "Fetch Data",
-        "msgVar": "fetch_data",
-        "description": "Makes an HTTP request",
-        "isActive": true,
-        "continueOnError": false,
-        "enableLTM": false,
-        "enableSTM": false,
-        "sourcePorts": [{ "id": "SPRTdefault" }],
-        "configuration": {
-          "options": "method: GET\nurl: https://example.com"  // REQUIRED YAML string
-        },
-        "schemas": {},
-        "position": { "x": 0, "y": 200 },
-        "edges": {}
-      },
-      "timestamp": 1712500000000           // REQUIRED  number (epoch milliseconds)
-    },
-    {
-      // --- "update" operation: partial CanvasActorSchema in data ---
-      "type": "update",
-      "actorId": "ACTR01kd6gqghj04j8765nnqyp09a3",
-      "data": {                            // REQUIRED for update  (partial — only changed fields)
-        "name": "Updated Actor Name",
-        "msgVar": "updated_actor_name",
-        "configuration": {
-          "options": "method: POST\nurl: https://example.com/update"
-        }
-      },
-      "editVersion": 3,                    // optional  for conflict detection
-      "timestamp": 1712500000001           // REQUIRED
-    },
-    {
-      // --- "remove" operation: no data needed ---
-      "type": "remove",
-      "actorId": "ACTR01kd6gr8m6q9nzp2w4j7h5k6lo",
-      "editVersion": 2,                    // optional  for conflict detection
-      "timestamp": 1712500000002           // REQUIRED
-    }
+    { "type": "add", "actorId": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl", "timestamp": 1712500000000,
+      "data": { /* a full CanvasActor, as in the create body */ } },
+    { "type": "update", "actorId": "ACTR01kd6gqghj04j8765nnqyp09a3", "editVersion": 3, "timestamp": 1712500000001,
+      "data": { "name": "Updated Actor Name", "msgVar": "updated_actor_name" } },
+    { "type": "remove", "actorId": "ACTR01kd6gr8m6q9nzp2w4j7h5k6ln", "editVersion": 2, "timestamp": 1712500000002 }
   ]
 }
 ```
 
----
+## Verify bodies
 
-## Verify Format
-
-Used by: `borgiq canvas-actors verify <canvasSlugOrId>`
-
-The `options` field is a YAML string:
-
-```json
-{
-  "actorType": "HttpRequestActor",
-  "options": "method: GET\nurl: https://example.com"
-}
-```
-
-For `RouterActor` and `AiRouterActor`, include `sourcePorts`:
+`canvas-actors verify <canvas>` (file or stdin) checks one actor's options against its type's schema without saving
+anything. Router and AI Router actors also need `sourcePorts`:
 
 ```json
 {
   "actorType": "RouterActor",
   "options": "emitType: singleRoute\nconditions:\n  Active: ${{ msg.trigger.body.status === 'active' }}",
-  "sourcePorts": [
-    { "id": "SPRTabcdefg", "name": "Active" },
-    { "id": "SPRTdefault", "name": "F" }
-  ]
+  "sourcePorts": [{ "id": "SPRTabcdefg", "name": "Active" }, { "id": "SPRTdefault", "name": "F" }]
 }
 ```
 
----
+`canvases verify-import --file <path>` checks import data without importing it; its `canvas` field is the whole export
+as one YAML string (`"metadata:\n  schemaVersion: v1.0\n  source: BIQCanvas\nactors:\n  …"`).
 
-## Verify-Import Format
+## Export and duplicate
 
-Used by: `borgiq canvases verify-import --file <path>`
+`canvases export <canvas>` prints `{ yaml, errors }`. `yaml` is the whole canvas as one YAML string in the
+ExportedCanvasData shape: a `metadata` block (`id`, `slug`, `name`, `description`, `tags`, `imagePath`,
+`messageTTLInDays`, `runtimeSlug`) and a `data` block with the actor graph. `create-with-data` does not accept it, and
+`yaml` is YAML, not JSON, so `jq fromjson` fails on it. To copy a canvas, unpack the export into a bundle:
+[canvas-bundles.md → Lifecycle commands](canvas-bundles.md#lifecycle-commands).
 
-The `canvas` field is a single YAML string containing the entire canvas export:
+## Common mistakes
 
-```json
-{
-  "canvas": "metadata:\n  schemaVersion: v1.0\n  source: BIQCanvas\nactors:\n  ACTR01kd6gqghj04j8765nnqyp09a3:\n    type: ButtonTriggerActor\n    ..."
-}
-```
-
----
-
-## Export Format
-
-The `borgiq canvases export <canvasSlugOrId>` command returns JSON with a `yaml` field containing the entire canvas as a YAML string, and an `errors` array:
-
-```json
-{
-  "yaml": "metadata:\n  id: CANV01abc123def456ghi789jkl012\n  slug: my-flow\n  name: My Flow\n  description: ''\n  tags: ''\n  imagePath: null\n  messageTTLInDays: 7\n  runtimeSlug: ''\ndata:\n  schemaVersion: '1'\n  actors:\n    ACTR01kd6gqghj04j8765nnqyp09a3:\n      type: ButtonTriggerActor\n      ...",
-  "errors": []
-}
-```
-
-The YAML inside the `yaml` field uses the **ExportedCanvasData** format — configuration fields are parsed objects (not YAML strings). The `metadata` section includes canvas metadata (`id`, `slug`, `name`, etc.) and the `data` section contains the actor graph.
-
-To re-import an exported canvas as a copy, unpack it into a bundle (the `yaml` field is YAML, not JSON, so it cannot go through `jq fromjson`):
-
-```bash
-borgiq canvases export CANV01abc123def456ghi789jkl012 --json | borgiq bundle unpack - ./copy.borgiq-canvas
-# Set a new canvas.name and canvas.slug in ./copy.borgiq-canvas/canvas.yaml, then:
-borgiq bundle push ./copy.borgiq-canvas --create
-```
-
----
-
-## Actor Common Fields Reference
-
-Every actor (in both formats) has these fields:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `id` | string | Yes (except in `canvas-actors create` — passed as CLI arg) | `ACTR` + 26-char ULID |
-| `type` | string | Yes | Actor type enum (e.g., `HttpRequestActor`) |
-| `version` | number | Yes | Runtime version (typically `1`) |
-| `name` | string | Yes | Display name |
-| `msgVar` | string | Yes | JSON-safe variable name for message references |
-| `description` | string | Yes | UI description (can be `""`) |
-| `isActive` | boolean | Yes | Whether the actor receives/emits messages |
-| `continueOnError` | boolean | Yes | Emit error message on failure instead of stopping |
-| `enableLTM` | boolean | Yes | Long-term memory (canvas-scoped, one-at-a-time across flowruns) |
-| `enableSTM` | boolean | Yes | Short-term memory (flowrun-scoped, one-at-a-time within flowrun) |
-| `sourcePorts` | array | Yes | Output ports (see below) |
-| `configuration` | object | Yes | Actor-specific configuration (format varies by endpoint — see above) |
-| `schemas` | object | Yes | Custom JSON schemas for inputs/outputs (can be `{}`) |
-| `position` | `{ x, y }` | Yes | UI coordinates |
-| `edges` | object | Yes | Outgoing connections (can be `{}`) |
-| `showInWorkspaceApps` | boolean | No (defaults to `true`) | Whether actor appears in workspace apps listing |
-| `template` | object | No | Template reference: `{ id, version, appName }` |
-| `icon` | object | No | Custom icon: `{ type: "borgiq"\|"svg"\|"url", value, category?, color?, colorable? }`. See [Icon Configuration](#icon-configuration) below. |
-| `runtimeSlug` | string | No | Override runtime for this actor |
-
-### Icon Configuration
-
-The `icon` field supports three types:
-
-**1. CDN-hosted icon (`type: "borgiq"`)** — Recommended for standard brand/UI icons:
-
-```json
-{ "type": "borgiq", "value": "slack", "category": "logos" }
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `type` | Yes | `"borgiq"` |
-| `value` | Yes | Icon slug from the CDN manifest |
-| `category` | Yes for borgiq | `"logos"` (brand logos, 4 variants) or `"icons"` (monochrome UI icons, single file) |
-| `color` | No | Hex color override without `#` (e.g., `"FF5733"`). Applied via CDN `?color=` param. |
-| `colorable` | No | `true` if the icon supports color rewriting (monochrome SVGs) |
-
-CDN URL structure:
-- Logos: `https://icons.borgiqassets.com/v1/logos/{slug}/icon-{light|dark}.svg`
-- Icons: `https://icons.borgiqassets.com/v1/icons/{slug}.svg`
-- Manifest: `https://icons.borgiqassets.com/v1/manifest.json`
-
-Examples:
-```json
-{ "type": "borgiq", "value": "slack", "category": "logos" }
-{ "type": "borgiq", "value": "arrow-right", "category": "icons", "colorable": true }
-{ "type": "borgiq", "value": "brand-github", "category": "logos", "colorable": true }
-{ "type": "borgiq", "value": "AiActor", "category": "icons", "colorable": true, "color": "504C97" }
-```
-
-**2. Raw SVG (`type: "svg"`)** — For custom inline SVGs:
-
-```json
-{ "type": "svg", "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">...</svg>" }
-```
-
-**3. External URL (`type: "url"`)** — For externally hosted images:
-
-```json
-{ "type": "url", "value": "https://example.com/my-icon.svg" }
-```
-
-### Source Ports
-
-Most actors use a single default port:
-
-```json
-"sourcePorts": [{ "id": "SPRTdefault" }]
-```
-
-Actors with multiple ports:
-
-| Actor Type | Ports |
-|-----------|-------|
-| `RouterActor`, `AiRouterActor` | Custom `SPRTxxxxxxx` ports + `SPRTdefault` (fallback) |
-| `AgentHarnessActor`, `AiAgentActor` | `SPRTdone000` (Done) + `SPRTdefault` (Status) |
-| `InterfaceActor` | `SPRTevent00` (Event) + `SPRTdefault` (Meta) |
-| `AppTriggerActor`, `CommentActor` | No ports (`[]`) |
-
-### Edge Structure
-
-```json
-{
-  "EDGE01kd6gqx5k7tvzs86y40w8etms": {
-    "id": "EDGE01kd6gqx5k7tvzs86y40w8etms",
-    "sourceActorId": "ACTR01kd6gqghj04j8765nnqyp09a3",
-    "sourcePortId": "SPRTdefault",
-    "targetActorId": "ACTR01kd6gr3vjxm2rs0k8s3fjq4nl",
-    "targetPortId": "TPRTdefault",
-    "type": "borgiqEdge"
-  }
-}
-```
-
-### ID Format Reference
-
-| Entity | Prefix | Total Length | Character Set |
-|--------|--------|-------------|---------------|
-| Actor | `ACTR` | 30 | `0-9, a-h, j-k, m-n, p, q, r-t, v-z` (ULID, excludes i, l, o, u) |
-| Edge | `EDGE` | 30 | Same ULID charset |
-| Source Port | `SPRT` | 11 | Full `a-z, 0-9` |
-| Canvas | `CANV` | 30 | Same ULID charset |
-
-Generate IDs using the `borgiq generate` command:
-
-```bash
-borgiq generate id actor       # ACTR01kcsnjnkqa69w50qr60dcd06e
-borgiq generate id edge        # EDGE01kd6gqx5k7tvzs86y40w8etms
-borgiq generate id sourceport  # SPRTabcdefg
-borgiq generate msgvar "Fetch user profile"  # fetch_user_profile
-```
+| Mistake | Result | Fix |
+|---|---|---|
+| An object for `options` in a `canvas-actors create`/`update`/`batch` body | `400`: a YAML string is expected | `"options": "method: GET"` |
+| A YAML string for `options` in `create-with-data` | Accepted, but the actor's options become that string, not an object | `"options": { "method": "GET" }` |
+| No `options` in a CanvasActor body | `400`: required | `"options": ""` at least |
+| No `description` | `400`: required | `"description": ""` |
+| No `timestamp` in a batch operation | `400`: required | `"timestamp": <epoch ms>` |
+| `codeDir` as a YAML string | Rejected | An array of `{ path, content }` in both shapes |
+| An `id` in a `canvas-actors create` body | Ignored | Pass the ID as the command's argument |
+| A `{ canvas, mode }` wrapper in the `update-data` file | Wrapped twice | The file holds `{ schemaVersion, actors }` only |
