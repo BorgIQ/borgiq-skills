@@ -98,7 +98,7 @@ actors:
           You are a data analyst. Work inside your workspace; the report
           archive is already extracted there.
         prompt: ${{ inputs.instructions }}
-        volumeZipFile: ${{ inputs.reportZip }}   # extracted into the workspace at session creation
+        volumeZipFile: ${{ inputs.reportZip }}   # extracted into the workspace; a later run on the same session re-applies it (resets those files)
         timeoutInMinutes: 30
         # sessionId: fixed-id-to-continue-later  # optional; auto-generated if empty
       aiAgentToolActorIds:
@@ -222,7 +222,7 @@ All options live under `configuration.options`.
 | `systemPrompt` | string | — | Background instructions appended to the agent's system prompt |
 | `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` | `medium` | How much the model thinks before each turn. Clamped to what the selected model supports (a level on a non-thinking model is a no-op). Thinking is billed as output tokens, shows in the editor timeline, and streams as `reasoning` on the Status port; `off` stops paying for it |
 | `sessionId` | string | auto-generated | Session ID to continue or create (max 64 characters). Same ID = continue the session |
-| `volumeZipFile` | BIQFile | — | Zip file extracted into the session workspace at session creation |
+| `volumeZipFile` | BIQFile | — | Zip file extracted into the session workspace at session creation. Each later run that reuses the session with a zip extracts it again over the restored workspace: files at the paths it names are reset to the zip's version, other files are kept |
 | `workingDirectory` | string | workspace root | Working directory for the agent, relative to the session workspace |
 | `timeoutInMinutes` | integer | 30 | Session timeout in minutes, measured across segments |
 | `maxLoopCount` | integer | unlimited | Maximum number of assistant turns |
@@ -542,7 +542,7 @@ For complex multi-step tasks, prefer `claude-sonnet-5`, `claude-opus-5-5` or `cl
 - **Starting**: leave `sessionId` empty to auto-generate one (returned on the done port), or set a custom ID (max 64 chars).
 - **Continuing**: re-invoke the actor with the same `sessionId` — the workspace and full conversation state restore from the last checkpoint and the agent picks up where it left off. Works within a flow (loop back into the agent) and across flowruns.
 - **Session TTL**: 7 days, sliding — every session activity refreshes it. After the TTL lapses, the same `sessionId` starts a **clean fresh session** (deterministic; never a partial state).
-- **Seeding files**: `volumeZipFile` is extracted into the workspace **at session creation only** — it does not re-apply on continuation.
+- **Seeding and resetting files**: `volumeZipFile` is extracted into the workspace at session creation, and again by **every later run that reuses the session with a zip**. That includes a loop back into the agent within one flow, since each message into the actor is a new run. The workspace is restored from the last checkpoint, then the zip is extracted over it. Files at the paths the zip names are reset to the zip's version, even where the zip has a file and the workspace a folder of the same name, or the reverse. Files only in the old workspace are kept. Sending a zip is therefore a deliberate reset of those files: use it to hand a continuing session updated inputs. To keep the agent's edits, send the zip only on the first run, for example by wiring it to an input that is empty on later loops. Within one run the zip is applied once, so the agent's edits across its own long-running segments are kept. A zip that cannot be downloaded or extracted fails the run, with a message naming the zip, and leaves the session's previous workspace as it was.
 - **Getting files out**: the done port carries `outputZipFile` (the workspace) and `sessionDataFile` (pi session data; portable — it can seed a harness-tier pi session).
 - **Scope**: sessions are scoped to the actor instance (not shared across actors) and bound to the runtime they started on — repointing the actor at a different runtime starts fresh sessions.
 
