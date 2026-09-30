@@ -1,164 +1,41 @@
 # Callable Response Actor Reference
 
-The CallableResponseActor sends a response back to the parent flow that invoked the current sub-flow via a CallFlowActor.
+The CallableResponseActor returns data from a sub-flow to the waiting [CallFlowActor](call-flow-actor.md) of the parent run. Put one at the end of each path of a flow started by a [CallableTriggerActor](callable-trigger-actor.md). What the parent emits, and its errors and timeouts: [call-flow-actor.md](call-flow-actor.md).
 
-> **Important:** CallableResponseActor can **only** be used in workflows that are triggered by a CallableTriggerActor. Using it in flows with other trigger types (WebhookTriggerActor, ButtonTriggerActor, etc.) will result in an error.
+## Options
 
-## Table of Contents
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `payload` | any | `{}` | Returned to the parent CallFlowActor, which emits it as `msg.<callFlowMsgVar>`. This is the sub-flow's return type: keep its shape stable and documented. |
+| `throwError` | boolean | `false` | Return the payload as an error: the parent CallFlowActor fails with `CallableResponseError` and the `payload` in the error's `metadata`. With `continueOnError: true` on the CallFlowActor it lands in `err.<callFlowMsgVar>`; otherwise the parent run fails. |
 
-- [Overview](#overview)
-- [Configuration Structure](#configuration-structure)
-- [Options Reference](#options-reference)
-- [TypeScript Schema Definition](#typescript-schema-definition)
-- [Emitted Message](#emitted-message)
-- [Examples](#examples)
-- [Usage with CallableTriggerActor and CallFlowActor](#usage-with-callabletriggeractor-and-callflowactor)
-- [Workflow Diagram](#workflow-diagram)
-- [Use Cases](#use-cases)
-- [Error Handling](#error-handling)
+- It returns data only when the run was started by a CallFlowActor that waits (`waitForResponse` true). After a fire-and-forget call, or in a flow started by any other trigger, nothing is returned.
+- It also emits `payload` on `SPRTdefault` in the sub-flow.
+- An actor's `results` never reach the parent: wire the last actor into the CallableResponseActor with `payload: ${{ msg.<last_actor_msgVar> }}`. The only other way back is a DenoActor returning `signal: Signal.callableResponse({ payload, throwError })`.
 
-## Overview
+Exact schema: [typescript/actorSchemas/task/callableResponse.md](typescript/actorSchemas/task/callableResponse.md).
 
-When a parent workflow invokes a sub-flow using CallFlowActor, the sub-flow can return data back to the parent using CallableResponseActor. This enables:
-- Returning computed results from sub-flows
-- Passing processed data back to parent workflows
-- Signaling errors to the calling flow
-- Creating reusable workflow modules
+## Example
 
-## Configuration Structure
+Return the upstream result, or its error (the upstream `api_call` has `continueOnError: true`):
 
 ```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01xxxxx:
-    type: CallableResponseActor
-    version: 1
-    name: Callable Response
-    msgVar: callable_response
-    description: Send response to parent flow
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      options:
-        payload: ${{ msg.process_data.result }}
-        throwError: false
-    schemas: {}
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
-
-## Options Reference
-
-| Option | Type | Required | Default | Description |
-|--------|------|----------|---------|-------------|
-| `payload` | any | Yes | - | The data to return to the CallFlowActor in the parent flow |
-| `throwError` | boolean | No | false | If true, throws an error to the CallFlowActor instead of returning normally |
-
-## TypeScript Schema Definition
-
-The complete TypeScript schema for CallableResponseActor options:
-
-```typescript
-import { z } from 'zod';
-
-import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
-
-/** The options schema for the CallableResponseActor */
-export const CallableResponseActorOptionsSchema = z.object({
-  payload: z.any().describe('The payload to emit on the Call flow actor that trigged the flow'),
-  throwError: z.boolean().nullish()
-    .describe('If the callable response actor should throw an error to the call flow actor'),
-});
-
-export type CallableResponseActorOptions = z.infer<typeof CallableResponseActorOptionsSchema>;
-
-export const CallableResponseActorOptionsJsonSchema: BIQJsonSchema = {
-  properties: {
-    payload: {
-      type: BIQJsonSchemaType.Any,
-      title: 'Payload',
-      description: 'The payload to emit on the Call flow actor that trigged the flow',
-      ui: {
-        options: {
-          editInModal: true,
-        }
-      }
-    },
-    throwError: {
-      type: BIQJsonSchemaType.Boolean,
-      title: 'Throw Error',
-      description: 'If the callable response actor should throw an error to the call flow actor',
-      default: false,
-      ui: {
-        component: 'switch',
-      },
-    },
-  },
-};
-
-/** The response schema for the CallableResponseActor */
-export const CallableResponseActorResultSchema = z.any().describe('The payload provided from the options of the CallableResponseActor');
-
-export type CallableResponseActorResult = z.infer<typeof CallableResponseActorResultSchema>;
-```
-
-## Emitted Message
-
-The CallableResponseActor emits the payload it sent back to the parent flow:
-
-```json
-{
-  "result": "processed data",
-  "status": "success"
-}
-```
-
-The exact structure depends on what you configure in the `payload` option.
-
-## Examples
-
-### Simple Response with Static Data
-
-```yaml
-configuration:
-  options:
-    payload:
-      success: true
-      message: Sub-flow completed successfully
-```
-
-### Dynamic Response from Upstream Actor
-
-```yaml
-configuration:
-  options:
-    payload: ${{ msg.process_data.result }}
-```
-
-### Conditional Response with Computed Data
-
-```yaml
+type: CallableResponseActor
+version: 1
+name: Return Result
+msgVar: callable_response
+sourcePorts:
+  - id: SPRTdefault
 configuration:
   inputs:
-    processedItems: ${{ msg.collect_items.items }}
-    totalCount: ${{ msg.collect_items.items.length }}
+    hasError: ${{ !Q.isNil(err.api_call) }}
   options:
-    payload:
-      items: ${{ inputs.processedItems }}
-      count: ${{ inputs.totalCount }}
-      processedAt: ${{ Q.currentDateTime() }}
+    payload: "${{ inputs.hasError ? err.api_call : msg.api_call.body }}"   # quoted: contains ': '
+    throwError: ${{ inputs.hasError }}
+schemas: {}
 ```
 
-### Error Response
+An explicit failure with a fixed shape:
 
 ```yaml
 configuration:
@@ -167,106 +44,4 @@ configuration:
       error: Validation failed
       details: ${{ msg.validation.errors }}
     throwError: true
-```
-
-### Conditional Error Handling
-
-```yaml
-configuration:
-  inputs:
-    hasError: ${{ !Q.isNil(err.api_call) }}
-  options:
-    payload: "${{ inputs.hasError ? err.api_call : msg.api_call.body }}"   # quoted: contains ': '
-    throwError: ${{ inputs.hasError }}
-```
-
-## Usage with CallableTriggerActor and CallFlowActor
-
-The CallableResponseActor works in a parent-child flow relationship:
-
-**Parent Flow (calls the sub-flow):** the CallFlowActor must set `waitForResponse: true` to receive the response.
-```yaml
-ACTR01callFlow:
-  type: CallFlowActor
-  msgVar: call_result
-  configuration:
-    options:
-      callableTriggerActorId: ACTR01kbgj09tqm83xssss6ys3c4dw   # the sub-flow's CallableTriggerActor
-      payload: ${{ msg.trigger.body }}
-      waitForResponse: true
-      timeoutInSeconds: 60
-```
-
-**Sub-Flow (returns response to parent):**
-```yaml
-# CallableTriggerActor starts the sub-flow
-ACTR01trigger:
-  type: CallableTriggerActor
-  msgVar: callable_trigger
-  configuration:
-    options: {}
-
-# ... processing actors ...
-
-# CallableResponseActor returns data to parent
-ACTR01response:
-  type: CallableResponseActor
-  msgVar: callable_response
-  configuration:
-    options:
-      payload: ${{ msg.process_result }}
-```
-
-## Workflow Diagram
-
-```
-Parent Flow:
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Trigger   │────>│ CallFlowActor│────>│  Continue   │
-└─────────────┘     └──────┬───────┘     └─────────────┘
-                           │ calls              ▲
-                           ▼                    │ returns
-Sub-Flow:                                       │
-┌─────────────────┐     ┌─────────┐     ┌──────┴────────────┐
-│CallableTrigger  │────>│ Process │────>│CallableResponse   │
-└─────────────────┘     └─────────┘     └───────────────────┘
-```
-
-## Use Cases
-
-| Scenario | Description |
-|----------|-------------|
-| Reusable Processing | Create sub-flows for common operations (data transformation, API calls) |
-| Error Isolation | Isolate complex error-prone logic in sub-flows |
-| Modular Workflows | Break large workflows into manageable sub-flows |
-| Parallel Sub-flow Execution | Call multiple sub-flows and collect their responses |
-| Conditional Processing | Route to different sub-flows based on conditions |
-
-## Error Handling
-
-When `throwError: true`:
-- The CallFlowActor in the parent flow fails with a `CallableResponseError`; the `payload` is in the error's `metadata`
-- If the parent's CallFlowActor has `continueOnError: true`, the error is stored in `err.<callFlowMsgVar>`
-- If `continueOnError: false` (default), the parent flow will fail
-
-```yaml
-# Sub-flow with error
-configuration:
-  options:
-    payload:
-      error: Processing failed
-      code: VALIDATION_ERROR
-    throwError: true
-
-# Parent flow handling error
-ACTR01callFlow:
-  type: CallFlowActor
-  msgVar: sub_flow_result
-  continueOnError: true  # Handle error gracefully
-
-# Downstream actor in parent
-configuration:
-  inputs:
-    hasError: ${{ !Q.isNil(err.sub_flow_result) }}
-    result: ${{ msg.sub_flow_result ?? err.sub_flow_result?.metadata }}
 ```
