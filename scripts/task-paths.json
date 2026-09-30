@@ -118,8 +118,8 @@
         "borgiq-builder/SKILL.md",
         "borgiq-agent-builder/SKILL.md",
         "borgiq-builder/references/ai-agent-actor.md",
-        "borgiq-builder/references/http-request-actor.md",
-        "borgiq-json-schema-builder/SKILL.md"
+        "borgiq-builder/references/agent-tools.md",
+        "borgiq-builder/references/http-request-actor.md"
       ]
     },
     {
@@ -127,8 +127,7 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/ai-actor.md",
-        "borgiq-json-schema-builder/SKILL.md",
-        "borgiq-builder/references/ai-actor-examples.md"
+        "borgiq-json-schema-builder/SKILL.md"
       ]
     },
     {
@@ -137,8 +136,8 @@
         "borgiq-builder/SKILL.md",
         "borgiq-agent-builder/SKILL.md",
         "borgiq-builder/references/agent-harness-actor.md",
-        "borgiq-builder/references/ai-agent-actor.md",
-        "borgiq-builder/references/mcp-server-actor.md"
+        "borgiq-builder/references/agent-tools.md",
+        "borgiq-builder/references/ai-models.md"
       ]
     },
     {
@@ -147,7 +146,8 @@
         "borgiq-builder/SKILL.md",
         "borgiq-agent-builder/SKILL.md",
         "borgiq-builder/references/mcp-server-actor.md",
-        "borgiq-builder/references/ai-agent-actor.md"
+        "borgiq-builder/references/agent-tools.md",
+        "borgiq-builder/references/api-tokens.md"
       ]
     },
     {

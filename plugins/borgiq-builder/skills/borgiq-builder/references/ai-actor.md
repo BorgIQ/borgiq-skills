@@ -1,517 +1,20 @@
 # AI Actor Reference
 
-The AiActor invokes AI models (LLMs) to generate responses, process text, and perform AI-powered tasks within BorgIQ workflows.
+The AiActor makes one LLM call per message and returns text, structured JSON, or tool calls it does not execute. Read
+it to configure one. Models are in [ai-models.md](ai-models.md), schema design for `outputSchema` in the
+`borgiq-json-schema-builder` skill, exact types in [typescript/actorSchemas/task/ai.md](typescript/actorSchemas/task/ai.md).
+For a loop that calls tools, use an [AiAgentActor](ai-agent-actor.md).
 
-## Table of Contents
+## Contents
 
 - [Configuration Structure](#configuration-structure)
 - [Options Reference](#options-reference)
-- [TypeScript Schema Definition](#typescript-schema-definition)
-- [Available Models](#available-models)
 - [Results Object](#results-object)
-- [Common Patterns](#common-patterns)
+- [Structured Output](#structured-output)
 - [Message Format](#message-format)
-- [Temperature Guide](#temperature-guide)
-- [Input Schemas](#input-schemas)
-- [Error Handling](#error-handling)
-- [Direct Response Usage](#direct-response-usage)
-- [Best Practices](#best-practices)
-- [Examples](#examples)
+- [Tools (Function Calling)](#tools-function-calling)
 
 ## Configuration Structure
-
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01xxxxx:
-    type: AiActor
-    version: 1
-    name: Actor Name Here
-    msgVar: actor_name_here
-    description: What this actor does
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      inputs:
-        key: value
-      options:
-        model: claude-haiku-4-5
-        systemPrompt: You are a helpful assistant...
-        prompt: ${{ inputs.userPrompt }}
-        temperature: 0.7
-        maxTokens: 1000
-        jsonMode: false
-        emitInput: false
-    schemas:
-      inputs:
-        type: object
-        properties:
-          userPrompt:
-            type: string
-            title: User Prompt
-            description: The prompt to send to the AI model
-        required:
-          - userPrompt
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
-
-## Options Reference
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `model` | string | gpt-6-luna | The model reference, in one of three forms: a known model id (see [Available Models](#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model (`openai/gpt-6`); or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) |
-| `prompt` | string | - | The prompt to send to the AI model |
-| `systemPrompt` | string | - | Background context/instructions for the AI model |
-| `messages` | array | - | Previous conversation messages (for multi-turn) |
-| `temperature` | number | 0.7 | Creativity level (0-1, lower = more deterministic) |
-| `maxTokens` | integer | - | Maximum tokens to generate |
-| `jsonMode` | boolean | false | Output response as JSON object |
-| `outputSchema` | object | - | JSON Schema for structured output (overrides jsonMode) |
-| `tools` | array | - | Tools/functions the AI can call |
-| `maxRetries` | integer | — | Retry attempts on failure; must be at least 1 when set (`0` fails validation, so omit it for no retries) |
-| `emitInput` | boolean | false | Include input messages in output |
-
-**Note:** Either `prompt` or `messages` must be provided.
-
-## TypeScript Schema Definition
-
-The complete TypeScript schema for AiActor options:
-
-```typescript
-import { z } from 'zod';
-
-/** The options for the AiActor */
-export const AiActorOptionsSchema = z.object({
-  model: AiModelRefSchema.nullish()
-    .describe('The model to use: a known model id, "<provider>/<model-id>" for a built-in provider\'s unlisted model, or "<custom-provider-slug>/<model-id>" for a model served by one of the workspace\'s custom providers (e.g. "fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct"). Defaults to gpt-6-luna if not provided'),
-  prompt: z.string().nullish()
-    .describe('The prompt to send to the AI model to generate a response'),
-  temperature: z.number().min(0).max(1).nullish()
-    .describe('The temperature to use for the AI model (0-1)'),
-  maxTokens: z.number().int().positive().nullish()
-    .describe('The maximum number of tokens to generate'),
-  systemPrompt: z.string().nullish()
-    .describe('The system prompt to provide as a background information to the AI model'),
-  tools: z.array(z.object({
-    name: z.string(),
-    description: z.string(),
-    jsonSchemaParameters: z.any().nullish()
-      .describe('The parameters of the tool as a json schema'),
-  })).nullish()
-    .describe('The tools to use for the AI model'),
-  messages: z.array(BIQAiMessageSchema).nullish()
-    .describe('The previous messages to provide to the AI model'),
-  maxRetries: z.number().int().positive().nullish()
-    .describe('The maximum number of retries to attempt if the AI model fails'),
-  outputSchema: z.any().nullish()
-    .describe('The json schema to use for the AI model output, overrides jsonMode if provided'),
-  jsonMode: z.boolean().nullish()
-    .describe('Whether to output the response as a json object'),
-  emitInput: z.boolean().nullish()
-    .describe('Whether to emit the input messages to the AI model'),
-}).superRefine((data, ctx) => {
-  if (!data.prompt && !data.messages) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'Either prompt or messages must be provided',
-    });
-  }
-});
-
-/** The response schema for the AiActor */
-export const AiActorResultSchema = z.object({
-  response: z.any()
-    .describe('The generated content from the AI model'),
-  toolCalls: z.array(AiToolCallSchema).nullish()
-    .describe('The tool calls made by the AI model'),
-  meta: z.object({
-    input: z.array(z.union([BIQAiMessageSchema, z.object({
-      role: z.literal('system'),
-      content: z.string(),
-    })])).nullish()
-      .describe('The input messages to the AI model'),
-    model: z.string()
-      .describe('The model used to generate the response'),
-    usage: z.object({
-      promptTokens: z.number().int()
-        .describe('The number of tokens in the prompt'),
-      completionTokens: z.number().int()
-        .describe('The number of tokens in the completion'),
-      totalTokens: z.number().int()
-        .describe('The total number of tokens used'),
-    }),
-    fromCache: z.boolean()
-      .describe('Whether the response was fetched from the cache'),
-  }),
-});
-```
-
-## Available Models
-
-**Default:** Always start with `claude-haiku-4-5` unless the task requires more advanced reasoning capabilities. Set `model` explicitly — when it is omitted the platform falls back to `gpt-6-luna`.
-
-| Provider | Models |
-|----------|--------|
-| Anthropic | claude-sonnet-5, claude-opus-5-5, claude-opus-5, claude-fable-5-1, claude-fable-5, claude-opus-4-8, claude-opus-4-7, claude-opus-4-6, claude-sonnet-4-6, claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 |
-| Google | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, gemini-3.1-flash-lite, gemini-3-flash-preview, gemini-2.5-pro, gemini-2.5-flash |
-| OpenAI | gpt-6-sol, gpt-6-astra, gpt-6-luna, gpt-5.6, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5.4-pro, gpt-5.2, gpt-5.2-pro, gpt-5.1, gpt-4.1, gpt-4.1-mini |
-| xAI | grok-4.7, grok-4.6, grok-4.5, grok-4.3, grok-4.20-0309-reasoning, grok-4.20-0309-non-reasoning, grok-4.20-multi-agent-0309, grok-build-0.1 |
-
-Every value of the provider enums (including dated snapshots such as `gpt-5.4-2026-03-05`) is accepted; the full lists live in [typescript/ai/anthropic.md](typescript/ai/anthropic.md), [typescript/ai/openAi.md](typescript/ai/openAi.md), [typescript/ai/google.md](typescript/ai/google.md) and [typescript/ai/xAi.md](typescript/ai/xAi.md), with prices in each provider's section (`ai/anthropic`, `ai/openAi`, `ai/google`, `ai/xAi`). The enums also keep ids the providers have retired or scheduled for shutdown — Claude 3.x, Opus 4, Sonnet 4 and Opus 4.1, `o1`, `o3`, `o3-mini`, `o4-mini`, `gpt-4.1-nano`, the dated `gpt-5` snapshots, the Gemini 2.0 family, `gemini-3-pro-preview`, `grok-4-0709`, `grok-4-fast-*`, `grok-code-fast-1` — so existing actors still load, but calls to them fail or are redirected by the provider. Pick a model from the table above for anything new. Since 2026-09-18, Google serves the Gemini 2.5 models only to projects that already used them.
-
-**Custom providers.** Any OpenAI-compatible provider, gateway or self-hosted server the workspace has added (Fireworks, Groq, Together, DeepInfra, OpenRouter, LiteLLM, Ollama, vLLM, …) is referenced as `<slug>/<model-id>`, e.g. `fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct` or `openrouter/moonshotai/kimi-k2`. A built-in provider's unlisted model is `<provider>/<model-id>` (`openai/gpt-6`). Bare unknown ids are rejected. A slug the workspace does not have only produces a warning in the editor and in `borgiq canvases validate`; the actor fails at run time. See [custom-ai-providers.md](custom-ai-providers.md) for setup, the catalog fields and pricing; `borgiq ai-providers models` lists every reference usable in the workspace.
-
-**Model tiers** (per million input/output tokens, as the platform meters them):
-- **claude-haiku-4-5** — $1/$5. The recommended starting point for classification, extraction and short generation.
-- **claude-sonnet-5** — $2/$10, 128K output. The step up when Haiku is not enough.
-- **claude-opus-5-5** — $4/$20 for hard reasoning; **claude-fable-5-1** ($10/$50) is the top Anthropic tier.
-- **gpt-6-sol** — $2/$10, OpenAI's balanced tier; **gpt-6-luna** $0.10/$0.50 budget (the fallback when `model` is omitted); **gpt-6-astra** $10/$50 top tier. OpenAI bills a prompt over 272K input tokens at 2x input and 1.5x output for the whole request.
-- **gpt-5.6-terra** — $2/$12; **gpt-5.6-luna** $0.20/$1.20.
-- **gemini-3.5-flash-lite** — $0.30/$2.50 for simple classification/extraction.
-- **grok-4.7** — $2/$6 for prompts under 200K input tokens; from 200K the whole request bills at double (all Grok 4.3+ models price this way).
-- **gpt-5.5-pro, gpt-5.4-pro** — $30/$180 pro tiers for research-grade tasks; the o-series reasoning models are being retired.
-
-## Results Object
-
-After the AI actor executes, the `results` object contains:
-
-```json
-{
-  "response": "The generated text or structured output...",
-  "toolCalls": [...],
-  "meta": {
-    "input": [...],
-    "model": "gpt-4o-mini",
-    "usage": {
-      "promptTokens": 150,
-      "completionTokens": 200,
-      "totalTokens": 350
-    },
-    "fromCache": false
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `response` | The generated content from the AI model |
-| `toolCalls` | Array of tool calls made by the AI (if tools were provided) |
-| `meta.input` | Input messages sent to the model (if `emitInput: true`) |
-| `meta.model` | The model that was used |
-| `meta.usage` | Token usage statistics |
-| `meta.fromCache` | Whether the response was cached |
-
-## Common Patterns
-
-### Simple Text Generation
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: You are a helpful assistant that summarizes text concisely.
-  prompt: ${{ inputs.textToSummarize }}
-  temperature: 0.3
-  maxTokens: 500
-```
-
-### Structured Output with JSON Mode
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: Extract key information from the provided text.
-  prompt: ${{ inputs.document }}
-  jsonMode: true
-  temperature: 0
-```
-
-### Structured Output with Schema
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: Analyze the sentiment of the provided text.
-  prompt: ${{ inputs.text }}
-  outputSchema:
-    type: object
-    properties:
-      sentiment:
-        type: string
-        enum:
-          - positive
-          - negative
-          - neutral
-      confidence:
-        type: number
-      keywords:
-        type: array
-        items:
-          type: string
-    required:
-      - sentiment
-      - confidence
-```
-
-### Multi-turn Conversation
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: You are a customer support agent.
-  messages: ${{ inputs.conversationHistory }}
-  prompt: ${{ inputs.userMessage }}
-```
-
-### Using Tools (Function Calling)
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: You are a helpful assistant with access to tools.
-  prompt: ${{ inputs.userRequest }}
-  tools:
-    - name: get_weather
-      description: Get the current weather for a location
-      jsonSchemaParameters:
-        type: object
-        properties:
-          location:
-            type: string
-            description: The city and country
-          unit:
-            type: string
-            enum:
-              - celsius
-              - fahrenheit
-        required:
-          - location
-    - name: search_database
-      description: Search the product database
-      jsonSchemaParameters:
-        type: object
-        properties:
-          query:
-            type: string
-          limit:
-            type: integer
-        required:
-          - query
-```
-
-## Message Format
-
-Messages follow a structured format with roles:
-
-### User Message
-
-```yaml
-messages:
-  - role: user
-    content: What is the capital of France?
-```
-
-### User Message with Image
-
-```yaml
-messages:
-  - role: user
-    content:
-      - type: text
-        text: What's in this image?
-      - type: image
-        image: ${{ inputs.imageFile }}
-```
-
-### Assistant Message
-
-```yaml
-messages:
-  - role: assistant
-    content: The capital of France is Paris.
-```
-
-### Tool Result Message
-
-```yaml
-messages:
-  - role: tool
-    content:
-      - type: tool-result
-        toolCallId: call_abc123
-        toolName: get_weather
-        output:
-          type: json
-          value:
-            temperature: 22
-            conditions: sunny
-```
-
-## Temperature Guide
-
-| Temperature | Use Case |
-|-------------|----------|
-| 0.0 - 0.3 | Factual, deterministic responses (data extraction, classification) |
-| 0.3 - 0.7 | Balanced creativity (general Q&A, summarization) |
-| 0.7 - 1.0 | Creative tasks (brainstorming, creative writing) |
-
-## Input Schemas
-
-Define input schemas for validation and UI generation:
-
-```yaml
-schemas:
-  inputs:
-    type: object
-    properties:
-      userPrompt:
-        type: string
-        title: User Prompt
-        description: The question or request for the AI
-      context:
-        type: string
-        title: Context
-        description: Additional context for the AI
-      temperature:
-        type: number
-        title: Temperature
-        description: Creativity level (0-1)
-        default: 0.7
-    required:
-      - userPrompt
-```
-
-## Error Handling
-
-A failed call fails the job; rate-limit errors are retried first. With `continueOnError: true` the error goes to the connected actors instead, as `err.<msgVar>` — see [error-handling.md](error-handling.md).
-
-## Direct Response Usage
-
-When the AiActor's response will be used directly (e.g., passed to another actor, rendered in UI, or saved to a file), use structured output to ensure clean, predictable formatting.
-
-### Why Structured Output Matters
-
-By default, LLMs may wrap code, HTML, or other content in markdown formatting (triple backticks), add explanatory text, or include other artifacts that break downstream processing. Using `jsonMode: true` or `outputSchema` forces the model to return only the requested content.
-
-### Code/HTML Generation Pattern
-
-When generating code, HTML, CSS, or any content that will be used directly:
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: |
-    You are a code generator. Return ONLY the requested code.
-    Do NOT wrap the output in markdown code blocks (no triple backticks).
-    Do NOT include explanations or comments outside the code.
-    Return raw, executable code only.
-  prompt: |
-    Generate a Python function that ${{ inputs.requirement }}
-  jsonMode: true
-  outputSchema:
-    type: object
-    properties:
-      code:
-        type: string
-        description: The raw code without markdown formatting
-    required:
-      - code
-  temperature: 0.2
-```
-
-### HTML Template Generation
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: |
-    You generate HTML content. Return ONLY valid HTML.
-    Never wrap output in ```html or ``` blocks.
-    Do not include explanations before or after the HTML.
-  prompt: |
-    Create an HTML email template for: ${{ inputs.emailPurpose }}
-  outputSchema:
-    type: object
-    properties:
-      html:
-        type: string
-        description: Raw HTML content without markdown code blocks
-      subject:
-        type: string
-        description: Suggested email subject line
-    required:
-      - html
-      - subject
-  temperature: 0.3
-```
-
-### Simple Text Extraction
-
-When you need a single value without any wrapper:
-
-```yaml
-options:
-  model: claude-haiku-4-5
-  systemPrompt: |
-    Extract the requested information. Return ONLY the value, nothing else.
-  prompt: |
-    Extract the company name from this text: ${{ inputs.text }}
-  jsonMode: true
-  outputSchema:
-    type: object
-    properties:
-      value:
-        type: string
-    required:
-      - value
-  temperature: 0
-```
-
-### Key Guidelines for Direct Usage
-
-1. **Always use `outputSchema`** - Provides the most control over response format
-2. **Explicitly instruct against markdown** - Tell the model not to use triple backticks
-3. **Use low temperature** - Set `temperature: 0` or `0.2` for deterministic output
-4. **Be specific in system prompt** - Reinforce the formatting requirements
-5. **Validate downstream** - Even with structured output, validate the content before use
-
-### Common Pitfalls
-
-| Problem | Solution |
-|---------|----------|
-| Response wrapped in \`\`\` | Add "no markdown code blocks" to system prompt + use outputSchema |
-| Extra explanatory text | Use outputSchema with specific field for the content |
-| Inconsistent formatting | Set temperature to 0 for deterministic output |
-| JSON with extra fields | Define strict outputSchema with only required fields |
-
-## Best Practices
-
-1. **Use appropriate models** - Choose smaller models (claude-haiku-4-5, gpt-6-luna) for simple tasks, larger models for complex reasoning
-2. **Set temperature intentionally** - Lower for factual tasks, higher for creative tasks
-3. **Use structured output** - Use `outputSchema` when you need predictable response formats
-4. **Provide clear system prompts** - Give the AI clear context about its role and task
-5. **Handle tool calls** - When using tools, implement proper handling for tool call responses
-6. **Monitor token usage** - Check `meta.usage` to optimize costs
-7. **Use caching** - Check `meta.fromCache` to understand cache behavior
-8. **Use structured output for direct usage** - When responses will be used directly (code, HTML, data), always use `jsonMode: true` with `outputSchema` and explicitly instruct the model to avoid markdown formatting
-
-## Examples
-
-See [ai-actor-examples.md](ai-actor-examples.md) for complete examples including:
-- Generate System Prompt (prompt engineering with upstream actor data)
-- Generate SERP Queries (structured output with outputSchema)
-- Gmail Filter Query Generator (natural language to domain-specific syntax)
-
-## Quick Example
 
 ```yaml
 metadata:
@@ -543,7 +46,6 @@ actors:
           Summarize the following text in no more than ${{ inputs.maxLength }} words:
 
           ${{ inputs.text }}
-        temperature: 0.3
         maxTokens: 500
     schemas:
       inputs:
@@ -565,4 +67,132 @@ actors:
       x: 0
       'y': 0
     edges: {}
+```
+
+## Options Reference
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `model` | string | `gpt-6-luna` | A known model id, `<provider>/<model-id>`, or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md). Set it: start with `claude-haiku-4-5` and step up only when the task needs more reasoning ([ai-models.md](ai-models.md)) |
+| `prompt` | string | — | The prompt, sent as the last user message |
+| `systemPrompt` | string | — | Background context and instructions: the model's role, the task, the output rules |
+| `messages` | array | — | Previous conversation messages (multi-turn); `prompt` is appended after them |
+| `temperature` | number (0–1) | — | Accepted, but not currently sent to the model: the provider's default applies |
+| `maxTokens` | integer | — (the editor fills in 10000) | Maximum tokens to generate |
+| `jsonMode` | boolean | false | Return the response as a JSON object |
+| `outputSchema` | object | — | JSON Schema the response must match; overrides `jsonMode` |
+| `tools` | array | — | Tool definitions the model may call ([below](#tools-function-calling)) |
+| `maxRetries` | integer | — | Retry attempts on failure; must be at least 1 when set (`0` fails validation, so omit it for no retries) |
+| `emitInput` | boolean | false | Include the input messages in `meta.input`, for debugging |
+
+Either `prompt` or `messages` must be provided. A failed call fails the job; rate-limit errors are retried first. With
+`continueOnError: true` the error goes to the connected actors instead, as `err.<msgVar>`: see
+[error-handling.md](error-handling.md).
+
+## Results Object
+
+| Field | Description |
+|-------|-------------|
+| `response` | The generated text, or the parsed object with `jsonMode` / `outputSchema` |
+| `toolCalls` | Tool calls the model made, when `tools` were given (`toolCallId`, `toolName`, `input`) |
+| `meta.input` | Input messages sent to the model (with `emitInput: true`) |
+| `meta.model` | The model used |
+| `meta.usage` | `promptTokens`, `completionTokens`, `totalTokens`: watch them to control cost |
+| `meta.fromCache` | Whether the response came from the cache: an identical call is answered from a cache |
+
+## Structured Output
+
+- Use `outputSchema` whenever the response feeds another actor, a UI or a file. It overrides `jsonMode`, so you need
+  not set both; `jsonMode` alone returns some JSON object with no contract.
+- Put content that is used directly (code, HTML, an email body, a single value) in a string property, and tell the
+  model in `systemPrompt` to return only that content: no markdown code fences (no triple backticks) and no
+  explanations. Otherwise models wrap code and HTML in fences or add prose that breaks downstream processing.
+- Require only the fields you need, and still validate the content downstream.
+
+```yaml
+options:
+  model: claude-haiku-4-5
+  systemPrompt: |
+    You are an expert researcher. Today is ${{ new Date().toISOString() }}.
+  prompt: |
+    Generate at most ${{ inputs.numQueries }} distinct search queries to research: ${{ inputs.query }}
+  outputSchema:
+    type: object
+    properties:
+      queries:
+        type: array
+        description: Search queries, at most ${{ inputs.numQueries }}
+        items:
+          type: object
+          properties:
+            query:
+              type: string
+              description: The search query
+            researchGoal:
+              type: string
+              description: What this query should find out, and where to go next
+          required:
+            - query
+            - researchGoal
+    required:
+      - queries
+```
+
+`response` is then `{ queries: [{ query, researchGoal }, …] }`. `${{ }}` works inside the schema too.
+
+## Message Format
+
+```yaml
+messages:
+  - role: user
+    content: What is the capital of France?
+  - role: assistant
+    content: The capital of France is Paris.
+  - role: user                        # content can be a list of parts
+    content:
+      - type: text
+        text: What's in this image?
+      - type: image
+        image: ${{ inputs.imageFile }}
+  - role: tool                        # the result of a tool call the model made
+    content:
+      - type: tool-result
+        toolCallId: call_abc123
+        toolName: get_weather
+        output:
+          type: json
+          value:
+            temperature: 22
+            conditions: sunny
+```
+
+For a multi-turn conversation, pass the history in `messages` (e.g. `${{ inputs.conversationHistory }}`) and the new
+user message in `prompt`.
+
+## Tools (Function Calling)
+
+The model can answer with tool calls instead of text. The AiActor only returns them in `toolCalls`: run them
+yourself and send the results back as `role: tool` messages, or use an AiAgentActor, which runs its tools in a loop.
+
+```yaml
+options:
+  model: claude-haiku-4-5
+  systemPrompt: You are a helpful assistant with access to tools.
+  prompt: ${{ inputs.userRequest }}
+  tools:
+    - name: get_weather
+      description: Get the current weather for a location
+      jsonSchemaParameters:
+        type: object
+        properties:
+          location:
+            type: string
+            description: The city and country
+          unit:
+            type: string
+            enum:
+              - celsius
+              - fahrenheit
+        required:
+          - location
 ```

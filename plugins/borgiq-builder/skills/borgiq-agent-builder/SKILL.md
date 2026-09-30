@@ -16,7 +16,7 @@ BorgIQ has three execution modes for AI work plus one endpoint pattern:
 - **AgentHarnessActor** — Claude Code running in an isolated sandbox VM (E2B or Daytona) with a full machine, MCP servers, background processes, and session persistence via `sessionId`. Inbound messages are queued FIFO with mutex. Returns workspace + session zips on completion.
 - **McpServerActor** — *not* an agent. An MCP endpoint that exposes its child tool actors so external clients (Claude Desktop, Cursor, custom agents) can call BorgIQ actors via the Model Context Protocol.
 
-> **Legacy note:** flows built before mid-2026 may contain `DeprecatedAiAgent` — the old orchestrator-loop agent (no filesystem, options like `temperature`/`maxTokens`/`messages`) that used to own the `AiAgentActor` type name. It still runs but must not be used for new work. See [`references/deprecated-ai-agent.md`](../borgiq-builder/references/deprecated-ai-agent.md).
+> **Legacy note:** flows built before mid-2026 may contain `DeprecatedAiAgent` — the old orchestrator-loop agent (no filesystem, options like `temperature`/`maxTokens`/`messages`) that used to own the `AiAgentActor` type name. It still runs but must not be used for new work. See [`references/ai-agent-actor.md`](../borgiq-builder/references/ai-agent-actor.md#legacy-deprecatedaiagent).
 
 ## "Which one do I use" matrix
 
@@ -85,7 +85,7 @@ This keeps the directory definition in one reusable place: any agent or flow tha
 |---|---|
 | [`references/ai-actor.md`](../borgiq-builder/references/ai-actor.md) | Single LLM call: text generation, structured output, tool *definitions*. When NOT to use it. |
 | [`references/ai-agent-actor.md`](../borgiq-builder/references/ai-agent-actor.md) | Serverless coding agent: built-in filesystem/bash tools, BorgIQ actor tools, sessions, Done/Status ports, runtime sizing. |
-| [`references/deprecated-ai-agent.md`](../borgiq-builder/references/deprecated-ai-agent.md) | Legacy orchestrator-loop agent (`DeprecatedAiAgent`) — read/debug existing flows only. |
+| [`references/ai-agent-actor.md`](../borgiq-builder/references/ai-agent-actor.md#legacy-deprecatedaiagent) | Legacy orchestrator-loop agent (`DeprecatedAiAgent`) — read/debug existing flows only. |
 | [`references/agent-harness-actor.md`](../borgiq-builder/references/agent-harness-actor.md) | Sandboxed Claude Code: full VM, session persistence, MCP, network controls. |
 | [`references/mcp-server-actor.md`](../borgiq-builder/references/mcp-server-actor.md) | Expose BorgIQ tools as MCP endpoint, PAT auth, JSON-RPC protocol. |
 | [`references/message-processor-actor.md`](../borgiq-builder/references/message-processor-actor.md) | `issueCallbackToken` / `waitForCallbackToken` for human-in-the-loop agent flows. |
