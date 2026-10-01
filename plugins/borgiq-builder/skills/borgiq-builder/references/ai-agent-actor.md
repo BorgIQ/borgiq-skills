@@ -56,7 +56,7 @@ AiAgentActor gives an AI model a working environment plus your BorgIQ actors as 
 |--------|---------|------------------|-------------------|
 | Execution | Single LLM call | Agent loop in checkpointed serverless segments | Harness CLI inside a sandbox VM (E2B/Daytona) |
 | Filesystem / bash | None | Private session workspace + bash | Full machine |
-| Tools | Describes tools, returns tool calls | Built-ins (read/write/edit/bash/grep/find/ls, + opt-in deno) + BorgIQ actor tools + MCP servers | Harness built-ins + BorgIQ tools + MCP servers |
+| Tools | Describes tools, returns tool calls | Built-ins (read/write/edit/bash/grep/find/ls, + opt-in `code_execution`) + BorgIQ actor tools + MCP servers | Harness built-ins + BorgIQ tools + MCP servers |
 | Startup latency | ~0 | Low (serverless invoke; cold restore adds seconds) | Sandbox provision + harness install (tens of seconds to minutes) |
 | Sessions | No | Yes — `sessionId`, checkpoint/restore, 7-day sliding TTL | Yes — sandbox session zips |
 | Background processes | — | No (nothing survives a segment boundary) | Yes (within sandbox lifetime) |
@@ -85,8 +85,10 @@ actors:
     sourcePorts:
       - id: SPRTdone000
         name: Done
+        description: Final result when the session ends
       - id: SPRTdefault
         name: Status
+        description: Assistant turns and tool results while the agent runs
     configuration:
       inputs:
         # Wire upstream actor data DIRECTLY into inputs (not into vars).
@@ -161,6 +163,7 @@ AiAgentActor has two required source ports:
 | `meta.endReason` | `completed`, `timeout`, `error`, or `max-loop-count` |
 | `meta.model` | The model used |
 | `meta.segments` | How many serverless segments the run spanned |
+| `meta.duration` | Total run time in milliseconds |
 
 Token usage is not reported on the done port; it is metered per segment into the workspace AI log.
 
@@ -176,7 +179,7 @@ Token usage is not reported on the done port; it is metered per segment into the
   "toolCalls": [
     {
       "toolCallId": "toolu_01Kss5SfgsQUA7UGsuXCjhT1",
-      "toolName": "deno",
+      "toolName": "code_execution",
       "input": { "path": "aggregate.ts", "args": ["data"] }
     }
   ],
@@ -192,7 +195,7 @@ Token usage is not reported on the done port; it is metered per segment into the
 {
   "type": "tool-result",
   "toolCallId": "toolu_01Kss5SfgsQUA7UGsuXCjhT1",
-  "toolName": "deno",
+  "toolName": "code_execution",
   "output": { "type": "json", "value": "wrote summary.csv (412 rows)" },
   "isError": false,
   "meta": { "cwd": "/workspace", "timestamp": 1751791236789 }
@@ -209,6 +212,8 @@ Token usage is not reported on the done port; it is metered per segment into the
 }
 ```
 
+**Notification** (`ai-agent-notification`) — a notice about the session itself, emitted when the runtime compacts the conversation (`notificationType: "compaction"`, `message` such as `Compacted context: N → ~M tokens`); it also carries an optional `title` and `meta`.
+
 The `ai-agent-loop`/`tool-result` envelope (`type` / `response` / `toolCalls` / tool-result fields) is the same shape the legacy agent used, so status-port consumers built for the old actor keep working; `reasoning` is a new optional field on the loop that consumers ignoring unknown fields never see. Note that `meta` now carries `cwd` and `timestamp` (the legacy actor's status `meta` carried `model` and `usage`).
 
 ## Options Reference
@@ -217,10 +222,13 @@ All options live under `configuration.options`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | `claude-sonnet-5` | The model to use, in one of three forms: a known model id, which must be one of the curated `AiAgentModels` (see [Available Models](#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model; or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) whose catalog entry does not say `agent: false`. LLM calls route through the BorgIQ AI gateway using the workspace's credential for that provider |
+| `model` | string | the runtime's default Anthropic model (the editor fills in `claude-sonnet-5`) | Always set it. The model to use, in one of three forms: a known model id, which must be one of the curated `AiAgentModels` (see [Available Models](#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model; or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) whose catalog entry does not say `agent: false`. LLM calls route through the BorgIQ AI gateway using the workspace's credential for that provider |
 | `prompt` | string | — | **Required.** The task prompt for the agent |
 | `systemPrompt` | string | — | Background instructions appended to the agent's system prompt |
 | `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` | `medium` | How much the model thinks before each turn. Clamped to what the selected model supports (a level on a non-thinking model is a no-op). Thinking is billed as output tokens, shows in the editor timeline, and streams as `reasoning` on the Status port; `off` stops paying for it |
+| `autoCompaction` | boolean | true | Summarise the conversation when it grows past the context budget, so a long session keeps running. `false` leaves only the emergency compaction after a context-overflow error. Each compaction emits an `ai-agent-notification` on the Status port |
+| `compactionInstructions` | string | — | Extra focus for the compaction summary, e.g. what must never be dropped (`keep the list of files changed`) |
+| `contextBudgetTokens` | integer (≥ 32000) | 200000 | How large the conversation may grow before it is compacted: compaction starts at 85% of this budget, capped at the model's context window. Raise it on a 1M-context model to keep more history at a higher input cost |
 | `sessionId` | string | auto-generated | Session ID to continue or create (max 64 characters). Same ID = continue the session |
 | `volumeZipFile` | BIQFile | — | Zip file extracted into the session workspace at session creation. Each later run that reuses the session with a zip extracts it again over the restored workspace: files at the paths it names are reset to the zip's version, other files are kept |
 | `workingDirectory` | string | workspace root | Working directory for the agent, relative to the session workspace |
@@ -230,7 +238,7 @@ All options live under `configuration.options`.
 | `disallowedTools` | string[] | — | Deny-list of the same seven built-in tools. Does not affect the Code Execution tool |
 | `enableCodeExecution` | boolean | **false** | Give the agent the `code_execution` tool ("Code Execution" in the editor), so it can run TypeScript/JavaScript it writes in its workspace with Deno. The tool's only switch. See [Running code with the Code Execution tool](#running-code-with-the-code-execution-tool) |
 | `allowNet` | boolean | **false** | Allow outbound network access from the tool runtime. Applies to `bash` too — with it off, `bash` has no `curl` at all |
-| `allowNetList` | string[] | — | Only these hosts/CIDRs allowed for tool-runtime egress (system endpoints always included). Mutually exclusive with `denyNetList` |
+| `allowNetList` | string[] | — | Only these hosts/CIDRs allowed for tool-runtime egress (system endpoints always included). Takes effect only with `allowNet: true`. Mutually exclusive with `denyNetList` |
 | `denyNetList` | string[] | — | Block these hosts/CIDRs for tool-runtime egress (system endpoints cannot be denied). Mutually exclusive with `allowNetList` |
 | `env` | record | — | Environment variables exposed to tools and bash. Values encrypted in transit. Reserved names rejected: `HOME`, `PATH`, `TMPDIR`, `NODE_OPTIONS`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, and anything starting with `AWS_`, `DENO_`, or `BORGIQ_` |
 | `mcpServers` | object[] | — | MCP servers exposed to the agent as tools. Remote (`type: http`) or internal (`type: borgiq`); stdio is not supported here. See [MCP Servers](#mcp-servers) |
@@ -337,7 +345,7 @@ configuration:
 1. **All tools must be listed** — every tool the agent should access must have its actor ID in this array
 2. **Order doesn't matter** — the agent selects tools based on their descriptions and schemas, not array order
 3. **Location is critical** — `aiAgentToolActorIds` is a sibling to `inputs` and `options`, NOT nested inside `options`
-4. **Names must not collide with built-ins** — a tool actor whose `msgVar` is `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, or `deno` fails validation
+4. **Names must not collide with built-ins** — a tool actor whose `msgVar` is `read`, `write`, `edit`, `bash`, `grep`, `find` or `ls` (or `code_execution` while `enableCodeExecution` is on) is rejected when the session starts
 5. **Tool actors are rendered inside the agent's boundary in the UI** and have **empty edges** — their output flows back to the agent
 
 ### Tool Actor Input Pattern
@@ -419,7 +427,7 @@ Tool actors have a specific structure. Key requirements:
 - **edges must be empty** — tool output flows back to the agent
 - **inputs use `${{aiInput}}`** — to receive values from the agent's tool calls
 - **continueOnError: true** is recommended — so the agent can handle failures gracefully
-- **msgVar must not be a built-in tool name** (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`/`deno`)
+- **msgVar must not be a built-in tool name** (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, plus `code_execution` while `enableCodeExecution` is on)
 
 ```yaml
 ACTR01toolactor:
@@ -487,6 +495,7 @@ interface AiAgentActorResult {
     endReason: 'completed' | 'timeout' | 'error' | 'max-loop-count';
     model?: string;
     segments?: number;        // Serverless segments the run spanned
+    duration?: number;        // Total run time in milliseconds
   };
 }
 ```
@@ -509,6 +518,13 @@ type AiAgentStatusPortResult =
       output: AiToolMessageOutput;
       isError?: boolean;
       meta: { cwd: string; timestamp: number };
+    }
+  | {
+      type: 'ai-agent-notification';
+      notificationType?: string;   // e.g. 'compaction'
+      title?: string;
+      message?: string;            // e.g. 'Compacted context: N → ~M tokens'
+      meta?: { cwd?: string; timestamp?: number };
     };
 ```
 
@@ -522,16 +538,16 @@ type AiAgentStatusPortResult =
 
 The workspace must have an AI credential configured for the chosen model's provider — for a custom provider, one with that slug — or the run fails fast. A slug the workspace does not have only warns in the editor and in `borgiq canvases validate`. For custom models, `thinkingLevel` only applies when the catalog entry has `reasoning: true`. `borgiq ai-providers models` lists every usable reference, with `agent` saying which ones the AI Agent accepts.
 
-**Default:** `claude-sonnet-5` (the first entry of the Anthropic list; the platform picks it when `model` is unset).
+**Default:** the editor fills in `claude-sonnet-5` (the first entry of the Anthropic list). An unset `model` runs the runtime's default Anthropic model, so always set `model`.
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | `claude-sonnet-5` (default), `claude-opus-5-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
+| Anthropic | `claude-sonnet-5` (editor default), `claude-opus-5-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
 | OpenAI | `gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`, `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini` |
 | Google | `gemini-3.1-pro-preview`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-2.5-pro` |
 | xAI | `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-build-0.1`, `grok-4.3`, `grok-4-fast-reasoning`, `grok-code-fast-1` |
 
-Rough price tiers, per million input/output tokens as the platform meters them: `claude-sonnet-5` and `gpt-6-sol` $2/$10; `claude-opus-5-5` $4/$20; `claude-opus-5` and `claude-opus-4-8` $5/$25; `claude-fable-5-1` and `gpt-6-astra` $10/$50; `gpt-5.6` $4/$20 (promotional); `gpt-6-luna` $0.10/$0.50; `gpt-5.6-luna` $0.20/$1.20; `claude-haiku-4-5` $1/$5; `gemini-3.8-flash` $0.75/$3.75; `grok-4.7` $2/$6 (double from 200K input tokens).
+Rough price tiers, per million input/output tokens as the platform meters them: `claude-sonnet-5` and `gpt-6-sol` $2/$10; `claude-opus-5-5` $4/$20; `claude-opus-5` and `claude-opus-4-8` $5/$25; `claude-fable-5-1` and `gpt-6-astra` $10/$50; `gpt-6-luna` $0.10/$0.50; `gpt-5.6-luna` $0.20/$1.20; `claude-haiku-4-5` $1/$5; `grok-4.7` $2/$6 (double from 200K input tokens).
 
 `grok-4-fast-reasoning` and `grok-code-fast-1` are still accepted for existing actors, but xAI retired them on 2026-05-15 and serves those requests with `grok-4.3` and `grok-build-0.1`; the dated `gpt-5` and `gpt-5-mini` snapshots shut down on 2026-12-11, and since 2026-09-18 Google serves `gemini-2.5-pro` only to projects that already used it.
 
@@ -724,8 +740,10 @@ actors:
     sourcePorts:
       - id: SPRTdone000
         name: Done
+        description: Final result when the session ends
       - id: SPRTdefault
         name: Status
+        description: Assistant turns and tool results while the agent runs
     configuration:
       inputs:
         reportZip: ${{ msg.upload_trigger.file }}
@@ -889,7 +907,7 @@ Existing flows built on the legacy loop agent keep running as `DeprecatedAiAgent
 | `temperature`, `maxTokens`, `enableTodoTool` | Removed — no equivalent (the agent manages its own generation and planning) |
 | `messages` (multi-turn history) | Use `sessionId` continuation — re-invoke the same session instead of replaying message arrays |
 | `prompt` / `systemPrompt` / `maxLoopCount` | Same names, same intent |
-| `model: gpt-4o-mini` (legacy default) | Pick an agent-grade model; default is `claude-sonnet-5` |
+| `model: gpt-6-luna` (legacy default) | Set an agent-grade model explicitly (the editor fills in `claude-sonnet-5`) |
 | — | New: `thinkingLevel` (`off` … `high`, default `medium`) controls how much the model thinks; the legacy agent never requested thinking |
 
 Output contract changes for downstream actors:
@@ -903,7 +921,7 @@ Output contract changes for downstream actors:
 
 On the Status port, `ai-agent-loop` keeps its legacy shape and gains an optional `reasoning` field; a loop may now be reasoning-only with an empty `response` (see [Status Port Output](#status-port-output)).
 
-Tool wiring (`aiAgentToolActorIds`, `${{aiInput}}`, tool schemas) is unchanged — tool actors migrate as-is, unless their `msgVar` collides with a built-in tool name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`/`deno`), which now requires a rename.
+Tool wiring (`aiAgentToolActorIds`, `${{aiInput}}`, tool schemas) is unchanged — tool actors migrate as-is, unless their `msgVar` collides with a built-in tool name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, plus `code_execution` while `enableCodeExecution` is on), which requires a rename.
 
 See [deprecated-ai-agent.md](deprecated-ai-agent.md) for the full legacy reference.
 
@@ -932,12 +950,12 @@ Compose agents hierarchically using CallFlowActor tools to create specialized su
 ## Best Practices
 
 1. **Size the runtime for the workspace** — ≥ 4 GB ephemeral storage for real file work; the workspace cap is 20% of ephemeral storage
-2. **Use agent-grade models** — default `claude-sonnet-5`; step up to `claude-opus-5-5` or `claude-fable-5-1` for complex multi-step tasks
+2. **Use agent-grade models** — start with `claude-sonnet-5`; step up to `claude-opus-5-5` or `claude-fable-5-1` for complex multi-step tasks
 3. **Make bash side effects idempotent** — bash is at-least-once across segment retries; external calls (APIs, emails) may repeat
 4. **Prefer built-in tools for file work** — don't wire file-system tool actors; the agent already has `read`/`write`/`edit`/`bash`
 5. **Define clear tool schemas** — the agent uses tool descriptions and schemas to decide when and how to call wired tools
 6. **Handle tool errors** — set `continueOnError: true` on tool actors so the agent can recover from failures
-7. **Restrict tools when you can** — `disallowedTools` for read-only agents; `denyNetList`/`allowNetList` for tool-runtime egress (remember bash is not constrained)
+7. **Restrict tools when you can** — `disallowedTools` for read-only agents; `denyNetList`/`allowNetList` for tool-runtime egress (they cover bash's `curl` and Code Execution scripts; `allowNetList` needs `allowNet: true`)
 8. **Store `sessionId` when you need continuation** — persist it (e.g. in a Collection) to resume the session in a later flowrun
 9. **Guard `result` downstream** — it is optional; branch on `success`/`meta.endReason` for control flow
 10. **Set `thinkingLevel` on purpose** — the default `medium` is billed as output tokens every turn; `off` for cheap high-volume agents, `high` for hard multi-step work

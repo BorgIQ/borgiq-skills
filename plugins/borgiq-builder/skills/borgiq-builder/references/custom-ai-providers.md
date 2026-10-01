@@ -80,7 +80,7 @@ Any of these connection types works:
 | `deepseek-bearer` | `https://api.deepseek.com` | No `/v1` |
 | `cerebras-bearer` | `https://api.cerebras.ai/v1` | |
 | `deepinfra-bearer` | `https://api.deepinfra.com/v1/openai` | |
-| `perplexity-bearer` | `https://api.perplexity.ai` | No `/v1`; Sonar chat completions are being superseded by Perplexity's Agent API (support announced until 2026-09-27) |
+| `perplexity-bearer` | `https://api.perplexity.ai` | No `/v1`; Sonar chat completions are being superseded by Perplexity's Agent API |
 | `cohere-bearer` | `https://api.cohere.ai/compatibility/v1` | Cohere's OpenAI-compatible Compatibility API |
 | `huggingface-bearer` | `https://router.huggingface.co/v1` | Ids are `org/model`, optionally `:provider` |
 | `openai-bearer`, `xai-bearer` | `https://api.openai.com/v1`, `https://api.x.ai/v1` | The built-in providers' own types; usable behind a custom provider too (e.g. with an overriding gateway base URL) |
@@ -200,7 +200,7 @@ cost; the catalog is what makes it show up in the dropdown, priced and labelled.
 ```yaml
 type: AiActor
 configuration:
-  options: |
+  options:
     model: fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct
     prompt: ${{ inputs.text }}
 ```
@@ -208,7 +208,7 @@ configuration:
 ```yaml
 type: AiAgentActor
 configuration:
-  options: |
+  options:
     model: openrouter/moonshotai/kimi-k2
     thinkingLevel: off      # unless the catalog entry says reasoning: true
     prompt: ${{ inputs.task }}
@@ -237,7 +237,7 @@ on its connection, or re-import the connection type.`).
 | DeepSeek | `deepseek-bearer` | `https://api.deepseek.com` | No `/v1`; reasoning models: `reasoning: true`, `compat: { thinkingFormat: "deepseek" }` |
 | Cerebras | `cerebras-bearer` | `https://api.cerebras.ai/v1` | Do not combine `tools` with `response_format` |
 | DeepInfra | `deepinfra-bearer` | `https://api.deepinfra.com/v1/openai` | |
-| Perplexity | `perplexity-bearer` | `https://api.perplexity.ai` | No `/v1`; Sonar chat completions superseded by the Agent API (support announced until 2026-09-27) |
+| Perplexity | `perplexity-bearer` | `https://api.perplexity.ai` | No `/v1`; Sonar chat completions superseded by the Agent API |
 | Cohere | `cohere-bearer` | `https://api.cohere.ai/compatibility/v1` | The Compatibility API; ids like `command-a-03-2025` |
 | Hugging Face | `huggingface-bearer` | `https://router.huggingface.co/v1` | HF token with the Inference Providers permission; ids are `org/model`, optionally `:provider` |
 | Moonshot / Kimi | `custom-provider-apikey` | `https://api.moonshot.ai/v1` | Thinking variants: `reasoning: true` |
