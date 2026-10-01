@@ -68,14 +68,14 @@ Options can include BorgIQ expressions for dynamic values:
 options:
   staticValue: "hello"
   dynamicTimestamp: ${{ Date.now() }}
-  escapedExpression: '''${{ Date.now() }}'''
+  escapedExpression: '\${{ Date.now() }}'
   arrayValue:
     - item1
     - 42
     - ${{ Date.now() }}
 ```
 
-**Note:** To emit a literal string containing `${{ }}` without evaluation, wrap it in triple quotes: `'''${{ ... }}'''`
+**Note:** To keep a `${{ }}` from being evaluated, put a backslash before it: `'\${{ ... }}'` in a plain or single-quoted YAML string, `"\\${{ ... }}"` in a double-quoted one. The backslash stays in the emitted value (`\${{ Date.now() }}`). Quoting alone does not escape: `'''${{ Date.now() }}'''` emits the evaluated timestamp wrapped in single quotes.
 
 ## Emitted Message
 
@@ -148,7 +148,7 @@ configuration:
 ```
 
 ```typescript
-// In DenoActor
+// In DenoActor, with configuration.inputs.triggerData: ${{ msg.button_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {

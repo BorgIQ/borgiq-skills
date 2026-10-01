@@ -150,15 +150,17 @@ When `waitForResponse: true`, the sub-flow can return results to the parent usin
 
 See [callable-response-actor.md](callable-response-actor.md) for complete documentation.
 
+Only a CallableResponseActor returns data to the parent; an actor's own results never reach it. Wire the last actor into a CallableResponseActor with `payload: ${{ msg.<last_actor_msgVar> }}`:
+
 ```typescript
-// In sub-flow's DenoActor (final actor)
+// In sub-flow's DenoActor, with configuration.inputs: ${{ msg.callable_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
   // Process the data from callable trigger
   const result = await processData(req.inputs);
 
-  // This results value is sent back to the parent flow
+  // A downstream CallableResponseActor sends this message back to the parent flow
   return {
     results: {
       success: true,
@@ -232,9 +234,9 @@ ACTR01sendNotification:
 
 Create a reusable data lookup flow:
 
-**Sub-Flow:**
+**Sub-Flow:** CallableTriggerActor → DenoActor → CallableResponseActor (`payload: ${{ msg.<deno_msgVar> }}`)
 ```typescript
-// CallableTriggerActor passes inputs to DenoActor
+// DenoActor, with configuration.inputs.userId: ${{ msg.callable_trigger.userId }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
@@ -291,11 +293,11 @@ configuration:
 ```
 
 ```typescript
-// In downstream DenoActor
+// In downstream DenoActor, with configuration.inputs: ${{ msg.callable_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
-  // req.inputs contains the payload from callable trigger
+  // req.inputs is the interpolated configuration.inputs: here, the callable trigger's payload
   const { userId, action, data } = req.inputs;
 
   console.log(`Processing ${action} for user ${userId}`);

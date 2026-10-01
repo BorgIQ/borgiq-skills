@@ -33,7 +33,7 @@ This reference covers common mistakes when working with parallel execution and t
 **Parallel with forkJoin (D runs once with combined results):**
 ```yaml
 # A connects to Fork
-# Fork connects to B and C (with path names)
+# Fork connects to B and C (plain edges from SPRTdefault)
 # B and C both connect to ForkJoin
 # ForkJoin connects to D
 # Result: D executes once with bundled results from both B and C
@@ -151,7 +151,7 @@ edges:
 
 ## Visual Guide
 
-### Parallel WITHOUT fork (D runs multiple times):
+### Parallel WITHOUT fork (each branch runs on its own):
 ```
      A
     /|\

@@ -67,55 +67,63 @@ Runtime context with information about the current execution environment.
 ```json
 {
   "org": {
-    "id": "ORG001...",
+    "id": "ORG0...",
     "name": "Organization Name"
   },
   "workspace": {
     "id": "WKSP01...",
-    "name": "Workspace Name",
     "slug": "workspace-slug",
-    "denoActorTimeoutInSeconds": 240,
-    "lambdaTimeoutInSeconds": 240,
-    "lambdaReservedConcurrentExecutions": 5,
-    "lambdaMemorySizeInMB": 2048,
-    "lambdaEphemeralStorageSizeInMB": 2048
+    "name": "Workspace Name"
   },
   "canvas": {
     "id": "CANV01...",
     "slug": "canvas-slug",
     "name": "Canvas Name",
-    "webhookTriggers": {},
-    "interfaceTriggers": {...}
+    "webhookTriggers": {
+      "<msgVar>": { "id": "ACTR01...", "type": "WebhookTriggerActor", "name": "...", "msgVar": "...", "description": "...", "url": "https://..." }
+    },
+    "interfaceTriggers": {},
+    "appTriggers": {},
+    "universalTriggers": {}
   },
   "flowrun": {
     "id": "FLRN01...",
     "createdAt": "2025-09-05T15:43:58.142Z"
   },
-  "trigger": {
+  "triggerActor": {
     "id": "ACTR01...",
     "type": "InterfaceTriggerActor",
     "name": "Interface Trigger",
     "msgVar": "interface_trigger",
-    "isActive": true
+    "description": "..."
   },
   "actor": {
     "id": "ACTR01...",
     "type": "HttpRequestActor",
     "name": "Current Actor Name",
     "msgVar": "current_actor_msgvar",
-    "isActive": true,
+    "description": "...",
     "upstreamActorCount": 2
   },
   "sourceActor": {
     "id": "ACTR01...",
     "type": "PreviousActorType",
     "name": "Previous Actor",
-    "msgVar": "previous_actor"
+    "msgVar": "previous_actor",
+    "description": "..."
   },
-  "sourceType": "actor",
-  "sourceMsgId": "FMSG01..."
+  "sourceMsgId": "FMSG01...",
+  "parentFlowrun": {
+    "workspace": { "id": "WKSP01...", "slug": "parent-ws", "name": "Parent Workspace" },
+    "canvas": { "id": "CANV01...", "slug": "parent-canvas", "name": "Parent Canvas" },
+    "flowrunId": "FLRN01...",
+    "actorId": "ACTR01...",
+    "flowrunJobId": "FJOB01..."
+  }
 }
 ```
+
+The canvas maps (`webhookTriggers`, `interfaceTriggers`, `appTriggers`, `universalTriggers`) are keyed by the trigger's msgVar and carry its `url`. `sourceActor` and `sourceMsgId` are absent when a trigger fires, `parentFlowrun` is present only in a sub-flow, and `actor.tools` is added for agent actors.
 
 **Note on `sourceMsgId`:** This ID is unique per message and can be used as an idempotency key for downstream systems when you need to ensure an operation is only performed once.
 
@@ -136,7 +144,7 @@ body:
 
 The trigger event for the current firing — a discriminated union keyed by `trigger.type`. `trigger` is a top-level variable at the same level as `ctx` and `msg`, available **inside trigger actors' own configuration** (every trigger type, not just webhooks). In task actors `trigger` is `undefined` — downstream actors read the trigger's payload via `msg.<triggerMsgVar>` instead.
 
-> **Don't confuse** top-level `trigger` (the firing event, documented here) with `ctx.trigger` / `ctx.triggerActor` (static metadata about the workflow's trigger actor: `id`, `type`, `name`, `msgVar` — see [ctx](#ctx)).
+> **Don't confuse** top-level `trigger` (the firing event, documented here) with `ctx.triggerActor` (static metadata about the workflow's trigger actor: `id`, `type`, `name`, `msgVar`, `description` — see [ctx](#ctx)).
 
 **Access:** `${{ trigger.type }}`, `${{ trigger.request.body }}`, `${{ trigger.request.headers['x-github-event'] }}`
 
@@ -144,10 +152,11 @@ The trigger event for the current firing — a discriminated union keyed by `tri
 
 | `trigger.type` | Extra fields |
 |---|---|
-| `webhook` | `request` — the parsed inbound HTTP request (shape below) |
+| `webhook` | `request` — the parsed inbound HTTP request (shape below); `user?` `{ id, name?, email, appSessionId? }` — the caller identified by an app token or API key (also on `request.meta.user`) |
 | `schedule` | `triggeredAt` (this fire, ISO timestamp), `lastTriggeredAt?` (previous fire, if tracked) |
 | `interface` | `user?` `{ id, name?, email }`; `submission?` `{ interfaceId, body }` — present on form post, absent on initial render |
 | `app` | `user?` `{ id, name?, email }` |
+| `reactAppBuild` | `user?` — a ReactAppTriggerActor build; serving the app never reaches the runtime |
 | `lifecycle` | `event` — the lifecycle transition: `'on-delete'`, or `'canvas-enabled'` / `'canvas-disabled'` (reserved, not delivered yet). An `'on-delete'` also always carries `scope` (`'actor'` \| `'canvas'` \| `'workspace'` \| `'org'` — which level was deleted; only `'actor'` is sent today, by a hand-run test fire, and the others are reserved for automatic delivery, which is not available yet) and `subject` `{ id }` (that resource), plus `manual: true` on a test fire run by hand in a development workspace (nothing was deleted — treat it as a dry run) — see [universal-trigger-actor.md → Cleaning Up on Delete](universal-trigger-actor.md#cleaning-up-on-delete) |
 | `callable`, `email`, `button`, `mcpServer`, `manual` | none |
 
@@ -412,28 +421,32 @@ configuration:
 
 ## err
 
-Error information from upstream actors (when `continueOnError: true`).
+Errors emitted by upstream actors that have `continueOnError: true`, keyed by msgVar like `msg`. A failed actor's `msg.<msgVar>` is undefined and `err.<msgVar>` holds `{ name, message, stack, location, retry, canEmit, metadata? }`.
 
-**Access:** `${{ err }}`
+**Access:** `${{ err.<msgVar> }}`
 
 **Use case:** Processing errors from previous actors that had `continueOnError` enabled.
 
 ```yaml
 configuration:
   inputs:
-    previousError: ${{ err?.message || 'No error' }}
+    previousError: ${{ err.fetch_user?.message || 'No error' }}
 ```
 
 ---
 
 ## Interpolation Order Summary
 
-1. **inputs** → Uses: `msg`, `ctx`, `err` (plus `trigger` in trigger actors)
-2. **vars** → Uses: `inputs`, `msg`, `ctx`, `err` (plus `trigger` in trigger actors)
-3. **options** → Uses: `inputs`, `vars`, `msg`, `ctx`, `err` (plus `trigger` in trigger actors — this is where `options.webhook.response.body` lives)
+Every step also sees `credentials`, `connection`, and `assets`, plus `trigger` in trigger actors.
+
+1. **inputs** → Uses: `msg`, `ctx`, `err`
+2. **vars** → Uses: `inputs`, earlier `vars`, `msg`, `ctx`, `err`
+3. **options** → Uses: `inputs`, `vars`, `msg`, `ctx`, `err` (in a trigger actor, `trigger` is where `options.webhook.response.body` reads the request)
 4. Actor executes, populates `results`
-5. **error** → Uses: `results`, `inputs`, `vars`, `msg`, `ctx`
-6. **outputs** → Uses: `results`, `inputs`, `vars`, `msg`, `ctx` (only if no error)
+5. **error** → Uses: `results`, `inputs`, `vars`, `msg`, `ctx`, `err`
+6. **outputs** → Uses: `results`, `inputs`, `vars`, `msg`, `ctx`, `err` (only if no error)
+
+Code actors (DenoActor, PythonActor, UniversalTriggerActor) skip steps 2 and 6: `vars` and `outputs` are never interpolated.
 
 For trigger actors, the firing event is available as the top-level `trigger` variable (see [the `trigger` section](#trigger)); on webhook firings the inbound request is `trigger.request` — **not** `msg.<thisActor>`, which doesn't exist until the trigger emits.
 
@@ -461,7 +474,7 @@ timestamp: ${{ Date.now() }}
 greeting: ${{ `Hello, ${inputs.name}!` }}
 
 # Ternary conditional
-status: ${{ inputs.active ? 'Active' : 'Inactive' }}
+status: "${{ inputs.active ? 'Active' : 'Inactive' }}"   # quoted: a plain YAML value cannot contain ': '
 ```
 
 ### Multi-line IIFE Pattern
@@ -521,13 +534,13 @@ inputs:
 
 ```yaml
 # JSON to string
-jsonBody: ${{ Q.toJSON({ name: inputs.name, data: msg.upstream.body }) }}
+jsonBody: "${{ Q.toJSON({ name: inputs.name, data: msg.upstream.body }) }}"
 
 # Parse JSON string
 parsed: ${{ Q.parseJSON(msg.webhook.body) }}
 
 # CSV conversion
-csvOutput: ${{ Q.toCSV(msg.records.data) }}
+csvOutput: "${{ Q.toCSV(msg.records.data, { columns: ['id', 'name'] }) }}"   # objects need columns
 ```
 
 ### Error Handling with Status Codes
@@ -561,7 +574,7 @@ ulid: ${{ Q.ulid() }}
 hash: ${{ Q.hash('SHA256', inputs.sensitiveData) }}
 
 # Sign JWT
-token: ${{ Q.jwtSign({ userId: inputs.userId }, credentials.jwtSecret, { expiresIn: '1h' }) }}
+token: "${{ Q.jwtSign({ userId: inputs.userId }, credentials.jwtSecret, { expiresIn: '1h' }) }}"
 ```
 
 ### Text Processing

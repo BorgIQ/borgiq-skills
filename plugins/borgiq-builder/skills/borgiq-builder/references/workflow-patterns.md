@@ -242,7 +242,7 @@ ACTR01routerxxxxxxxxxxxxx:
     - id: SPRThighpri
       name: High
       description: High priority items
-    - id: SPRTmedpri
+    - id: SPRTmedpri0
       name: Medium
       description: Medium priority items
     - id: SPRTdefault

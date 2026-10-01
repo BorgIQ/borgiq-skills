@@ -53,11 +53,15 @@ actors:
     sourcePorts:
       - id: SPRTdefault
     configuration:
-      options:
+      webhook:                     # static, literals only
+        triggerKey: 01KD6GQGHJ04J8765NNQYP09A4   # borgiq generate id webhooktriggerkey
+        authorizationLevel: public
         allowedMethods:
           - post
-        respondImmediately: false  # Wait for WebhookResponseActor
-        emitRawBody: false
+      options:
+        webhook:                   # interpolatable response behavior
+          respondImmediately: false  # Wait for WebhookResponseActor
+          emitRawBody: false
     schemas: {}
     id: ACTR01kd6gqghj04j8765nnqyp09a3
     position:
@@ -107,21 +111,21 @@ actors:
         id: EDGE01kd6gr3vjxm2rs0k8s3fjq4nm
         sourceActorId: ACTR01kd6gqx5k7tvzs86y40w8etmr
         sourcePortId: SPRT5d5gj2s
-        targetActorId: ACTR01kd6gr3vjxm2rs0k8s3fjq4nl
+        targetActorId: ACTR01kd6gr3vjxm2rs0k8s3fjq4na
         targetPortId: TPRTdefault
         label: Create
         type: borgiqEdge
-      EDGE01kd6gr8m6q9nzp2w4j7h5k6lp:
-        id: EDGE01kd6gr8m6q9nzp2w4j7h5k6lp
+      EDGE01kd6gr8m6q9nzp2w4j7h5k6mp:
+        id: EDGE01kd6gr8m6q9nzp2w4j7h5k6mp
         sourceActorId: ACTR01kd6gqx5k7tvzs86y40w8etmr
         sourcePortId: SPRTg5vsvui
-        targetActorId: ACTR01kd6gr8m6q9nzp2w4j7h5k6lo
+        targetActorId: ACTR01kd6gr8m6q9nzp2w4j7h5k6ma
         targetPortId: TPRTdefault
         label: Update
         type: borgiqEdge
 
   # 3a. Create Response - responds to create actions
-  ACTR01kd6gr3vjxm2rs0k8s3fjq4nl:
+  ACTR01kd6gr3vjxm2rs0k8s3fjq4na:
     type: WebhookResponseActor
     version: 1
     name: Create Response
@@ -143,14 +147,14 @@ actors:
         headers:
           content-type: application/json
     schemas: {}
-    id: ACTR01kd6gr3vjxm2rs0k8s3fjq4nl
+    id: ACTR01kd6gr3vjxm2rs0k8s3fjq4na
     position:
       x: -300
       'y': 400
     edges: {}
 
   # 3b. Update Response - responds to update actions
-  ACTR01kd6gr8m6q9nzp2w4j7h5k6lo:
+  ACTR01kd6gr8m6q9nzp2w4j7h5k6ma:
     type: WebhookResponseActor
     version: 1
     name: Update Response
@@ -172,7 +176,7 @@ actors:
         headers:
           content-type: application/json
     schemas: {}
-    id: ACTR01kd6gr8m6q9nzp2w4j7h5k6lo
+    id: ACTR01kd6gr8m6q9nzp2w4j7h5k6ma
     position:
       x: 300
       'y': 400
@@ -181,7 +185,7 @@ actors:
 
 ## Key Points
 
-1. **respondImmediately: false** - The WebhookTriggerActor waits for a WebhookResponseActor to send the response
+1. **respondImmediately: false** - The WebhookTriggerActor waits for a WebhookResponseActor to send the response. A request whose `action` is neither `create` nor `update` leaves the router on `SPRTdefault` (`F`), which has no edge here, so the caller waits for `responseTimeout` (default 30 s) and then gets a timeout error; wire a response to that port in a real flow
 2. **Multiple source ports** - RouterActor uses custom source ports (`SPRT5d5gj2s`, `SPRTg5vsvui`) for conditional routing
 3. **Edge labels** - Labels like "Create" and "Update" match the router condition names for clarity
 4. **Terminal actors** - WebhookResponseActor has `edges: {}` since it's the end of the workflow path

@@ -34,14 +34,20 @@ edges:
 | `sourcePortId` | string | Yes | ID of the source port on the source actor |
 | `targetActorId` | string | Yes | ID of the actor where the edge terminates |
 | `targetPortId` | string | Yes | ID of the target port on the target actor (always `TPRTdefault`) |
-| `label` | string | No | Optional label for the edge (used for router conditions) |
+| `label` | string | No | Display label on the edge. Routing ignores it: a router matches its `conditions` keys to source port `name`s |
 | `type` | string | Yes | Always `borgiqEdge` |
 
 ## Port IDs
 
 **Source Ports (`sourcePortId`):**
-- `SPRTdefault` - Default source port (most actors have only this)
-- `SPRTxxxxxxx` - Custom source ports (used by RouterActor and AiRouterActor for conditional routing)
+
+| Actor | Source ports |
+|---|---|
+| Most actors, including MessageProcessorActor | `SPRTdefault` only |
+| RouterActor, AiRouterActor | one custom port per route (`SPRT` + 7 lowercase letters or digits; `borgiq generate id sourceport`) plus `SPRTdefault` as the fallback |
+| AiAgentActor, AgentHarnessActor | `SPRTdone000` (Done) and `SPRTdefault` (Status) |
+| InterfaceActor | `SPRTevent00` (Event) and `SPRTdefault` (Meta) |
+| AppTriggerActor, ReactAppTriggerActor, CommentActor | none (`sourcePorts: []`) |
 
 **Target Ports (`targetPortId`):**
 - `TPRTdefault` - All actors have a single target port

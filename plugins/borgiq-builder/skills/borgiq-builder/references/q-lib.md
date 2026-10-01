@@ -82,7 +82,7 @@ This document provides comprehensive documentation for all Q-lib functions for L
 **Q.newLineToBR(text)**
 - Converts newlines to HTML break tags
 - Signature: `Q.newLineToBR(str: string): string`
-- Example: `Q.newLineToBR("Hello\nWorld")` → `"Hello<br>World"`
+- Example: `Q.newLineToBR("Hello\nWorld")` → `"Hello<br/>World"`
 
 **Q.pluralize(count, singular, plural?)**
 - Returns singular or plural form based on count
@@ -131,7 +131,7 @@ This document provides comprehensive documentation for all Q-lib functions for L
 **Q.toURIEncode(text)**
 - URL-encodes a string
 - Signature: `Q.toURIEncode(input: string): string`
-- Example: `Q.toURIEncode("Hello World!")` → `"Hello%20World%21"`
+- Example: `Q.toURIEncode("Hello World!")` → `"Hello%20World!"` (`encodeURIComponent`)
 
 ### Decoding Functions
 
@@ -188,9 +188,9 @@ This document provides comprehensive documentation for all Q-lib functions for L
 - Example: `Q.parseYAML("name: Alice\nage: 30")` → `{name: "Alice", age: 30}`
 
 **Q.toCSV(data, options?)**
-- Converts data to CSV string
+- Converts data to CSV string. An array of objects needs `options.columns`; without it the call throws
 - Signature: `Q.toCSV(data: Record<string, unknown>[] | unknown[][], options?: StringifyOptions): string`
-- Example: `Q.toCSV([{name: "Alice", age: 30}])` → `"name,age\r\nAlice,30\r\n"`
+- Example: `Q.toCSV([{name: "Alice", age: 30}], {columns: ["name", "age"]})` → `"name,age\r\nAlice,30\r\n"`
 
 **Q.toJSON(value, space?)**
 - Converts value to JSON string
@@ -205,7 +205,7 @@ This document provides comprehensive documentation for all Q-lib functions for L
 **Q.toYAML(value, options?)**
 - Converts value to YAML string
 - Signature: `Q.toYAML(value: unknown, options?: StringifyOptions): string`
-- Example: `Q.toYAML({name: "Alice"})` → `"name: Alice"`
+- Example: `Q.toYAML({name: "Alice"})` → `"name: Alice\n"`
 
 ### Utility Functions
 
@@ -376,11 +376,11 @@ title: ${{ Q.appendText("Hello", " ", "World") }}
 escaped: ${{ Q.escapeHTML("<script>alert('xss')</script>") }}
 
 # Data conversion
-json_data: ${{ Q.toJSON({name: "Alice", age: 30}) }}
-csv_data: ${{ Q.toCSV([{name: "Alice", age: 30}]) }}
+json_data: '${{ Q.toJSON({name: "Alice", age: 30}) }}'   # quoted: a plain YAML value cannot contain ": "
+csv_data: '${{ Q.toCSV([{name: "Alice", age: 30}], {columns: ["name", "age"]}) }}'
 
 # Conditional logic
-status: ${{ Q.ifTrue(user.isActive, "Active", "Inactive") }}
+status: ${{ Q.ifTrue(inputs.user.isActive, "Active", "Inactive") }}
 
 # Date formatting
 current_date: ${{ Q.dateFns.format(Q.now(), 'yyyy-MM-dd') }}
@@ -389,7 +389,7 @@ current_date: ${{ Q.dateFns.format(Q.now(), 'yyyy-MM-dd') }}
 rotated: ${{ Q.rotate([1, 2, 3, 4, 5], 2) }}
 
 # Cryptographic operations
-token: ${{ Q.jwtSign({userId: user.id}, "secret", {expiresIn: "1h"}) }}
+token: '${{ Q.jwtSign({userId: inputs.user.id}, "secret", {expiresIn: "1h"}) }}'
 hash: ${{ Q.hash('SHA256', 'sensitive-data') }}
 
 # Network validation

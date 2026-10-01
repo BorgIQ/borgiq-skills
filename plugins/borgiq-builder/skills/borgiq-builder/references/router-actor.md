@@ -44,7 +44,7 @@ actors:
     enableSTM: false
     sourcePorts:
       - id: SPRTudmbfzw
-        name: Route Name
+        name: RouteName
         description: When to choose this route
       - id: SPRTdefault
         name: Default Route
@@ -123,7 +123,7 @@ sourcePorts:
     description: Fallback route
 ```
 
-**Important:** The `name` field in source ports must match the keys in `conditions`. The default port (`SPRTdefault`) is used when no conditions match.
+**Important:** The `name` field in source ports must match the keys in `conditions`; a key that names no port is rejected. The default port (`SPRTdefault`) is used when no conditions match, and it takes no condition: a `conditions` key equal to the default port's name is rejected as reserved for the default route.
 
 ## Conditions
 
@@ -375,38 +375,3 @@ actors:
       'y': 0
     edges: {}
 ```
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01kb92kn6t3tar8ag2x34b7641:
-    name: Router
-    type: RouterActor
-    msgVar: router
-    schemas: {}
-    version: 1
-    isActive: true
-    enableLTM: false
-    enableSTM: false
-    description: The router actor will emit messages based on various expressions.
-    sourcePorts:
-      - id: SPRT5d5gj2s
-        name: SALES
-        description: ''
-      - id: SPRTtiklusf
-        name: ENG
-        description: ''
-      - id: SPRTdefault
-        name: OTHERS
-        description: ''
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          SALES: ${{ true }}
-    continueOnError: false
-    id: ACTR01kb92kn6t3tar8ag2x34b7641
-    position:
-      x: -1678.883719665472
-      'y': -414.2874024153003
-    edges: {}

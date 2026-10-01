@@ -82,12 +82,12 @@ actors:
 | `authorizationLevel` | `configuration.webhook` | `public` \| `apps` \| `apiKey` \| `appsAndApiKey` | `public` | Who may call the webhook (static, literal only). `public` — anyone; `apps` — a valid app actor webhook token (`x-app-actor-token`); `apiKey` — a valid API key (a personal access token in `Authorization: Bearer` or `X-Api-Key`, whose owner is a member of the workspace and whose scopes include `workspace:access`); `appsAndApiKey` — either credential, the app token taking precedence when both are present |
 | `allowedMethods` | `configuration.webhook` | string[] | `["post"]` | HTTP methods accepted (get, post, put, delete) — static, literal only |
 | `responseTimeout` | `configuration.webhook` | number | `30` | Request timeout in seconds when `respondImmediately` is false (1-60) — static, literal only |
-| `respondImmediately` | `configuration.options.webhook` | boolean | `true` | Respond immediately before workflow completes (interpolatable) |
+| `respondImmediately` | `configuration.options.webhook` | boolean | `false` | Respond immediately before workflow completes (interpolatable). Omitted or `false`: a downstream WebhookResponseActor must respond |
 | `emitRawBody` | `configuration.options.webhook` | boolean | `false` | Emit raw body bytes instead of parsed content (interpolatable) |
 | `response` | `configuration.options.webhook` | object | - | Immediate response configuration (interpolatable) |
 | `response.statusCode` | `configuration.options.webhook` | number | `200` | HTTP status code for immediate response |
 | `response.headers` | `configuration.options.webhook` | object | - | Response headers |
-| `response.body` | `configuration.options.webhook` | string | `"OK"` | Response body content |
+| `response.body` | `configuration.options.webhook` | any | - | Response body content |
 
 ## TypeScript Schema Definition
 
@@ -128,6 +128,9 @@ export const WebhookTriggerActorResultSchema = z.object({
   meta: z.object({
     requestId: z.string()
       .describe('The request id of the webhook request'),
+    ipAddress: z.string().optional(),
+    user: WebhookTriggerRequestUserSchema.optional(),   // { id, name?, email, appSessionId? }
+    auth: WebhookTriggerAuthSchema.optional(),          // { type: 'apiToken', keyId, keyName }
   }),
   method: z.string().nullish()
     .describe('The method of the request. Valid methods are GET, POST, PUT, DELETE'),
@@ -165,11 +168,13 @@ Webhook config is split along the interpolation boundary:
 
 ### triggerKey
 
-The `triggerKey` (at `configuration.webhook.triggerKey`) is a unique identifier for each webhook trigger. It forms part of the webhook URL:
+The `triggerKey` (at `configuration.webhook.triggerKey`) is a unique identifier for each webhook trigger. It forms the last segment of the webhook URL:
 
 ```
-https://<borgiq-domain>/webhook/<triggerKey>
+https://<borgiq-api-host>/msg/<orgSlug>/<workspaceSlug>/<canvasId>/<actorId>/<triggerKey>
 ```
+
+Read the URL from `${{ ctx.canvas.webhookTriggers.<msgVar>.url }}` rather than building it.
 
 **Important:** You must generate and include a `triggerKey` for every WebhookTriggerActor. A webhook trigger without this key will not work.
 
@@ -242,7 +247,7 @@ The webhook trigger emits a message containing the HTTP request details:
 
 ## Response Modes
 
-### Immediate Response (Default)
+### Immediate Response
 
 With `respondImmediately: true`, the webhook responds instantly with the configured response, then the workflow runs asynchronously.
 
@@ -262,7 +267,7 @@ configuration:
 
 ### Deferred Response
 
-With `respondImmediately: false`, the workflow must explicitly respond using a DenoActor with the `WebhookRespond` signal.
+With `respondImmediately: false` (or omitted), a downstream actor must respond: normally a [WebhookResponseActor](webhook-response-actor.md), or a DenoActor returning `Signal.webhookRespond`. Without a response the caller gets a timeout error after `responseTimeout` (default 30 s).
 
 ```yaml
 configuration:
@@ -323,7 +328,6 @@ configuration:
               description: trigger.description || '',
               url: trigger.url,
               msgVar: msgVar,
-              isActive: trigger.isActive,
               type: trigger.type,
             }
           )) } }}
@@ -410,7 +414,8 @@ configuration:
 ```
 
 ```typescript
-// In DenoActor for Stripe signature verification
+// In DenoActor for Stripe signature verification,
+// with configuration.inputs: ${{ msg.webhook_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
@@ -441,7 +446,7 @@ configuration:
       respondImmediately: false
 ```
 
-The workflow processes the request and returns a computed response via `webhookRespond` signal.
+The workflow processes the request and returns a computed response through a WebhookResponseActor (or a DenoActor's `Signal.webhookRespond`).
 
 ## Accessing in Downstream Actors
 
@@ -454,7 +459,7 @@ configuration:
 ```
 
 ```typescript
-// In DenoActor
+// In DenoActor, with configuration.inputs: ${{ msg.webhook_trigger }}
 import type { Request, Response } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
