@@ -654,11 +654,12 @@ For ID generation, validation, and post-processing, see [validation.md](referenc
 borgiq generate id actor                   # Generate actor ID
 borgiq generate id edge                    # Generate edge ID
 borgiq generate msgvar "Name"              # Generate msgVar
-borgiq validate file.yaml                  # Validate YAML
-borgiq validate file.yaml --post-process -i # Post-process
+borgiq validate file.yaml                  # Validate a metadata + actors document
+borgiq validate file.yaml --post-process -i # Optional cleanup; does not validate
+borgiq bundle validate <dir> --strict      # Validate a bundle
 ```
 
-**Always validate and post-process** generated or edited YAML before presenting to the user.
+**Always validate** generated or edited YAML before presenting to the user: `borgiq validate` checks a `metadata` + `actors` document, not a bundle's `actor.yaml`.
 
 ## Generation Instructions
 
@@ -776,7 +777,7 @@ For detailed guidance on editing workflows, see [editing-workflows.md](reference
 
 **Key points:**
 - When renaming actors, regenerate `msgVar` and update all `msg.<msgVar>` references
-- Always validate and post-process after editing
+- Always validate after editing (`borgiq bundle validate` in a bundle, `borgiq validate` for a document)
 - See reference for common editing patterns and checklists
 
 ## Migration from Other Platforms
@@ -797,10 +798,10 @@ The `borgiq` CLI (`@borgiq/cli`) lets you deploy workflows to the platform, trig
 
 **Install:** `npm install -g @borgiq/cli`
 
-Canvas bundles require **`@borgiq/cli` >= 0.8.0**; `borgiq ai-providers` (workspace AI providers and usable models, see [custom-ai-providers.md](references/custom-ai-providers.md)) requires **>= 0.12.0**. Detect the capability directly and fall back to the direct path if missing:
+Canvas bundles require **`@borgiq/cli` >= 0.8.0**, `borgiq ai-providers` (workspace AI providers and usable models, see [custom-ai-providers.md](references/custom-ai-providers.md)) >= 0.12.0, and `borgiq recipes` **>= 0.13.0**; other floors are in [CLI versions](references/borgiq-cli.md#cli-versions). Detect a command with `borgiq help <command>` (`<command> --help` exits 0 even when it is missing) and fall back to the direct path if bundles are missing:
 
 ```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 ```
 
 **End-to-end workflow:**
@@ -826,13 +827,14 @@ borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cl
    borgiq templates list --app-id TAPP01... --page 2 --json        # filter + paginate
    borgiq recipes list --kind FLOW --json                          # multi-actor starting points (recipes)
    borgiq recipes get RCPE01... --json                             # what a recipe asks for (settings), entry/exit
-   borgiq templates get TMPL01... --json                           # fetch full actor payload
+   borgiq templates get ATMP01... --json                           # fetch full actor payload
    ```
-   The template's `actor` payload is in ExportedCanvasActor object shape. In a bundle, write it as `actor.yaml` with fresh IDs/trigger keys and the `template` provenance block per [the template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation), then follow the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). For the direct fallback (`canvas-actors create` / `batch`), convert it to the CanvasActor YAML-string shape with `borgiq scaffold actor-from-template` (which performs those fixups automatically):
+   `borgiq recipes` needs CLI >= 0.13.0: run `borgiq help recipes` first, and if it fails, build from templates instead.
+   The template's `actor` payload is in ExportedCanvasActor object shape. In a bundle, write it as `actor.yaml` with fresh IDs/trigger keys and the `template` provenance block per [the template fixups](references/cli/canvas-bundles.md#templates-and-the-starter-limitation), then follow the [three-edit rule](references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule). For the direct fallback (`canvas-actors create` / `batch`), convert it to the CanvasActor YAML-string shape with `borgiq scaffold actor-from-template` (which mints a fresh actor ID and msgVar and adds the provenance block):
    ```bash
-   ACTOR_ID=$(borgiq templates get TMPL01... --json \
+   ACTOR_ID=$(borgiq templates get ATMP01... --json \
      | borgiq scaffold actor-from-template \
-         --name "My instance" --output actor.json --print-id 2>&1 >/dev/null)
+         --name "My instance" --output actor.json --print-id)   # --print-id prints only the id, on stdout
    borgiq canvas-actors create CANV01... "$ACTOR_ID" --file actor.json --json
    ```
    See [borgiq-cli.md](references/borgiq-cli.md#browse-the-template-catalog-faster-than-building-from-scratch) for the search/paginate pattern and [cli-setup-scripts.md](references/cli/cli-setup-scripts.md#convert-a-template-to-an-actor-borgiq-scaffold-actor-from-template) for the full converter reference.
@@ -855,7 +857,7 @@ borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cl
    borgiq bundle push ./my-flow.borgiq-canvas                          # existing canvas; --dry-run to preview,
                                                                        # --auto-layout when actors were added/removed/rewired
    ```
-   `bundle push` validates, applies only changed actors with three-way (content-hash + `editVersion`) conflict detection, and refreshes the local bundle.
+   `bundle push` validates, applies only changed actors with three-way (content-hash + `editVersion`) conflict detection, and refreshes the local bundle. On a deployed workspace (`isDeployed` in `borgiq workspaces deployment --json`), runs execute the canvas's last runtime build, so push with `--runtime-build` or the push changes nothing that runs — see [deployment.md](references/deployment.md).
 
 6. **Validate on server** — Catch issues local validation can't detect (missing connections, invalid references):
    ```bash
@@ -867,18 +869,18 @@ borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cl
    borgiq canvases layout <canvasSlugOrId>
    ```
 
-8. **Execute** — Trigger the flow and monitor:
+8. **Execute** — Trigger the flow and monitor. `triggers run` takes the canvas ID and sends no payload ([to send one](references/flowrun-job-states.md#monitor-a-flow-until-completion)):
    ```bash
-   borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json
-   borgiq flowruns status <flowrunId> --json    # poll until Completed
-   borgiq flowruns summary <flowrunId> --json   # full execution summary
+   borgiq triggers run --canvas <canvasId> --actor-id <triggerActorId> --json   # flowrun ID: flowrun.id
+   borgiq flowruns status <flowrunId> --json    # poll while state is "running"
+   borgiq flowruns summary <flowrunId> --json   # "completed" is not success: errors must be empty
    ```
 
-9. **Debug** — If something fails, inspect runtime data, fix the bundle files, and push again:
+9. **Debug** — If something fails, inspect what the failed job received, fix the bundle files, and push again:
    ```bash
-   borgiq flowrun-jobs runtime-data <jobId> --root-path ctx --json   # actor config
-   borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json   # input data
    borgiq flowrun-results summaries --job-id <jobId> --json          # error details
+   borgiq flowrun-jobs source-message <jobId> --json                 # the message it received ...
+   borgiq flowrun-messages data <sourceFlowrunMessageId> --json      # ... and its msg.<msgVar> data
    # Fix the responsible actor.yaml / code/* in the bundle, then bundle push.
    borgiq flowrun-jobs re-run --job-id <jobId> --json                # re-run with fixed config
    ```
@@ -887,12 +889,12 @@ borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cl
 
 Use this only when a bundle is not possible: no shell/filesystem access, a CLI without `borgiq bundle` that cannot be upgraded, or a one-off patch to a canvas nobody maintains locally. Never patch out of band when a local bundle is the source of truth — edit the bundle and push it instead.
 
-**Two formats with different rules** for the configuration fields (`options`, `inputs`, `vars`, `outputs`, `secrets`, `error`) and `schemas.inputs`:
+**Two formats with different rules** for the configuration fields (`options`, `inputs`, `vars`, `outputs`, `credentials`, `error`) and `schemas.inputs`:
 
 | Command | Format | Configuration fields |
 |---|---|---|
 | `canvases create-with-data` | ExportedCanvasData envelope (YAML or JSON) | Native objects |
-| `canvas-actors create/update/batch` | CanvasActor mutation (JSON only) | Each configuration/schema field serialized as a **YAML string** |
+| `canvas-actors create/update/batch` | CanvasActor mutation (JSON, or YAML when the file ends in `.yaml`/`.yml`) | Each of those fields serialized as a **YAML string**; `codeDir` and `webhook` stay structured |
 
 **New canvas** — validate the generated `metadata` + `actors` document, then restructure it into the envelope: move `metadata.schemaVersion` to `data.schemaVersion`, nest `actors` under `data`, remove the now-empty `metadata` block, and add top-level `name`, `slug`, and `messageTTLInDays`:
 

@@ -101,8 +101,8 @@ borgiq canvases runtime-build my-canvas --json
 | Field | Meaning |
 |---|---|
 | `status: ok` / `failed` | whether this actor can run from the build |
-| `guard: ok` / `rejected` | whether the actor's imports stay within its own files |
-| `warm: ok` / `failed` | whether the actor started successfully once during the build |
+| `guard: ok` / `rejected` / `skipped` | whether the actor's imports stay within its own files; `skipped` means its imports could not be resolved at all, which fails the build (absent for Python actors) |
+| `warm: ok` / `failed` / `skipped` | whether the actor started successfully once during the build |
 | `error` | why it failed, in the actor's own words |
 
 A `warm: failed` on an otherwise `ok` actor means its dependencies installed but its code threw at
@@ -144,6 +144,8 @@ touching the canvas's code. Only fully successful (`ready`) builds can be activa
 | `no-code-actors` | the canvas has nothing to build | expected — non-code canvases need no build |
 | `runtime-too-small` | the canvas's runtime is configured below what a build needs | raise the runtime's timeout, memory and ephemeral storage in the workspace's Runtimes settings, then build again |
 | `build-in-progress` (409) | a build of this canvas is already running | wait for it; builds of one canvas are serialised |
+| `no-runtime` | the canvas has no resolvable runtime | read `blockedDetail` in `borgiq workspaces deployment --json`; it names the setting to change |
+| `error` (as the reason a canvas cannot be built) | the build could not run for an unexpected reason | read `blockedDetail` in `borgiq workspaces deployment --json` |
 | `outdated: true` | the canvas has been edited since its running build | build again — every run is still executing the old build |
 | `No built runtime available for canvas …` | the workspace is deployed and the canvas has no fully successful build | `borgiq canvases runtime-build <canvas>` and make every actor build |
 | An actor with `guard: rejected` | the actor imports a file outside its own files | move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |

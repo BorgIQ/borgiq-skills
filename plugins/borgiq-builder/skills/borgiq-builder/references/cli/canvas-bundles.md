@@ -2,10 +2,10 @@
 
 Canvas bundles are the preferred way to build and maintain BorgIQ canvases when shell access and a working directory are available. A bundle expands one canvas into ordinary YAML and source files, keeps the files git-friendly, and lets `borgiq bundle push` and `pull` synchronize only changed actors with three-way (content-hash + edit-version) conflict detection.
 
-> **CLI capability gate:** Bundle commands require a build of `@borgiq/cli` that contains BorgIQ CLI PR #37. Until that change has a published release version, detect the command instead of guessing from `borgiq --version`:
+> **CLI capability gate:** Bundle commands need `@borgiq/cli` ≥ 0.8.0; later floors are in [CLI versions](../borgiq-cli.md#cli-versions). Check with `borgiq help bundle` (`borgiq bundle --help` exits 0 even without it):
 >
 > ```bash
-> borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+> borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 > ```
 >
 > If `borgiq bundle` is unavailable, use the [direct document/batch workflow](../borgiq-cli.md#direct-document-and-batch-workflow) instead.
@@ -363,7 +363,7 @@ actors/tasks/deno/ACTR.../
 
 ### Multi-file requires a current CLI
 
-Multi-file code needs a `@borgiq/cli` new enough to represent it. There is no separate probe for that — `borgiq bundle --help` only tells you the bundle commands exist at all. What you get instead is a clear failure at the moment it matters, so upgrade (`npm install -g @borgiq/cli`) when you see one:
+Multi-file code needs `@borgiq/cli` ≥ 0.10.0 (`borgiq --version`); `borgiq help bundle` only tells you the bundle commands exist at all. An older CLI fails at the moment it matters, so upgrade (`npm install -g @borgiq/cli`) when you see one:
 
 - An **older CLI** pulling a canvas whose code actors are multi-file leaves the file list inline in `actor.yaml` and then refuses to pack or push it (`configuration.codeDir must be 'code'`). Upgrade; do not hand-edit around it. A CLI that supports multi-file never does that silently: when it meets a code shape it cannot represent it fails the operation with an explicit "upgrade `@borgiq/cli`" message rather than writing a bundle that would drop files on the next push.
 - A **bundle pulled before multi-file support** has `code/mod.ts` (or `code/mod.py`). Rename it to `main.ts` (or `main.py`) — `bundle validate` says so in the error — and push. The old name is just another project file now.
@@ -428,8 +428,9 @@ borgiq bundle validate ./my-flow.borgiq-canvas
 git -C ./my-flow.borgiq-canvas add .
 git -C ./my-flow.borgiq-canvas commit -m "fix: adjust actor configuration"
 borgiq bundle push ./my-flow.borgiq-canvas
-borgiq flowruns summary <flowrunId> --json
-borgiq flowrun-jobs runtime-data <jobId> --root-path inputs --json
+borgiq flowruns summary <flowrunId> --json              # success: errors is empty
+borgiq flowrun-jobs source-message <jobId> --json       # the message a failed job received ...
+borgiq flowrun-messages data <sourceFlowrunMessageId> --json   # ... and its data
 # Repeat edit -> validate -> commit -> push -> test.
 ```
 
@@ -489,14 +490,14 @@ To seed an actor from the published template catalog:
    - Keep or add the top-level `template: { id, version, appName }` provenance block using the values from the `templates get` payload; it drives the app-type badge and version check in the UI.
 3. Complete the three-edit rule and wire the actor in `graph.edges`.
 
-`borgiq scaffold actor-from-template` performs these same fixups but emits the CanvasActor YAML-string mutation shape — use it for the direct/batch path, not for bundle files.
+`borgiq scaffold actor-from-template` performs the id and provenance fixups but emits the CanvasActor YAML-string mutation shape, and it replaces only a top-level `webhookTriggerKey`, never `configuration.webhook.triggerKey` — use it for the direct/batch path, not for bundle files.
 
 ## Troubleshooting
 
 ### Bundle command is missing
 
 ```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 ```
 
 Upgrade `@borgiq/cli`. If upgrading is not possible, fall back to direct documents/batch operations.

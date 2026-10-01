@@ -7,7 +7,7 @@ A deployed canvas is edited through its bundle: pull it once, edit the files, an
 Pull once, keep the bundle in git, and synchronize from the files:
 
 ```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 borgiq bundle pull <canvasSlugOrId> ./my-flow.borgiq-canvas
 git init ./my-flow.borgiq-canvas
 git -C ./my-flow.borgiq-canvas add .
