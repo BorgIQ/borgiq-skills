@@ -106,7 +106,7 @@ The same actor configuration fields exist in two different representations depen
 
 **Key difference:** `configuration.options` is **required** in `CanvasActor` format (must be a YAML string, can be `""`) but **optional** in `ExportedCanvasData` format (can be omitted or `{}`).
 
-**`configuration.codeDir` is the same shape in both formats** — a JSON array of `{ path, content }` source files, one entry per file, never a YAML string and never interpolated. It is how Deno, Deno Test, Universal Trigger, Python, and React App actors carry their source. For the four code actors exactly one entry must be the entrypoint (`main.ts`, or `main.py` for Python); see [deno-actor.md → Code Files](../deno-actor.md#code-files) and [python-actor.md → Code Files](../python-actor.md#code-files). `configuration.code` is the single-string shape those actors used before multi-file support: documents that still carry it keep working, but write `codeDir` for new and edited actors, and never send both fields for the same actor.
+**`configuration.codeDir` is the same shape in both formats** — a JSON array of `{ path, content }` source files, one entry per file, never a YAML string and never interpolated. It is how Deno, Deno Test, Universal Trigger, Python, and React App actors carry their source. For the four code actors exactly one entry must be the entrypoint (`main.ts`, or `main.py` for Python); see [code-actor-runtime.md → Source files](../code-actor-runtime.md#source-files-codedir). `configuration.code` is the single-string shape those actors used before multi-file support: documents that still carry it keep working, but write `codeDir` for new and edited actors, and never send both fields for the same actor.
 
 **When to use which format:**
 

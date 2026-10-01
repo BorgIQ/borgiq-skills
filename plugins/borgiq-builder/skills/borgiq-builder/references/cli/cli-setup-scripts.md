@@ -69,7 +69,7 @@ An incoming webhook that routes by condition to a 200 success or 400 error respo
 
 **button-deno** -- ButtonTriggerActor -> DenoActor
 
-A manual trigger that runs custom TypeScript code. The DenoActor includes a starter `configuration.codeDir` holding its `main.ts` entrypoint, with inputs/outputs wired up. Add further files to that array as the actor grows -- see [deno-actor.md](../deno-actor.md#code-files).
+A manual trigger that runs custom TypeScript code. The DenoActor includes a starter `configuration.codeDir` holding its `main.ts` entrypoint, with inputs/outputs wired up. Add further files to that array as the actor grows -- see [code-actor-runtime.md](../code-actor-runtime.md#source-files-codedir).
 
 ### Examples
 

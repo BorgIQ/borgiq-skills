@@ -41,14 +41,14 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/deno-actor.md",
-        "borgiq-builder/references/multi-api-examples.md",
-        "borgiq-builder/references/auth-types.md"
+        "borgiq-builder/references/code-actor-runtime.md"
       ]
     },
     {
       "task": "Code actor that keeps a cursor across runs",
       "files": [
         "borgiq-builder/SKILL.md",
+        "borgiq-builder/references/code-actor-runtime.md",
         "borgiq-builder/references/deno-actor.md"
       ]
     },
