@@ -207,7 +207,7 @@
       "files": [
         "borgiq-agent-builder/SKILL.md",
         "borgiq-builder/references/ai-agent-actor.md",
-        "borgiq-builder/references/typescript/actor-schemas-task-core.md"
+        "borgiq-builder/references/typescript/actorSchemas/task/aiAgent.md"
       ]
     },
     {
@@ -215,7 +215,8 @@
       "files": [
         "borgiq-form-builder/SKILL.md",
         "borgiq-builder/references/interface-pages.md",
-        "borgiq-builder/references/typescript/form-components.md"
+        "borgiq-builder/references/typescript/formComponents/string/select.md",
+        "borgiq-builder/references/typescript/formComponents/base.md"
       ]
     }
   ]

@@ -1157,4 +1157,4 @@ Upload a codebase via `volumeZipFile`, run tests, and extract results.
 
 ## TypeScript Schema Hint
 
-See [typescript/actor-schemas-task-core.md](typescript/actor-schemas-task-core.md) for the complete TypeScript definitions of AgentHarnessActor options, result schemas, and status port types.
+See [typescript/actorSchemas/task/agentHarness.md](typescript/actorSchemas/task/agentHarness.md) for the complete TypeScript definitions of AgentHarnessActor options, result schemas, and status port types.

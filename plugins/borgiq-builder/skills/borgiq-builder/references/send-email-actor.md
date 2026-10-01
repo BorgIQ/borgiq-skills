@@ -318,6 +318,6 @@ configuration:
 
 ## TypeScript Schema Hint
 
-See [typescript/actor-schemas-task-core.md](typescript/actor-schemas-task-core.md) for complete TypeScript definitions including:
+See [typescript/actorSchemas/task/sendEmail.md](typescript/actorSchemas/task/sendEmail.md) for complete TypeScript definitions including:
 - `SendEmailActorOptionsSchema` - Configuration options
 - `SendEmailActorResultSchema` - Output message structure

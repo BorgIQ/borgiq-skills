@@ -86,7 +86,6 @@ This keeps the directory definition in one reusable place: any agent or flow tha
 | [`references/ai-actor.md`](../borgiq-builder/references/ai-actor.md) | Single LLM call: text generation, structured output, tool *definitions*. When NOT to use it. |
 | [`references/ai-agent-actor.md`](../borgiq-builder/references/ai-agent-actor.md) | Serverless coding agent: built-in filesystem/bash tools, BorgIQ actor tools, sessions, Done/Status ports, runtime sizing. |
 | [`references/deprecated-ai-agent.md`](../borgiq-builder/references/deprecated-ai-agent.md) | Legacy orchestrator-loop agent (`DeprecatedAiAgent`) — read/debug existing flows only. |
-| [`references/ai-agent-api-guide.md`](../borgiq-builder/references/ai-agent-api-guide.md) | Programmatic agent workflow API: creation, editing, execution, flowrun monitoring. |
 | [`references/agent-harness-actor.md`](../borgiq-builder/references/agent-harness-actor.md) | Sandboxed Claude Code: full VM, session persistence, MCP, network controls. |
 | [`references/mcp-server-actor.md`](../borgiq-builder/references/mcp-server-actor.md) | Expose BorgIQ tools as MCP endpoint, PAT auth, JSON-RPC protocol. |
 | [`references/message-processor-actor.md`](../borgiq-builder/references/message-processor-actor.md) | `issueCallbackToken` / `waitForCallbackToken` for human-in-the-loop agent flows. |

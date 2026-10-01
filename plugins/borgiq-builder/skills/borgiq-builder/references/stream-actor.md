@@ -404,7 +404,7 @@ Add a `createStream` (`persistent: true`) step to the app's migration runner, al
 
 ## TypeScript Schema Hint
 
-The Zod schemas for every action live in [typescript/actor-schemas-task-stream.md](typescript/actor-schemas-task-stream.md):
+The Zod schemas for every action live in [typescript/actorSchemas/task/stream/index.md](typescript/actorSchemas/task/stream/index.md):
 
 - `StreamActorCreateStreamOptionsSchema` / `StreamActorCreateStreamResultSchema`
 - `StreamActorEditMetadataOptionsSchema` / `StreamActorEditMetadataResultSchema`

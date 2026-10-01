@@ -140,7 +140,7 @@ The trigger event for the current firing — a discriminated union keyed by `tri
 
 **Access:** `${{ trigger.type }}`, `${{ trigger.request.body }}`, `${{ trigger.request.headers['x-github-event'] }}`
 
-**Variants** (full schema: [typescript/schemas.md → schemas/trigger](typescript/schemas.md#schemastrigger)):
+**Variants** (full schema: [typescript/schemas/trigger.md](typescript/schemas/trigger.md)):
 
 | `trigger.type` | Extra fields |
 |---|---|
