@@ -43,7 +43,7 @@ Deno Actors run inside **AWS Lambda** with the following constraints:
 | Constraint | Value | Notes |
 |------------|-------|-------|
 | Maximum timeout | 15 minutes | Absolute limit, cannot be exceeded |
-| Configurable timeout | Varies | Set per workspace via `denoActorTimeoutInSeconds` |
+| Configurable timeout | Varies | The runtime's *Deno actor timeout* (workspace settings → Runtimes, 3–780 s); code cannot read it from `req.ctx` |
 | Memory | Configurable | Set in Lambda configuration |
 | Ephemeral storage | Temp directory | Limited, cleared between invocations |
 | Shell commands | **Not available** | No access to `zip`, `unzip`, `curl`, `jq`, `git`, etc. |
@@ -459,7 +459,7 @@ Editing surfaces:
 - **Direct document / batch payload:** the `configuration.codeDir` list itself, as shown above. It is a structured array in both formats, not a YAML string.
 - **Web editor:** the actor's Code page shows a file tree beside the editor; the right-hand panel on the canvas edits the entrypoint inline. The **AI code assist works on the selected file only** — it cannot see sibling files, so prompt it per file and wire the pieces together yourself.
 
-An actor written before multi-file support carries a single `configuration.code` string. It keeps running, and saving it from the editor (or pushing it from a bundle) converts it to a one-entry `codeDir`. Never set both fields.
+Never write `configuration.code` (the legacy single-string source). The runtime reads only `codeDir`; an actor that has `code` and no `main.ts` in `codeDir` cannot run, and `canvases validate` reports the missing entrypoint.
 
 ## Code Template
 
@@ -486,10 +486,11 @@ export default async function receive(req: Request): Promise<Response> {
   console.log('Processing started');
 
   return {
-    // `results` is emitted as msg.ActorName downstream (array => one message per item).
+    // `results` is emitted as msg.ActorName downstream (an array is ONE message unless
+    // options.emitArrayAsSingleMessage is false).
     results: { result: "data" },
-    // To persist memory, return the half you changed — what you return REPLACES that
-    // stored half, so spread the prior state: memory: { ltm: { ...req.memory?.ltm, key } }.
+    // To persist memory, return the half you changed — it is shallow-merged into the stored
+    // half: memory: { ltm: { ...req.memory?.ltm, key } }. Clear a key with `key: null`.
     // Omit `memory` to leave both halves unchanged. (ltm/stm need enableLTM / enableSTM.)
     // Any actor may respond to a pending request in the flow. Allowed signals:
     // Signal.webhookRespond | Signal.callableResponse | Signal.delayUntil
@@ -499,9 +500,9 @@ export default async function receive(req: Request): Promise<Response> {
 ```
 
 **Return-value notes:**
-- `results: undefined` (or omitting `results`) emits **no** message downstream.
+- `results: undefined` (or omitting `results`) emits **no** message downstream; so does an empty array `[]`.
 - `results: null` emits a `null` message (valid JSON).
-- `results: [a, b]` emits one message per item (unless `emitArrayAsSingleMessage: true`).
+- `results: [a, b]` emits **one** message holding the array. It emits one message per item only when `options.emitArrayAsSingleMessage` is `false` (the default is `true`).
 - `throw new RetryableError()` re-invokes the actor with the same message; all other thrown errors are permanent.
 
 ## Logging
@@ -550,7 +551,7 @@ interface Memory {
 }
 
 interface Response {
-  /** emitted as msg.ActorName downstream (array => one message per item) */
+  /** emitted as msg.ActorName downstream (an array is one message unless emitArrayAsSingleMessage is false) */
   results?: any;
   /** return memory to persist it; omit to leave it unchanged */
   memory?: Memory;
@@ -581,27 +582,28 @@ Memory is **value-in / value-out**. Read the incoming state from `req.memory`, a
 
 `req.memory` always has **both** halves present — `stm` (reclaimed when the flowrun completes) and `ltm` (survives across flowruns). The API is identical; they differ only in lifetime. The split exists so STM can be garbage-collected promptly per-flowrun — **default to `stm` for run-local state**, and use `ltm` only for values that must outlive the run.
 
-**What you return for a half replaces that stored half — it does not merge.** Each half is persisted independently of the other, but *within* a half the returned object becomes the new stored value wholesale. So always return the complete state you want to keep:
+**The runtime shallow-merges each half you return into the stored half.** Each half is persisted independently of the other. *Within* a half, every top-level key you return replaces that key's whole value (nested objects are not merged), and every key you leave out keeps its stored value:
 
-1. **Return the full half — spread the prior state, then set your keys.** `memory: { ltm }` replaces LTM and leaves STM untouched (you don't echo back the other half — and *shouldn't*; see *Enabling* below). Returning a bare `{ cursor: nextCursor }` would drop every other LTM key.
+1. **Return the half you changed — spread the prior state, then set your keys.** `memory: { ltm }` merges into LTM and leaves STM untouched.
    ```typescript
-   // ✅ spread the prior LTM so existing keys survive, then set the one you changed.
+   // ✅ spread the prior LTM, then set the one you changed.
    return { results, memory: { ltm: { ...req.memory?.ltm, cursor: nextCursor } } };
 
    // multiple keys at once (spread is undefined-safe — no `?? {}` guard):
    const ltm = { ...req.memory?.ltm, cursor: nextCursor, lastRunAt };
    return { results, memory: { ltm } };
    ```
-2. **To clear a key, omit it from the snapshot you return** (it's a replace, so omission drops it). To clear a whole half, return it empty: `{ ltm: {} }`.
+2. **To clear a key, return it as `null`**: `memory: { ltm: { checkpoint: null } }`. Omitting a key, `delete`-ing it from the object you return, or setting it to `undefined` (dropped in transit) all leave the stored value in place, and `{ ltm: {} }` changes nothing.
 3. **Omit `memory` to leave everything unchanged** — only return it when you mutated something.
-4. **Read with optional chaining + default** — `req.memory?.ltm?.cursor ?? 0`; each store is empty on first use.
+4. **Read with optional chaining + default** — `req.memory?.ltm?.cursor ?? 0`; each store is empty on first use, and a cleared key reads as `null`.
 5. **Match the store to the lifetime** — run-local scratch → `stm` (auto-reclaimed); must-outlive-the-run → `ltm`.
+6. **Stay under the size caps** — LTM **1 KB** and STM **4 KB** per actor by default, measured as JSON after the merge (workspace settings → Actors → *Max LTM (KB)* / *Max STM (KB)*). Over a cap, the run fails with `MemoryExceedAllowedSize` (not retried) and no memory change is saved. Keep IDs and cursors in memory; put bulk state in a Collection or a stashed file.
 
-**Enabling is required, and you only return what's enabled.** Writing `req.memory.stm` requires `enableSTM: true`; `req.memory.ltm` requires `enableLTM: true`. Returning a **non-empty** half for a store that isn't enabled is a runtime error (`STM is not enabled for the actor` / `LTM is not enabled...`) — the other reason to return only the half you actually use. Enabling a store also **serializes** this actor's message processing — one message at a time within a flowrun (STM) or across all flowruns (LTM) — so read-modify-write is race-free.
+**Enabling is required, and you only return what's enabled.** Writing `req.memory.stm` requires `enableSTM: true`; `req.memory.ltm` requires `enableLTM: true`. Returning a **non-empty** half for a store that isn't enabled is a runtime error (`STM is not enabled for the actor` / `LTM is not enabled...`). A store that isn't enabled arrives as `{}`, so echoing it back is harmless; return only the half you use. Enabling a store also **serializes** this actor's message processing — one message at a time within a flowrun (STM) or across all flowruns (LTM) — so read-modify-write is race-free.
 
 ### Short-Term Memory (STM)
 
-Run-local state within a single flowrun; reclaimed when the flowrun completes. Read with optional chaining, and return the full STM snapshot you want stored — what you return replaces the stored STM.
+Run-local state within a single flowrun; reclaimed when the flowrun completes. Read with optional chaining, and return the STM keys you changed — they are merged into the stored STM.
 
 ```typescript
 import type { Request, Response } from "@borgiq/actors";
@@ -609,7 +611,7 @@ import type { Request, Response } from "@borgiq/actors";
 export default async function receive(req: Request): Promise<Response> {
   const count = (req.memory?.stm?.counter ?? 0) + 1;   // 0 on first use within the run
 
-  // Spread the prior STM so other keys survive, then set the one you changed.
+  // Spread the prior STM, then set the one you changed.
   return { results: { count }, memory: { stm: { ...req.memory?.stm, counter: count } } };
 }
 ```
@@ -626,8 +628,7 @@ import type { Request, Response } from "@borgiq/actors";
 export default async function receive(req: Request): Promise<Response> {
   const lastCheckedAt = req.memory?.ltm?.lastInvokedAt ?? 0;   // 0 on the very first run
 
-  // Return the full LTM snapshot (spread the prior state). STM is left untouched —
-  // echoing it back when STM is disabled would be a runtime error.
+  // Return the LTM half (spread the prior state, set the key). STM is omitted, so it is left untouched.
   return { results: { lastCheckedAt }, memory: { ltm: { ...req.memory?.ltm, lastInvokedAt: Date.now() } } };
 }
 ```
@@ -649,6 +650,10 @@ This mirrors a real incremental-poll trigger: read a `historyId`/cursor from `lt
 > That is a supply-chain risk and makes deploys non-deterministic. An exact pin
 > (`npm:lodash@4.17.21`) is immune to both. BorgIQ-internal specifiers
 > (`@borgiq/actors`, `node:*`) are exempt — they are provided by the runtime.
+>
+> **Minimum dependency age.** The runtime refuses any `npm:`/`jsr:` version
+> published less than 7 days ago (`minimumDependencyAge: "P7D"`), so pin a
+> release that is at least a week old; a pin to a newer release fails to resolve.
 >
 > **When resolution happens depends on whether the workspace is deployed.** On an
 > ordinary workspace, dependencies are resolved the first time the actor runs on a
@@ -676,7 +681,7 @@ import { normalize } from "./lib/normalize.ts";
 import { LIMIT } from "./constants.ts";      // relative to lib/, not to the root
 ```
 
-Imports must stay inside the actor's own files. An import that resolves outside them — an absolute path, a `..` escape, a symlink out of the tree — is rejected before the code runs, with an error naming the offending specifier. Reach anything external through `npm:` / `jsr:` / `https` specifiers below.
+Imports must stay inside the actor's own files. An import that resolves outside them — an absolute path, a `..` escape, a symlink out of the tree — is refused when the actor loads; on a deployed workspace the build rejects it first and names the offending specifier. Reach anything external through `npm:` / `jsr:` / `https` specifiers below.
 
 ### NPM Libraries
 
@@ -876,7 +881,7 @@ const result = await response.json();
 | `/assets/{key}` | PUT | Update an asset |
 | `/assets/{key}` | DELETE | Delete an asset |
 | `/secrets` | GET | Get secrets — decrypted when Sent to runtime, a proxy placeholder when Server-side |
-| `/connections/{key}` | GET | Get connection credentials — sensitive fields are proxy placeholders when Server-side |
+| `/connections/{key}` | GET | Get the actor's own connection (`configuration.connection.key`; any other key gets 403) — sensitive fields are proxy placeholders when Server-side |
 | `/publicKey` | GET | Get workspace public key (for encrypting sensitive data) |
 | `/sendEmail` | POST | Send an email |
 | `/interfaces/status` | PUT | Update interface status display |
@@ -902,7 +907,7 @@ The Collection API provides structured, persistent storage organized into named 
 
 **For full documentation** of all 13 actions, parameters, conditions, concurrent update patterns, DynamoDB behavior, batch operations, transactions, and error codes, see [collection-api.md](collection-api.md).
 
-**Response format:** All Collection API calls return `{ ok: boolean, value: T, error?: { code, message } }`, where `T` varies by action (e.g. `getItem` → `{ key, value } | null`, `query` → `{ items[], count, lastKey? }`, `listCollections` → `{ collections[], lastKey? }`, `deleteItem` → `{ deleted: number }`). See [collection-api.md](collection-api.md) for the complete return type table.
+**Response format:** All Collection API calls return `{ ok: boolean, value: T, error?: { code, message } }`, where `T` varies by action (e.g. `getItem` → `{ key, value } | null`, `query` → `{ items[], count, lastKey? }`, `listCollections` → `{ items[], count, lastKey? }`, `deleteItem` → `{ deleted: [{ collection, key }] }`). See [collection-api.md](collection-api.md) for the complete return type table.
 
 #### Helper Pattern
 
@@ -930,23 +935,27 @@ async function collectionsApi<T = unknown>(body: Record<string, unknown>): Promi
 **Quick reference — common actions:**
 
 ```typescript
-// putItem — full replace
+// putItem — creates the item; an existing key fails with ITEM_ALREADY_EXISTS
 await collectionsApi({ action: "putItem", collection: "my-col", key: "k1", value: { name: "Alice" } });
+
+// putItem replacing the whole item if it exists; ttl: seconds from now (or an epoch / ISO date)
+await collectionsApi({ action: "putItem", collection: "my-col", key: "k1", value: { name: "Alice" }, options: { overwrite: true, ttl: 3600 } });
 
 // getItem — eventually consistent read (returns null if missing)
 const item = await collectionsApi({ action: "getItem", collection: "my-col", key: "k1" });
 
-// updateItem — shallow field merge (only listed fields change, others preserved)
+// updateItem — shallow field merge (only listed fields change, others preserved);
+// never creates: a missing key fails with ITEM_DOES_NOT_EXIST
 await collectionsApi({ action: "updateItem", collection: "my-col", key: "k1", value: { email: "new@email.com" } });
 
-// updateItem with atomic counter
+// updateItem with atomic counter (the item must exist)
 await collectionsApi({ action: "updateItem", collection: "my-col", key: "k1", atomicCounters: { visits: 1 } });
 
-// query — prefix search
-const results = await collectionsApi({ action: "query", collection: "my-col", key: "user:*" });
+// query — prefix search on the key (`expression`, not `key`)
+const results = await collectionsApi({ action: "query", collection: "my-col", expression: "user:*" });
 
-// deleteItem
-await collectionsApi({ action: "deleteItem", collection: "my-col", key: "k1" });
+// deleteItem — `keys`: one key or an array of up to 25
+await collectionsApi({ action: "deleteItem", collection: "my-col", keys: "k1" });
 ```
 
 See [collection-api.md](collection-api.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and DynamoDB mapping details.
@@ -1044,10 +1053,11 @@ export default async function receive(req: Request): Promise<Response> {
     throw new Error('File ID is required');
   }
 
-  const expiresAfterInMinutes = req.inputs.expiresAfterInMinutes ?? 60;
+  // Without expiresInMinutes the URL expires after 1 minute.
+  const expiresInMinutes = req.inputs.expiresInMinutes ?? 60;
 
   const queryParams = new URLSearchParams({
-    expiresAfterInMinutes: String(expiresAfterInMinutes),
+    expiresInMinutes: String(expiresInMinutes),
   });
 
   const response = await biqApi(`/files/${fileId}/downloadUrl?${queryParams.toString()}`, {
@@ -1055,15 +1065,15 @@ export default async function receive(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' },
   });
 
-  return { results: await response.json() };
+  const { downloadUrl } = await response.json();
+  return { results: { downloadUrl } };
 }
 ```
 
 **Response:**
 ```json
 {
-  "url": "https://storage.borgiq.com/files/...",
-  "expiresAt": "2024-01-15T13:00:00Z"
+  "downloadUrl": "https://storage.borgiq.com/files/..."
 }
 ```
 
@@ -1182,7 +1192,7 @@ An actor returns at most one signal via `Response.signal`. The constructors avai
 |-------------|---------|-------------|
 | `Signal.webhookRespond(value)` | Respond to a pending webhook request | `{ statusCode: number, headers?: object, body?: any }` |
 | `Signal.callableResponse(value)` | Respond to a pending callable/subflow request | `{ payload: object, throwError?: boolean }` |
-| `Signal.delayUntil(value)` | Delay message emission until a time | `{ delayUntil: string }` (ISO 8601) |
+| `Signal.delayUntil(when)` | Delay message emission until a time | `when: string \| Date` — an ISO 8601 string or a `Date`, passed directly (not wrapped in an object) |
 
 > Other orchestrator signal types (`callFlow`, `waitForCallbackToken`, `notifyCallbackToken`, the `interface*` family, `ai`, `aiAgent`) are driven by their dedicated actors / the MessageProcessorActor, not set from Deno code.
 
@@ -1193,10 +1203,10 @@ import type { Request, Response } from "@borgiq/actors";
 import { Signal } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
-  // Delay until a specific time
+  // Delay until a specific time: pass the ISO string or Date itself
   return {
     results: { queued: true },
-    signal: Signal.delayUntil({ delayUntil: new Date(Date.now() + 60000).toISOString() }),
+    signal: Signal.delayUntil(new Date(Date.now() + 60000)),
   };
 }
 ```
@@ -1274,14 +1284,9 @@ Access runtime information via `req.ctx`:
 ```typescript
 interface RuntimeContext {
   org: { id: string; name: string };
-  workspace: {
-    id: string;
-    slug: string;
-    name: string;
-    denoActorTimeoutInSeconds: number;
-  };
+  workspace: { id: string; slug: string; name: string };
   canvas: { id: string; slug: string; name: string; /* webhookTriggers, interfaceTriggers, appTriggers */ };
-  actor: { id: string; type: string; name: string; msgVar: string; description: string; isActive: boolean; continueOnError: boolean };
+  actor: { id: string; type: string; name: string; msgVar: string; description: string; upstreamActorCount: number };
   flowrun: { id: string; createdAt: string };
   triggerActor: { id: string; type: string; name: string; msgVar: string };
   sourceActor?: { id: string; type: string; name: string; msgVar: string };
@@ -1303,18 +1308,18 @@ The `results` field of the returned `Response` becomes available as `msg.actor_m
 | Return | Behavior |
 |--------|----------|
 | `return { results: { data } }` | Emit object as message |
-| `return { results: [item1, item2] }` | Emit multiple messages (one per item) |
+| `return { results: [item1, item2] }` | Emit **one** message holding the array (one message per item only with `emitArrayAsSingleMessage: false`) |
 | `return { results: null }` | Emit null message (valid JSON) |
-| `return { results: undefined }` or `return {}` | Do NOT emit any message |
+| `return { results: undefined }`, `return {}` or `return { results: [] }` | Do NOT emit any message |
 | `return { results, memory }` | Emit message AND persist memory |
 
 ### Emitting Arrays
 
-By default, returning an array under `results` emits multiple messages. To emit as single message:
+By default (`emitArrayAsSingleMessage: true`), returning an array under `results` emits one message holding the whole array. To emit one message per item:
 
 ```yaml
 options:
-  emitArrayAsSingleMessage: true
+  emitArrayAsSingleMessage: false
 ```
 
 ## Examples
@@ -1357,7 +1362,8 @@ import { RetryableError } from "@borgiq/actors";
 import type { Request, Response } from "@borgiq/actors";
 import _ from "npm:lodash@4.17.21";
 
-const MAX_PROCESSED_EVENTS = 300;
+// LTM is capped at 1 KB by default (the whole stored LTM, as JSON): keep only a few recent IDs.
+const MAX_PROCESSED_EVENTS = 15;
 
 export default async function receive(req: Request): Promise<Response> {
   const token = req.connection.auth.values.token;
@@ -1490,7 +1496,7 @@ interface Checkpoint {
 }
 
 export default async function receive(req: Request): Promise<Response> {
-  const checkpoint = req.memory.ltm.checkpoint as Checkpoint | undefined;
+  const checkpoint = req.memory.ltm.checkpoint as Checkpoint | null | undefined;   // null once cleared
   let workingData: any[] = [];
   let startIndex = 0;
 
@@ -1529,10 +1535,9 @@ export default async function receive(req: Request): Promise<Response> {
     await processItem(workingData[i]);
   }
 
-  // Complete - clear the checkpoint. Persistence REPLACES the ltm half, so spread
-  // the prior ltm and drop `checkpoint` from the snapshot; other keys are preserved.
-  const { checkpoint: _done, ...ltm } = req.memory.ltm ?? {};
-  return { results: { status: 'complete', totalProcessed: workingData.length }, memory: { ltm } };
+  // Complete - clear the checkpoint. The returned ltm is merged into the stored one, so
+  // omitting `checkpoint` would keep it: set it to null. Other keys are preserved.
+  return { results: { status: 'complete', totalProcessed: workingData.length }, memory: { ltm: { ...req.memory.ltm, checkpoint: null } } };
 }
 ```
 
@@ -1611,15 +1616,14 @@ export default async function receive(req: Request): Promise<Response> {
     };
   }
 
-  // Clear checkpoint on completion. `ltm` holds the full prior memory (read from
-  // req.memory.ltm above), and persistence REPLACES the stored half with what we
-  // return, so just delete the key — other ltm keys survive because they're still in `ltm`.
+  // Clear checkpoint on completion. The returned ltm is merged into the stored one, so a
+  // deleted key would survive: set it to null instead.
   if (!results.hasMore) {
-    delete ltm.checkpoint;
+    ltm.checkpoint = null;
     console.log('Processing complete, checkpoint cleared');
   }
 
-  // Return the full ltm snapshot; stm is omitted, so it's left untouched.
+  // Return the ltm half; stm is omitted, so it's left untouched.
   return { results, memory: { ltm } };
 }
 ```

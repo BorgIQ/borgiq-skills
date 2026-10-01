@@ -97,19 +97,27 @@ def receive(req: Request) -> Response:
 
 ## Multiple Connections
 
-**Key rule:** An actor has **only ONE connection** (`req.connection`) plus any number of secrets (`req.credentials`). If a single actor genuinely needs to call different services with different OAuth connections, fetch the additional connection's decrypted credentials at runtime via the `/connections/{key}` BIQ Runtime API endpoint:
+**Key rule:** An actor has **only ONE connection** (`req.connection`) plus any number of credentials (`req.credentials`). If a single actor genuinely needs to call different services with different OAuth connections, declare each additional connection under `configuration.credentials` with `source: connection`. It arrives in `req.credentials` under its credential name, with the same shape as `req.connection`:
+
+```yaml
+configuration:
+  connection:
+    key: my-gmail-connection
+  credentials:
+    calendar:
+      workspaceKey: my-calendar-connection
+      source: connection
+```
 
 ```typescript
 import type { Request, Response } from "@borgiq/actors";
-import { biqApi } from "@borgiq/actors";
 
 export default async function receive(req: Request): Promise<Response> {
   // The actor's primary connection
   const gmailToken = req.connection.auth.values.token;
 
-  // A second connection fetched by its workspace key
-  const calendarRes = await biqApi('/connections/my-calendar-connection', { method: 'GET' });
-  const calendarToken = (await calendarRes.json()).auth.values.token;
+  // A second connection, declared as the `calendar` credential with source: connection
+  const calendarToken = req.credentials['calendar'].auth.values.token;
 
   // Use each token for its respective API
   const gmailResponse = await fetch(gmailUrl, {
@@ -123,6 +131,6 @@ export default async function receive(req: Request): Promise<Response> {
 }
 ```
 
-> Prefer splitting work across actors (one connection each) where possible; reach for `/connections/{key}` only when the logic must live in a single actor.
+> Prefer splitting work across actors (one connection each) where possible; add connections as credentials only when the logic must live in a single actor. The BIQ Runtime API's `/connections/{key}` endpoint returns only the actor's own connection (`configuration.connection.key`) and refuses any other key with 403.
 
 See [flow-consolidation.md](flow-consolidation.md) for more details on handling multiple connections when consolidating flows.

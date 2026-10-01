@@ -16,9 +16,9 @@ configuration:
   codeDir:
     - path: main.ts
       content: |
-        // Inside receive(req): the single connection's resolved auth
+        // Inside receive(req): the single connection's resolved auth (OAuth2 token)
         const response = await fetch(url, {
-          headers: { Authorization: `Bearer ${req.connection.auth.accessToken}` }
+          headers: { Authorization: `Bearer ${req.connection.auth.values.token}` }
         });
   connection:
     key: my-google-connection
@@ -40,10 +40,10 @@ configuration:
 
         // Use each connection for its respective API
         const sheetsResponse = await fetch(sheetsUrl, {
-          headers: { Authorization: `Bearer ${googleAuth.accessToken}` }
+          headers: { Authorization: `Bearer ${googleAuth.values.token}` }
         });
         const slackResponse = await fetch(slackUrl, {
-          headers: { Authorization: `Bearer ${slackAuth.accessToken}` }
+          headers: { Authorization: `Bearer ${slackAuth.values.token}` }
         });
   credentials:
     google-sheets-connection:
@@ -57,7 +57,7 @@ configuration:
 **Key points:**
 - `workspaceKey` is the connection key configured in the workspace
 - `source: connection` tells BorgIQ to treat this credential as a connection object
-- Access credentials via `credentials['key-name'].auth`
+- Access credentials via `credentials['key-name'].auth`; an OAuth2 token is at `credentials['key-name'].auth.values.token`, the same shape as `req.connection.auth.values.token`
 
 ## When to Consolidate
 
