@@ -58,8 +58,6 @@
   ],
   "reference_words_cap": 4000,
   "reference_exceptions": {
-    "agent-harness-actor.md": 5701,
-    "ai-agent-actor.md": 7121,
     "borgiq-cli.md": 4333,
     "cli/canvas-bundles.md": 4650,
     "cli/cli-command-reference.md": 6665

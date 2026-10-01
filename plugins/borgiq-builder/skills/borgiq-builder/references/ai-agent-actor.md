@@ -1,69 +1,46 @@
 # AI Agent Actor Reference
 
-The AiAgentActor runs an autonomous AI coding agent with a private workspace filesystem, bash, and BorgIQ actor tools. It executes a pi coding agent in checkpointed serverless segments: the agent works in a real (ephemeral) workspace, its state is checkpointed between segments, and a session can be continued across invocations via `sessionId` — so tasks like "unzip this report, run a script over it, edit three files, zip the result" work without provisioning a full sandbox VM.
+The AiAgentActor runs an autonomous AI coding agent (pi) with a private workspace filesystem, bash, and BorgIQ actors
+as tools, in checkpointed serverless segments; a session continues across invocations via `sessionId`. Read it to
+configure one: options, built-in tools, ports, sessions and runtime sizing. Tool wiring and MCP servers are in
+[agent-tools.md](agent-tools.md), models in [ai-models.md](ai-models.md), exact types in
+[typescript/actorSchemas/task/aiAgent.md](typescript/actorSchemas/task/aiAgent.md).
 
-> **Type-name history:** before mid-2026 the `AiAgentActor` type name referred to a legacy orchestrator-loop agent with **no filesystem or bash** and options like `temperature`/`maxTokens`/`messages`. That actor still runs for existing flows as `DeprecatedAiAgent` (hidden from the palette). If you are reading or debugging an existing flow whose agent has those options, see [deprecated-ai-agent.md](deprecated-ai-agent.md). Do not create new `DeprecatedAiAgent` instances.
-
-## Table of Contents
+## Contents
 
 - [Overview](#overview)
-- [Choosing an Agent Tier](#choosing-an-agent-tier)
 - [Configuration Structure](#configuration-structure)
-- [Source Ports](#source-ports)
 - [Options Reference](#options-reference)
 - [Built-in Tools](#built-in-tools)
 - [Running Code with the Code Execution Tool](#running-code-with-the-code-execution-tool)
-- [Connecting BorgIQ Tools with aiAgentToolActorIds](#connecting-borgiq-tools-with-aiagenttoolactorids)
-- [Tool Actor Configuration](#tool-actor-configuration)
-- [Results Object](#results-object)
-- [Available Models](#available-models)
+- [Tools and MCP Servers](#tools-and-mcp-servers)
+- [Source Ports](#source-ports)
 - [Sessions and Continuation](#sessions-and-continuation)
 - [Runtime Requirements](#runtime-requirements)
 - [Limitations](#limitations)
 - [Common Patterns](#common-patterns)
-- [Complete Example: Report Processing Agent](#complete-example-report-processing-agent)
 - [Accessing Agent Data in Downstream Actors](#accessing-agent-data-in-downstream-actors)
-- [Migrating from DeprecatedAiAgent](#migrating-from-deprecatedaiagent)
-- [Use Cases](#use-cases)
-- [Best Practices](#best-practices)
-- [TypeScript Schema Hint](#typescript-schema-hint)
+- [Legacy: DeprecatedAiAgent](#legacy-deprecatedaiagent)
 
 ## Overview
 
-AiAgentActor gives an AI model a working environment plus your BorgIQ actors as tools. The agent loops through:
+The agent loops: it receives the task prompt (and, on continuation, the prior session state), decides which tools to
+call, runs them against its private session workspace or as child flowrun jobs, and continues until the task is done.
 
-1. Receiving the task prompt (and, on continuation, the prior session state)
-2. Deciding which tools to call — built-in filesystem/bash tools or wired BorgIQ actor tools
-3. Executing the tools against its private session workspace or as child flowrun jobs
-4. Processing tool results and continuing until the task is complete
+- **Filesystem + bash**: built-in `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` tools run against a private
+  session workspace. Seed it with `volumeZipFile`; receive it back as `outputZipFile` on the Done port.
+- **Code execution (opt-in)**: with `enableCodeExecution`, a `code_execution` tool runs TypeScript/JavaScript the agent
+  writes in its workspace with Deno.
+- **Tools**: BorgIQ actors wired via `aiAgentToolActorIds`, and MCP servers.
+- **Sessions**: re-invoking with the same `sessionId` restores the workspace and conversation from the last checkpoint.
+- **No wall-clock cap**: the run is split into serverless segments, each bounded by the runtime's timeout. At each
+  boundary the workspace and session state are checkpointed and the next segment resumes seamlessly, with no synthetic
+  messages in the conversation. `meta.segments` on the Done port reports how many segments the run spanned.
+- **Status streaming**: assistant turns, the model's thinking and tool results stream on the Status port.
 
-**Key capabilities:**
-
-- **Filesystem + bash**: built-in `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` tools run against a private session workspace
-- **Code execution (opt-in)**: with `enableCodeExecution`, a `code_execution` tool runs TypeScript/JavaScript the agent writes in its workspace with Deno
-- **BorgIQ actor tools**: any actor wired via `aiAgentToolActorIds` is exposed to the agent as a callable tool (same mechanism as before)
-- **Sessions**: re-invoking with the same `sessionId` continues the session — workspace and conversation state restore from the last checkpoint
-- **Workspace in/out**: seed the workspace with `volumeZipFile`; receive the final workspace as `outputZipFile` on the done port
-- **No wall-clock cap**: execution is segmented and checkpointed, so a session is not limited by any single serverless invocation's timeout
-- **Status streaming**: assistant turns, the model's thinking, and tool results stream on the Status port during execution
-- **Thinking control**: `thinkingLevel` sets how much the model reasons before each turn (default `medium`, `off` to save tokens); the reasoning is shown in the editor timeline
-
-**How it executes (what you'll observe):** the run is split into serverless segments, each bounded by the runtime's configured timeout. At each segment boundary the workspace and session state are checkpointed and the next segment resumes seamlessly — no synthetic messages appear in the conversation. `meta.segments` on the done port reports how many segments the run spanned. See [Limitations](#limitations) for the two user-visible consequences (at-least-once bash side effects; no background processes across segments).
-
-## Choosing an Agent Tier
-
-| Aspect | AiActor | **AiAgentActor** | AgentHarnessActor |
-|--------|---------|------------------|-------------------|
-| Execution | Single LLM call | Agent loop in checkpointed serverless segments | Harness CLI inside a sandbox VM (E2B/Daytona) |
-| Filesystem / bash | None | Private session workspace + bash | Full machine |
-| Tools | Describes tools, returns tool calls | Built-ins (read/write/edit/bash/grep/find/ls, + opt-in `code_execution`) + BorgIQ actor tools + MCP servers | Harness built-ins + BorgIQ tools + MCP servers |
-| Startup latency | ~0 | Low (serverless invoke; cold restore adds seconds) | Sandbox provision + harness install (tens of seconds to minutes) |
-| Sessions | No | Yes — `sessionId`, checkpoint/restore, 7-day sliding TTL | Yes — sandbox session zips |
-| Background processes | — | No (nothing survives a segment boundary) | Yes (within sandbox lifetime) |
-| MCP servers | No | Remote + BorgIQ (no stdio) | Remote + BorgIQ + stdio |
-| Use case | Simple generation, structured output | File/data tasks, coding, research with tools — most agent work | Long-lived dev environments, stdio MCP, daemons, PTY |
-
-Rule of thumb: start with AiAgentActor. Drop to AiActor when a single structured LLM call is enough; step up to AgentHarnessActor only when you need stdio MCP servers, background processes, or a persistent full machine.
+Choose between AiActor, AiAgentActor and AgentHarnessActor with the `borgiq-agent-builder` skill's matrix. Start with
+AiAgentActor; use AgentHarnessActor only for a harness CLI, stdio MCP servers, background processes, package installs
+or a persistent full machine.
 
 ## Configuration Structure
 
@@ -127,105 +104,16 @@ actors:
     edges: {}
 ```
 
-## Source Ports
-
-AiAgentActor has two required source ports:
-
-| Port ID | Name | Description |
-|---------|------|-------------|
-| `SPRTdone000` | Done | Emits the final result when the session completes (task done, timeout, error, or max loop count) |
-| `SPRTdefault` | Status | Emits assistant turns and tool results while the agent runs |
-
-### Done Port Output
-
-```json
-{
-  "sessionId": "sess_01hxyz...",
-  "success": true,
-  "result": "I extracted the report, ran the aggregation script, and wrote summary.md. Revenue grew 14% QoQ...",
-  "outputZipFile": { "id": "FILE01...", "name": "workspace.zip", "...": "..." },
-  "sessionDataFile": { "id": "FILE01...", "name": "session.zip", "...": "..." },
-  "meta": {
-    "endReason": "completed",
-    "model": "claude-sonnet-5",
-    "segments": 2
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `sessionId` | The session ID (pass it back in `options.sessionId` to continue this session) |
-| `success` | Whether the execution succeeded |
-| `result` | Final assistant message, or the error message on failure. May be absent — do not depend on it unconditionally |
-| `outputZipFile` | Zip of the session workspace (omitted when `returnOutputZipFile: false`) |
-| `sessionDataFile` | Zip of the pi session data, portable to the harness tier (omitted when `returnSessionDataFile: false`) |
-| `meta.endReason` | `completed`, `timeout`, `error`, or `max-loop-count` |
-| `meta.model` | The model used |
-| `meta.segments` | How many serverless segments the run spanned |
-| `meta.duration` | Total run time in milliseconds |
-
-Token usage is not reported on the done port; it is metered per segment into the workspace AI log.
-
-### Status Port Output
-
-**Assistant turn** (`ai-agent-loop`) — emitted for each assistant turn; `toolCalls` is present when the turn invokes tools, and `reasoning` carries the model's thinking for the turn when the model produced any:
-
-```json
-{
-  "type": "ai-agent-loop",
-  "response": "The archive is extracted. I'll run the aggregation script next.",
-  "reasoning": "The CSVs are in place, so aggregate.ts can produce summary.csv now.",
-  "toolCalls": [
-    {
-      "toolCallId": "toolu_01Kss5SfgsQUA7UGsuXCjhT1",
-      "toolName": "code_execution",
-      "input": { "path": "aggregate.ts", "args": ["data"] }
-    }
-  ],
-  "meta": { "cwd": "/workspace", "timestamp": 1751791234567 }
-}
-```
-
-`reasoning` is optional. The platform clips it at 16 000 characters (a clipped one ends with a visible `… [thinking truncated]` marker). A turn in which the model only thought arrives as a **reasoning-only loop** — `response: ''`, `toolCalls: []`, `reasoning` set — so a consumer that renders `response` should skip or collapse turns whose `response` is empty. With `thinkingLevel: off`, or on a model that does not think, no loop carries `reasoning`.
-
-**Tool result** (`tool-result`) — emitted after each tool call resolves:
-
-```json
-{
-  "type": "tool-result",
-  "toolCallId": "toolu_01Kss5SfgsQUA7UGsuXCjhT1",
-  "toolName": "code_execution",
-  "output": { "type": "json", "value": "wrote summary.csv (412 rows)" },
-  "isError": false,
-  "meta": { "cwd": "/workspace", "timestamp": 1751791236789 }
-}
-```
-
-**Error** (`agent-harness-error`) — emitted on the Status port when the session ends unsuccessfully (the done port still fires, carrying `success: false`):
-
-```json
-{
-  "type": "agent-harness-error",
-  "message": "Agent execution failed",
-  "meta": { "timestamp": 1751791240000 }
-}
-```
-
-**Notification** (`ai-agent-notification`) — a notice about the session itself, emitted when the runtime compacts the conversation (`notificationType: "compaction"`, `message` such as `Compacted context: N → ~M tokens`); it also carries an optional `title` and `meta`.
-
-The `ai-agent-loop`/`tool-result` envelope (`type` / `response` / `toolCalls` / tool-result fields) is the same shape the legacy agent used, so status-port consumers built for the old actor keep working; `reasoning` is a new optional field on the loop that consumers ignoring unknown fields never see. Note that `meta` now carries `cwd` and `timestamp` (the legacy actor's status `meta` carried `model` and `usage`).
-
 ## Options Reference
 
 All options live under `configuration.options`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | the runtime's default Anthropic model (the editor fills in `claude-sonnet-5`) | Always set it. The model to use, in one of three forms: a known model id, which must be one of the curated `AiAgentModels` (see [Available Models](#available-models)); `<provider>/<model-id>` for a built-in provider's unlisted model; or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) whose catalog entry does not say `agent: false`. LLM calls route through the BorgIQ AI gateway using the workspace's credential for that provider |
+| `model` | string | the runtime's default Anthropic model (the editor fills in `claude-sonnet-5`) | Always set it. A known agent model id, `<provider>/<model-id>`, or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md) whose catalog entry does not say `agent: false`; see [ai-models.md](ai-models.md). LLM calls route through the BorgIQ AI gateway using the workspace's credential for that provider |
 | `prompt` | string | — | **Required.** The task prompt for the agent |
-| `systemPrompt` | string | — | Background instructions appended to the agent's system prompt |
-| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` | `medium` | How much the model thinks before each turn. Clamped to what the selected model supports (a level on a non-thinking model is a no-op). Thinking is billed as output tokens, shows in the editor timeline, and streams as `reasoning` on the Status port; `off` stops paying for it |
+| `systemPrompt` | string | — | Background instructions appended to the agent's system prompt. Put the role, conventions and the wired-tool inventory here; put the task in `prompt` |
+| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` | `medium` | How much the model thinks before each turn. Clamped to what the selected model supports (a level on a non-thinking model is a no-op; a custom model needs `reasoning: true` in its catalog entry). Thinking is billed as output tokens, shows in the editor timeline, and streams as `reasoning` on the Status port; `off` stops paying for it, `high` suits hard multi-step work |
 | `autoCompaction` | boolean | true | Summarise the conversation when it grows past the context budget, so a long session keeps running. `false` leaves only the emergency compaction after a context-overflow error. Each compaction emits an `ai-agent-notification` on the Status port |
 | `compactionInstructions` | string | — | Extra focus for the compaction summary, e.g. what must never be dropped (`keep the list of files changed`) |
 | `contextBudgetTokens` | integer (≥ 32000) | 200000 | How large the conversation may grow before it is compacted: compaction starts at 85% of this budget, capped at the model's context window. Raise it on a 1M-context model to keep more history at a higher input cost |
@@ -241,7 +129,7 @@ All options live under `configuration.options`.
 | `allowNetList` | string[] | — | Only these hosts/CIDRs allowed for tool-runtime egress (system endpoints always included). Takes effect only with `allowNet: true`. Mutually exclusive with `denyNetList` |
 | `denyNetList` | string[] | — | Block these hosts/CIDRs for tool-runtime egress (system endpoints cannot be denied). Mutually exclusive with `allowNetList` |
 | `env` | record | — | Environment variables exposed to tools and bash. Values encrypted in transit. Reserved names rejected: `HOME`, `PATH`, `TMPDIR`, `NODE_OPTIONS`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, and anything starting with `AWS_`, `DENO_`, or `BORGIQ_` |
-| `mcpServers` | object[] | — | MCP servers exposed to the agent as tools. Remote (`type: http`) or internal (`type: borgiq`); stdio is not supported here. See [MCP Servers](#mcp-servers) |
+| `mcpServers` | object[] | — | MCP servers exposed to the agent as tools: `type: http` or `type: borgiq`; stdio is not supported here. See [agent-tools.md](agent-tools.md#mcp-servers-mcpservers) |
 | `returnOutputZipFile` | boolean | true | Include the workspace zip in the done-port result |
 | `returnSessionDataFile` | boolean | true | Include the pi session data zip in the done-port result |
 
@@ -254,309 +142,118 @@ Validation rules enforced before the session starts:
 
 ## Built-in Tools
 
-The agent always has (subject to `allowedTools`/`disallowedTools`) seven built-in tools that operate on its private session workspace, plus `code_execution` when `enableCodeExecution` is set:
+The agent always has (subject to `allowedTools`/`disallowedTools`) seven built-in tools that operate on its private
+session workspace, plus `code_execution` when `enableCodeExecution` is set:
 
 | Tool | Purpose |
 |------|---------|
 | `read` / `write` / `edit` | Read, create, and surgically edit files in the workspace |
-| `bash` | Run shell commands — an **in-process bash interpreter**, not a real shell. See the note below |
+| `bash` | Run shell commands — an **in-process bash interpreter**, not a real shell (below) |
 | `grep` / `find` / `ls` | Search and explore the workspace |
 | `code_execution` | Run a TypeScript/JavaScript file from the workspace with Deno. **Only present when `enableCodeExecution: true`**; the allow/deny lists do not apply to it |
 
-Notes:
+- These names are **reserved** — a wired BorgIQ tool actor may not use them as its `msgVar`. `code_execution` is
+  reserved only while `enableCodeExecution: true`. `deno` is **not** reserved, so a DenoActor wired as a tool under its
+  default `deno` msgVar is fine.
+- Do not wire file-system tool actors: the built-ins already cover file work.
+- To build a read-only agent, set `disallowedTools: [write, edit, bash]` and leave `enableCodeExecution` off (a script
+  could otherwise write to the workspace).
+- Bash runs with a minimal environment: your `options.env` entries are exposed; platform and cloud-provider credentials
+  are not.
 
-- These names are **reserved** — a wired BorgIQ tool actor may not use them as its `msgVar`. `code_execution` is reserved only while `enableCodeExecution: true`. `deno` is **not** reserved, so a DenoActor wired as a tool under its default `deno` msgVar is fine.
-- To build a read-only agent, set `disallowedTools: [write, edit, bash]` and leave `enableCodeExecution` off (a script could otherwise write to the workspace).
-- Bash runs with a minimal environment: your `options.env` entries are exposed; platform and cloud-provider credentials are not.
+**`bash` cannot run other programs.** `bash`, `grep` and `find` run in-process as a TypeScript bash interpreter over
+the workspace filesystem: there is no `/bin/bash` and no child process. No `python`, `node`, `git`, `curl`-the-binary,
+package managers or PTY, and nothing can be installed; only the interpreter's own built-ins (`ls`, `cat`, `sed`, `awk`,
+`grep`, `curl`, and the usual shell constructs) are available. So:
 
-### What `bash` can and cannot do
-
-`bash`, `grep`, and `find` run **in-process** as a TypeScript bash interpreter over the workspace filesystem. There is no `/bin/bash` and no child processes, which has one consequence worth designing around:
-
-> **`bash` cannot run other programs.** No `python`, `node`, `git`, `curl`-the-binary, or package managers, and nothing can be installed. Only the interpreter's own built-ins (`ls`, `cat`, `sed`, `awk`, `grep`, `curl`, and the usual shell constructs) are available.
-
-Two things follow:
-
-- **To run code, use the [Code Execution tool](#running-code-with-the-code-execution-tool)** — that is what it is for. Do not write a prompt that tells the agent to "run a Python script".
-- **`curl` is a built-in of the interpreter, not the binary**, and its egress obeys `allowNet`/`allowNetList`/`denyNetList`. With `allowNet` off (the default) there is no network at all and `curl` reports "command not found".
+- **To run code, use the [Code Execution tool](#running-code-with-the-code-execution-tool).** Do not write a prompt
+  that tells the agent to "run a Python script".
+- **`curl` is a built-in of the interpreter**, and its egress obeys `allowNet`/`allowNetList`/`denyNetList`. With
+  `allowNet` off (the default) there is no network at all and `curl` reports "command not found".
 
 ## Running Code with the Code Execution Tool
 
-Set `enableCodeExecution: true` and the agent gains a `code_execution` tool (labelled "Code Execution" in the editor) that executes a TypeScript or JavaScript file from its workspace with Deno. This is how an agent runs code it has written — `bash` cannot.
-
-```yaml
-options:
-  prompt: Compute the churn rate from data.csv and write result.json
-  enableCodeExecution: true
-```
-
-The agent writes the script with `write`/`edit`, then calls `code_execution` with a path:
+Set `enableCodeExecution: true`. The agent writes a script with `write`/`edit`, then calls `code_execution` with a
+path:
 
 ```json
 { "path": "analyze.ts", "args": ["--verbose"] }
 ```
 
-`path` is relative to the working directory and must stay inside the workspace; `args` is optional and arrives as `Deno.args`. The tool returns the script's stdout and stderr (truncated at 50KB); a non-zero exit comes back as an error with the diagnostics attached, so the agent can read its own stack trace and fix the script.
+- `path` is relative to the working directory and must stay inside the workspace; `args` is optional and arrives as
+  `Deno.args`.
+- The tool returns stdout and stderr. Output over 50KB is truncated from the middle (the start and end are kept, so a
+  stack trace survives); a non-zero exit comes back as an error with the diagnostics, so the agent can fix the script.
+- **The file runs as a module.** Top-level code and top-level `await` run, but `import.meta.main` is **false**: a
+  script shaped like a CLI (`if (import.meta.main) { main() }`) does nothing and reports success.
+- **Imports must stay inside the workspace.** An import that resolves outside it, even through a symlink, is refused
+  and the script does not run. Deno and Web built-ins (`fetch`, `crypto`, streams, `Deno.readTextFile`) and `node:`
+  modules work; treat `npm:`, `jsr:` and `https:` imports as unavailable, since nothing can be downloaded or installed.
+- **Same sandbox as the other tools:** the workspace and scratch directory only, the same network policy, your
+  `options.env`, and no spawning of programs. Enabling the tool does not widen what the agent can reach.
+- A run that would outlast the current segment is terminated and does **not** resume (unlike an interrupted actor or
+  MCP tool call): the agent re-runs it after the boundary, so keep scripts restartable and check for partially written
+  files. A per-call timeout also applies.
+- Scripts share bash's at-least-once retry semantics ([Limitations](#limitations)): keep external side effects
+  idempotent.
 
-**The file runs as a module.** Top-level code and top-level `await` execute, but `import.meta.main` is **false** — a script shaped like a CLI (`if (import.meta.main) { main() }`) does nothing and reports success. Put the work at the top level, or call `main()` unconditionally.
+## Tools and MCP Servers
 
-**Imports must stay inside the workspace too.** A script may import other files it wrote (`./helper.ts`, `./lib/parse.ts`), but an import that resolves outside the workspace is refused and the script does not run — including one that reaches out through a symlink. Split multi-file scripts within the workspace rather than pointing at anything beyond it.
+Wire BorgIQ actors as tools with `aiAgentToolActorIds`, and add MCP servers with `mcpServers` (`type: http` or
+`type: borgiq`; no stdio): see [agent-tools.md](agent-tools.md). Specific to the AI Agent:
 
-**What scripts can use:**
+- A wired tool's `msgVar` must not be a [built-in tool name](#built-in-tools).
+- Name each wired tool in `systemPrompt` with what it does; the agent chooses tools by name, description and schema.
+- Put exactly-once API work in wired tool actors, not in bash + `curl` (bash is at-least-once).
+- MCP tools are discovered at session start, and each call is bridged through BorgIQ, so it resumes across segments.
+- The agent cannot answer MCP input requests: it runs headless, declares no `elicitation`, `sampling` or `roots`
+  capability, and a server that needs one reports that it cannot proceed. Use an AgentHarnessActor if you need a harness
+  CLI that can.
+- A tool that declares an `outputSchema` has its structured result passed to the model as structured data.
 
-| | |
-|---|---|
-| ✅ Deno and Web built-ins | `fetch`, `crypto`, streams, `Deno.readTextFile`, TypeScript types |
-| ✅ `node:` standard modules | `node:crypto`, `node:path`, `node:fs`, … |
-| ⚠️ `npm:`, `jsr:`, `https:` imports | **Treat as unavailable.** Nothing can be downloaded or installed — only a version already cached in the runtime image resolves, and which those are is an implementation detail you should not rely on |
+## Source Ports
 
-**Sandbox.** Scripts run under the same permissions as the agent's other tools — the workspace and scratch directory only, the same `allowNet`/`allowNetList`/`denyNetList` policy, your `options.env` variables, and no ability to spawn further programs. Enabling the tool does not widen what the agent can reach; it only lets it execute code within those bounds.
+| Port ID | Name | Emits |
+|---------|------|-------|
+| `SPRTdone000` | Done | Once, when the session ends (completed, timeout, error, or max loop count) |
+| `SPRTdefault` | Status | Assistant turns, tool results and notices while the agent runs |
 
-**Notes:**
+Wire Done to the next task actor; wire Status to a UI or logging actor for real-time visibility.
 
-- A run that would outlast the current segment is terminated and reported as such. Unlike an interrupted actor/MCP tool call it does **not** resume — the agent re-runs it after the boundary, so keep scripts restartable and check for partially written files.
-- A single run is also capped by a per-call timeout, and output over 50KB is truncated from the middle (the start and the end are kept, so a failing script's stack trace survives).
-- Scripts are subject to the same at-least-once retry semantics as bash (see [Limitations](#limitations)), so keep external side effects idempotent.
-- `enableCodeExecution` is the tool's **only** switch. `allowedTools`/`disallowedTools` govern the seven always-on built-ins and neither list affects `code_execution`; listing it either way does nothing.
+### Done Port Output
 
-## Connecting BorgIQ Tools with aiAgentToolActorIds
+| Field | Description |
+|-------|-------------|
+| `sessionId` | The session ID (pass it back in `options.sessionId` to continue this session) |
+| `success` | Whether the execution succeeded |
+| `result` | Final assistant message, or the error message on failure. May be absent: branch on `success` / `meta.endReason`, not on `result` |
+| `outputZipFile` | Zip of the session workspace (omitted when `returnOutputZipFile: false`) |
+| `sessionDataFile` | Zip of the pi session data, portable to the harness tier (omitted when `returnSessionDataFile: false`) |
+| `meta.endReason` | `completed`, `timeout`, `error`, or `max-loop-count` |
+| `meta.model` | The model used |
+| `meta.segments` | How many serverless segments the run spanned |
 
-The `aiAgentToolActorIds` array is the mechanism to give the agent BorgIQ actors as tools, unchanged from the legacy agent.
+The result type also declares an optional `meta.duration`; it is not set. Token usage is not reported on the Done
+port; it is metered per segment into the workspace AI log.
 
-**Location:** `configuration.aiAgentToolActorIds` (sibling to `inputs` and `options`, NOT inside `options`)
+### Status Port Output
 
-**CRITICAL:** To give an agent access to multiple tools, you MUST list ALL tool actor IDs in this array:
+| `type` | When | Fields |
+|---|---|---|
+| `ai-agent-loop` | Each assistant turn | `response`; `toolCalls` (`toolCallId`, `toolName`, `input`) when the turn calls tools; optional `reasoning`; `meta.cwd`, `meta.timestamp` |
+| `tool-result` | Each tool call resolves | `toolCallId`, `toolName`, `output` (e.g. `{ type: json, value }`), `isError`, `meta` |
+| `agent-harness-error` | The session ends unsuccessfully (Done still fires, with `success: false`) | `message`, `meta.timestamp` |
+| `ai-agent-notification` | The runtime compacted the conversation | `notificationType: compaction`, `message` (`Compacted context: N → ~M tokens`), optional `title`, `meta` |
 
-```yaml
-configuration:
-  inputs:
-    topic: ''
-  options:
-    model: claude-sonnet-5
-    # ... other options
-  aiAgentToolActorIds:
-    - ACTR01tool1  # First tool
-    - ACTR01tool2  # Second tool
-    - ACTR01tool3  # Third tool (add as many as needed)
-```
-
-### Key Rules
-
-1. **All tools must be listed** — every tool the agent should access must have its actor ID in this array
-2. **Order doesn't matter** — the agent selects tools based on their descriptions and schemas, not array order
-3. **Location is critical** — `aiAgentToolActorIds` is a sibling to `inputs` and `options`, NOT nested inside `options`
-4. **Names must not collide with built-ins** — a tool actor whose `msgVar` is `read`, `write`, `edit`, `bash`, `grep`, `find` or `ls` (or `code_execution` while `enableCodeExecution` is on) is rejected when the session starts
-5. **Tool actors are rendered inside the agent's boundary in the UI** and have **empty edges** — their output flows back to the agent
-
-### Tool Actor Input Pattern
-
-Tool actors receive input from the agent using the `${{aiInput}}` placeholder. The placement depends on the actor type:
-
-**HttpRequestActor, DenoActor, PythonActor** — use `${{aiInput}}` in `configuration.inputs`:
-
-```yaml
-ACTR01httptool:
-  type: HttpRequestActor
-  msgVar: my_tool  # This becomes the tool name
-  configuration:
-    inputs:
-      query: ${{aiInput}}      # Receives 'query' from agent's tool call
-      limit: ${{aiInput}}      # Receives 'limit' from agent's tool call
-    options:
-      url: https://api.example.com/search
-      body:
-        q: ${{ inputs.query }}
-        max: ${{ inputs.limit }}
-```
-
-**CallFlowActor** — use `${{aiInput}}` in `configuration.options.payload` (NOT in inputs):
-
-```yaml
-ACTR01callflowtool:
-  type: CallFlowActor
-  msgVar: sub_agent  # This becomes the tool name
-  configuration:
-    options:
-      workspaceSlug: my-workspace
-      canvasSlug: my-flow
-      callableTriggerActorId: ACTR01trigger
-      payload:
-        query: ${{aiInput}}    # Receives 'query' from agent's tool call
-        options: ${{aiInput}}  # Receives 'options' from agent's tool call
-      waitForResponse: true
-```
-
-The agent calls tools using the `msgVar` as the tool name and passes parameters that match the tool's input schema.
-
-### Tool Actor Types
-
-Any BorgIQ actor can be used as a tool:
-
-| Actor Type | Use Case |
-|------------|----------|
-| **HttpRequestActor** | API calls, web requests |
-| **DenoActor** | Custom TypeScript/JavaScript logic |
-| **PythonActor** | Custom Python logic, data science |
-| **CallFlowActor** | Sub-agents, complex workflows |
-
-### Tool Schema Definition
-
-Each tool actor must define its input schema in `schemas.inputs` to tell the agent what parameters it accepts:
-
-```yaml
-schemas:
-  inputs:
-    type: object
-    properties:
-      query:
-        type: string
-        title: Search Query
-        description: The search query to execute
-      limit:
-        type: integer
-        title: Result Limit
-        description: Maximum number of results to return
-        default: 10
-    required:
-      - query
-```
-
-## Tool Actor Configuration
-
-Tool actors have a specific structure. Key requirements:
-- **edges must be empty** — tool output flows back to the agent
-- **inputs use `${{aiInput}}`** — to receive values from the agent's tool calls
-- **continueOnError: true** is recommended — so the agent can handle failures gracefully
-- **msgVar must not be a built-in tool name** (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, plus `code_execution` while `enableCodeExecution` is on)
-
-```yaml
-ACTR01toolactor:
-  type: HttpRequestActor
-  version: 1
-  name: Exa Search
-  msgVar: exa_search  # This becomes the tool name the agent uses
-  description: Search the web using Exa API
-  isActive: true
-  continueOnError: true  # Recommended: let agent handle errors
-  enableLTM: false
-  enableSTM: false
-  sourcePorts:
-    - id: SPRTdefault
-  configuration:
-    inputs:
-      query: ${{aiInput}}  # Receives 'query' from agent's tool call
-      limit: ${{aiInput}}  # Receives 'limit' from agent's tool call
-    options:
-      url: https://api.exa.ai/search
-      method: POST
-      headers:
-        Content-Type: application/json
-      body:
-        query: ${{ inputs.query }}
-        type: neural
-        numResults: ${{ inputs.limit || 10 }}
-      auth: ${{ connection.auth }}
-    connection:
-      key: exa-api
-  schemas:
-    inputs:
-      type: object
-      properties:
-        query:
-          type: string
-          title: Search Query
-          description: The search query to execute
-        limit:
-          type: integer
-          title: Result Limit
-          description: Maximum number of results to return
-          default: 10
-      required:
-        - query
-  id: ACTR01toolactor
-  position:
-    x: 0
-    'y': 100
-  edges: {}  # IMPORTANT: Empty edges for tool actors
-```
-
-## Results Object
-
-### Done Port Result
-
-```typescript
-interface AiAgentActorResult {
-  sessionId: string;          // Session ID (reuse to continue the session)
-  success: boolean;
-  result?: string;            // Final assistant message or error message
-  outputZipFile?: BIQFile;    // Workspace zip (when returnOutputZipFile !== false)
-  sessionDataFile?: BIQFile;  // pi session data zip (when returnSessionDataFile !== false)
-  meta: {
-    endReason: 'completed' | 'timeout' | 'error' | 'max-loop-count';
-    model?: string;
-    segments?: number;        // Serverless segments the run spanned
-    duration?: number;        // Total run time in milliseconds
-  };
-}
-```
-
-### Status Port Result
-
-```typescript
-type AiAgentStatusPortResult =
-  | {
-      type: 'ai-agent-loop';
-      response: string;            // '' on a reasoning-only turn
-      reasoning?: string | null;   // the model's thinking for the turn, clipped at 16 000 chars
-      toolCalls?: AiToolCall[] | null;
-      meta: { cwd: string; timestamp: number };
-    }
-  | {
-      type: 'tool-result';
-      toolCallId: string;
-      toolName: string;
-      output: AiToolMessageOutput;
-      isError?: boolean;
-      meta: { cwd: string; timestamp: number };
-    }
-  | {
-      type: 'ai-agent-notification';
-      notificationType?: string;   // e.g. 'compaction'
-      title?: string;
-      message?: string;            // e.g. 'Compacted context: N → ~M tokens'
-      meta?: { cwd?: string; timestamp?: number };
-    };
-```
-
-## Available Models
-
-`model` accepts three forms:
-
-1. **A known model id** — it must be one of the `AiAgentModels` below, a curated cross-provider list of models proficient at agentic tool use. A known id outside that list (bare, or written as `openai/gpt-4o-mini`) fails validation with `Model "<id>" is not one of the AI Agent actor's <provider> models (…)`.
-2. **`<provider>/<model-id>`** — a built-in provider's model the platform does not list (`openai/gpt-6`); not restricted by the curated list.
-3. **`<custom-provider-slug>/<model-id>`** — a workspace [custom provider](custom-ai-providers.md) (Fireworks, Groq, OpenRouter, a self-hosted vLLM at a public address, …). A catalog entry with `agent: false` is hidden from the AI Agent's model suggestions and refused at run time (`Model "<ref>" is not enabled for the AI Agent actor (agent: false in provider "<slug>" catalog)`); entries without the flag are usable. A custom provider with no effective base URL is refused before the segment is dispatched.
-
-The workspace must have an AI credential configured for the chosen model's provider — for a custom provider, one with that slug — or the run fails fast. A slug the workspace does not have only warns in the editor and in `borgiq canvases validate`. For custom models, `thinkingLevel` only applies when the catalog entry has `reasoning: true`. `borgiq ai-providers models` lists every usable reference, with `agent` saying which ones the AI Agent accepts.
-
-**Default:** the editor fills in `claude-sonnet-5` (the first entry of the Anthropic list). An unset `model` runs the runtime's default Anthropic model, so always set `model`.
-
-| Provider | Models |
-|----------|--------|
-| Anthropic | `claude-sonnet-5` (editor default), `claude-opus-5-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5` |
-| OpenAI | `gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`, `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini` |
-| Google | `gemini-3.1-pro-preview`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-2.5-pro` |
-| xAI | `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-build-0.1`, `grok-4.3`, `grok-4-fast-reasoning`, `grok-code-fast-1` |
-
-Rough price tiers, per million input/output tokens as the platform meters them: `claude-sonnet-5` and `gpt-6-sol` $2/$10; `claude-opus-5-5` $4/$20; `claude-opus-5` and `claude-opus-4-8` $5/$25; `claude-fable-5-1` and `gpt-6-astra` $10/$50; `gpt-6-luna` $0.10/$0.50; `gpt-5.6-luna` $0.20/$1.20; `claude-haiku-4-5` $1/$5; `grok-4.7` $2/$6 (double from 200K input tokens).
-
-`grok-4-fast-reasoning` and `grok-code-fast-1` are still accepted for existing actors, but xAI retired them on 2026-05-15 and serves those requests with `grok-4.3` and `grok-build-0.1`; the dated `gpt-5` and `gpt-5-mini` snapshots shut down on 2026-12-11, and since 2026-09-18 Google serves `gemini-2.5-pro` only to projects that already used it.
-
-For complex multi-step tasks, prefer `claude-sonnet-5`, `claude-opus-5-5` or `claude-fable-5-1`. For simple high-volume agents, `claude-haiku-4-5`, `gpt-6-luna` or `gemini-3.5-flash-lite` keep costs down — and set `thinkingLevel: off`, since the default `medium` thinking is billed as output tokens on every turn.
+`reasoning` is the model's thinking for the turn. The platform clips it at 16 000 characters (a clipped one ends with
+`… [thinking truncated]`). A turn in which the model only thought arrives as a **reasoning-only loop**: `response: ''`,
+`toolCalls: []`, `reasoning` set, so a consumer that renders `response` should skip or collapse turns whose `response`
+is empty. With `thinkingLevel: off`, or on a model that does not think, no loop carries `reasoning`.
 
 ## Sessions and Continuation
 
-- **Starting**: leave `sessionId` empty to auto-generate one (returned on the done port), or set a custom ID (max 64 chars).
-- **Continuing**: re-invoke the actor with the same `sessionId` — the workspace and full conversation state restore from the last checkpoint and the agent picks up where it left off. Works within a flow (loop back into the agent) and across flowruns.
+- **Starting**: leave `sessionId` empty to auto-generate one (returned on the done port), or set a custom ID (max 64 chars). Leave it blank for one-shot runs.
+- **Continuing**: re-invoke the actor with the same `sessionId` — the workspace and full conversation state restore from the last checkpoint and the agent picks up where it left off. Works within a flow (loop back into the agent) and across flowruns. To continue in a later flowrun, persist the returned `sessionId` (e.g. in a Collection).
 - **Session TTL**: 7 days, sliding — every session activity refreshes it. After the TTL lapses, the same `sessionId` starts a **clean fresh session** (deterministic; never a partial state).
 - **Seeding and resetting files**: `volumeZipFile` is extracted into the workspace at session creation, and again by **every later run that reuses the session with a zip**. That includes a loop back into the agent within one flow, since each message into the actor is a new run. The workspace is restored from the last checkpoint, then the zip is extracted over it. Files at the paths the zip names are reset to the zip's version, even where the zip has a file and the workspace a folder of the same name, or the reverse. Files only in the old workspace are kept. Sending a zip is therefore a deliberate reset of those files: use it to hand a continuing session updated inputs. To keep the agent's edits, send the zip only on the first run, for example by wiring it to an input that is empty on later loops. Within one run the zip is applied once, so the agent's edits across its own long-running segments are kept. A zip that cannot be downloaded or extracted fails the run, with a message naming the zip, and leaves the session's previous workspace as it was.
 - **Getting files out**: the done port carries `outputZipFile` (the workspace) and `sessionDataFile` (pi session data; portable — it can seed a harness-tier pi session).
@@ -564,329 +261,88 @@ For complex multi-step tasks, prefer `claude-sonnet-5`, `claude-opus-5-5` or `cl
 
 ## Runtime Requirements
 
-The agent runs on the workspace's serverless runtime (or a per-actor runtime override), and two runtime settings directly shape agent behavior:
+The agent runs on the workspace's serverless runtime (or a per-actor runtime override):
 
-- **Ephemeral storage sizes the workspace.** The durable workspace is capped at **20% of the runtime's ephemeral storage**. The 512 MB default yields only ~100 MB of workspace — **provision a runtime with ≥ 4 GB ephemeral storage (~800 MB workspace) for real agent work**. Exceeding the cap ends the session with `endReason: 'error'` (state is snapshotted first); a follow-up invoke with a cleanup prompt starts in a grace mode that lets the agent delete files before the cap re-enforces.
-- **The runtime timeout is the segment length**, not the session limit. Each segment is bounded by the runtime's configured timeout (up to 14 minutes); the session checkpoints and continues across segments, so total runtime is governed by `timeoutInMinutes`, not the runtime timeout. Short runtime timeouts still work — they just checkpoint more often.
-- **AI credential**: the workspace needs an AI credential for the chosen model's provider — for a `<slug>/<model-id>` reference, a custom provider with that slug (its base URL must be a public `https://` address; private-network endpoints are refused).
-- **Isolation**: agent segments share the workspace runtime's concurrency pool. For isolation, create a dedicated runtime and point the actor at it via the per-actor runtime setting.
-
-## MCP Servers
-
-The agent can call tools from MCP servers alongside its built-ins and any wired BorgIQ actor tools.
-Two kinds are supported — stdio subprocess servers are not (use AgentHarnessActor for those).
-
-```yaml
-options:
-  prompt: Summarise this week's open issues.
-  mcpServers:
-    # A remote MCP server, proxied through BorgIQ. Auth resolves per request, so an
-    # OAuth-backed connection refreshes mid-session without restarting the agent.
-    - type: http
-      name: linear
-      url: https://mcp.linear.app/mcp
-      auth: ${{ credentials.linearMcp }}
-
-    # An McpServerActor elsewhere in BorgIQ. No auth and no URL — the agent's session is
-    # already scoped to exactly the servers listed here. Slugs default to this actor's
-    # own workspace/canvas.
-    - type: borgiq
-      name: support-tools
-      actorId: ACTR01mcpserveractorid00000000
-      canvasSlug: support-desk        # optional
-      workspaceSlug: otherws          # optional
-```
-
-| Field | Applies to | Required | Description |
-|-------|-----------|----------|-------------|
-| `type` | both | no on `http` (the default), **yes** on `borgiq` | `http` or `borgiq` |
-| `name` | both | yes | Tool namespace for this server. Letters, numbers, hyphens and underscores; must be unique across the list |
-| `url` | `http` | yes | The MCP server endpoint |
-| `transport` | `http` | no | Only `streamable-http` is supported |
-| `auth` | `http` | no | Credential for the upstream server, usually `${{ credentials.<key> }}` |
-| `actorId` | `borgiq` | yes | The McpServerActor to expose |
-| `canvasSlug` | `borgiq` | no | Canvas holding that actor; defaults to this actor's canvas |
-| `workspaceSlug` | `borgiq` | no | Workspace holding that canvas; defaults to this actor's workspace |
-
-Notes:
-
-- A `borgiq` entry **must** carry `type: borgiq`. Omitting `type` means `http`, which is what a
-  legacy entry without a discriminant is treated as.
-- Internal MCP calls are depth-limited, so an agent and an MCP server that call each other in a loop
-  terminate with a tool error rather than running away.
-- **Protocol versions are negotiated automatically.** The agent speaks MCP `2026-07-28` (the
-  stateless core) where the upstream server supports it, and falls back to the older `initialize`
-  handshake where it does not. Nothing to configure; a server on either protocol works.
-- **The agent cannot answer input requests.** It runs headless inside a flow, with no user to
-  prompt, so it declares no `elicitation` / `sampling` / `roots` capability. A server that requires
-  one of those to complete a call will report that it cannot proceed rather than hanging. Use an
-  AgentHarnessActor if you need a harness CLI that can.
-- A tool that declares an `outputSchema` has its structured result passed through to the model as
-  structured data, not flattened to text.
+- **Ephemeral storage sizes the workspace.** The durable workspace is capped at **20% of the runtime's ephemeral
+  storage**. The 512 MB default yields only ~100 MB of workspace — **provision a runtime with ≥ 4 GB ephemeral storage
+  (~800 MB workspace) for real agent work**. Exceeding the cap ends the session with `endReason: 'error'` (state is
+  snapshotted first); a follow-up invoke with a cleanup prompt starts in a grace mode that lets the agent delete files
+  before the cap re-enforces.
+- **The runtime timeout is the segment length**, not the session limit. Each segment is bounded by the runtime's
+  configured timeout (up to 14 minutes); total runtime is governed by `timeoutInMinutes`. Short runtime timeouts still
+  work — they just checkpoint more often.
+- **AI credential**: the workspace needs one for the model's provider — for a `<slug>/<model-id>` reference, a custom
+  provider with that slug, at a public `https://` base URL (private-network endpoints are refused). A custom provider
+  with no effective base URL is refused before the segment is dispatched.
+- **Isolation**: agent segments share the workspace runtime's concurrency pool. For isolation, create a dedicated
+  runtime and point the actor at it via the per-actor runtime setting.
 
 ## Limitations
 
-- **Bash side effects are at-least-once.** If a segment dies before its checkpoint, the session retries from the previous checkpoint and re-runs any bash executed since then. The workspace state stays consistent (it always restores from the checkpoint), but **external** side effects from bash (API calls, emails) may repeat — design them to be idempotent, as with webhook deliveries elsewhere in the platform.
-- **No background processes.** Daemons/dev-servers started by bash do not survive a segment boundary. Long-running listeners belong on the harness tier.
-- **No stdio MCP servers** — `type: http` (an external server, proxied through BorgIQ) and `type: borgiq` (an MCP Server Actor inside BorgIQ, dispatched in-process with no transport) are supported; stdio subprocess servers are not. Use AgentHarnessActor when you need a stdio server.
-- **`bash` cannot run programs** — it is an in-process interpreter, so `python`/`node`/`git` and installing anything are out. Use the [Code Execution tool](#running-code-with-the-code-execution-tool) to run code. No PTY, no interactive programs.
-- **Workspace size cap** — 20% of runtime ephemeral storage (see [Runtime Requirements](#runtime-requirements)).
+- **Bash side effects are at-least-once.** If a segment dies before its checkpoint, the session retries from the
+  previous checkpoint and re-runs any bash executed since then. The workspace stays consistent (it always restores from
+  the checkpoint), but **external** side effects from bash (API calls, emails) may repeat — make them idempotent.
+- **No background processes.** Daemons and dev servers started by bash do not survive a segment boundary; long-running
+  listeners belong on the harness tier.
+- **No stdio MCP servers**, no programs from `bash`, no PTY or interactive programs (see [Built-in Tools](#built-in-tools)).
+- **Workspace size cap**: 20% of runtime ephemeral storage ([Runtime Requirements](#runtime-requirements)).
 
 ## Common Patterns
 
-### File-Processing Agent
+**File-processing agent** — the built-in tools cover unpack, transform, edit and re-zip without tool actors; add
+`enableCodeExecution: true` when the work needs real code:
 
 ```yaml
 options:
   model: claude-sonnet-5
   systemPrompt: |
     You are a data processor. The input archive is extracted in your workspace.
-    Produce results as files; your workspace is returned to the caller as a zip.
+    Use bash built-ins for simple passes; for real computation write a TypeScript
+    file and run it with the code_execution tool. Produce results as files.
   prompt: ${{ inputs.instructions }}
   volumeZipFile: ${{ inputs.archive }}
+  enableCodeExecution: true
 ```
 
-### Continuable Session (multi-invoke conversation)
+**Continuable session** — the first invoke returns an auto-generated `sessionId`; pass it back to continue:
 
 ```yaml
-# First invoke: auto-generated sessionId comes back on the done port.
-# Later invokes: pass it back to continue with full workspace + conversation state.
 options:
   model: claude-sonnet-5
   prompt: ${{ inputs.followUpInstruction }}
   sessionId: ${{ inputs.sessionId }}   # empty on first call, set on follow-ups
 ```
 
-### Read-Only Analysis Agent
+**Read-only analysis agent**:
 
 ```yaml
 options:
   model: claude-haiku-4-5
+  thinkingLevel: off
   prompt: ${{ inputs.question }}
   volumeZipFile: ${{ inputs.dataZip }}
-  disallowedTools:
-    - write
-    - edit
-    - bash
+  disallowedTools: [write, edit, bash]
   returnOutputZipFile: false   # nothing to return; skip the zip
 ```
 
-### Research Agent with Web Search Tools
-
-```yaml
-options:
-  model: claude-sonnet-5
-  systemPrompt: |
-    You are a research assistant. Use the available tools:
-    - web_search: Search for information on the web
-    - extract_content: Extract detailed content from URLs
-    Save findings as markdown files in your workspace.
-  prompt: ${{ inputs.researchQuestion }}
-# aiAgentToolActorIds (sibling of options) lists the two HttpRequestActor tools
-```
-
-### Sub-Agent Pattern (Agent-as-Tool)
-
-Use CallFlowActor to invoke sub-agents. Note: use `${{aiInput}}` inside `payload`, not in `inputs`:
-
-```yaml
-ACTR01subagent:
-  type: CallFlowActor
-  name: Research Sub Agent
-  msgVar: research_sub_agent
-  description: Sub-agent specialized in web research
-  configuration:
-    options:
-      workspaceSlug: my-workspace
-      canvasSlug: research-agent-flow
-      callableTriggerActorId: ACTR01kcddpqxsakc25fn5c0hz9a35
-      payload:
-        topic: ${{aiInput}}  # Receives value from agent
-      waitForResponse: true
-      timeoutInSeconds: 120
-  schemas:
-    inputs:
-      type: object
-      properties:
-        topic:
-          type: string
-          title: Research Topic
-          description: Topic for the sub-agent to research
-      required:
-        - topic
-  edges: {}  # Empty for tool actors
-```
-
-## Complete Example: Report Processing Agent
-
-An agent that receives a zip of CSV reports, analyzes them in its workspace, publishes a summary through a wired HTTP tool, and returns the processed workspace:
-
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  # Main Agent
-  ACTR01kd6agent00000000000000000:
-    type: AiAgentActor
-    version: 1
-    name: Report Processing Agent
-    msgVar: report_agent
-    description: Unpacks report archives, analyzes them, and publishes a summary
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdone000
-        name: Done
-        description: Final result when the session ends
-      - id: SPRTdefault
-        name: Status
-        description: Assistant turns and tool results while the agent runs
-    configuration:
-      inputs:
-        reportZip: ${{ msg.upload_trigger.file }}
-        period: ${{ msg.upload_trigger.period }}
-      options:
-        model: claude-sonnet-5
-        systemPrompt: |
-          You are a data analyst. The report archive is extracted in your
-          workspace. Analyze the CSVs — use bash built-ins for simple passes,
-          and for real computation write a TypeScript file and run it with the
-          code_execution tool. Write summary.md with your findings, and publish the
-          summary using the publish_summary tool.
-        prompt: |
-          Analyze the ${{ inputs.period }} reports in the workspace,
-          write summary.md, and publish it.
-        volumeZipFile: ${{ inputs.reportZip }}
-        enableCodeExecution: true    # the agent runs TypeScript to crunch the CSVs
-        timeoutInMinutes: 30
-      # IMPORTANT: List ALL tool actor IDs here
-      aiAgentToolActorIds:
-        - ACTR01kd6publish000000000000000   # publish_summary
-    schemas:
-      inputs:
-        type: object
-        properties:
-          reportZip:
-            type: object
-            title: Report Zip
-            description: The report archive to analyze
-          period:
-            type: string
-            title: Reporting Period
-            description: e.g. 2026-Q2
-        required:
-          - period
-    id: ACTR01kd6agent00000000000000000
-    position:
-      x: 0
-      'y': 0
-    edges:
-      SPRTdone000:
-        - target: ACTR01kd6notify0000000000000000
-
-  # Tool: publish summary via internal API
-  ACTR01kd6publish000000000000000:
-    type: HttpRequestActor
-    version: 1
-    name: Publish Summary
-    msgVar: publish_summary
-    description: Publish a report summary to the internal reporting API
-    isActive: true
-    continueOnError: true  # Let agent handle errors
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      inputs:
-        title: ${{aiInput}}    # Receives 'title' from agent's tool call
-        summary: ${{aiInput}}  # Receives 'summary' from agent's tool call
-      options:
-        url: https://reports.internal.example.com/api/summaries
-        method: POST
-        headers:
-          Content-Type: application/json
-        body:
-          title: ${{ inputs.title }}
-          summary: ${{ inputs.summary }}
-        auth: ${{ connection.auth }}
-      connection:
-        key: reporting-api
-    schemas:
-      inputs:
-        type: object
-        properties:
-          title:
-            type: string
-            title: Summary Title
-            description: Title for the published summary
-          summary:
-            type: string
-            title: Summary Body
-            description: Markdown body of the summary
-        required:
-          - title
-          - summary
-    id: ACTR01kd6publish000000000000000
-    position:
-      x: -200
-      'y': 100
-    edges: {}  # IMPORTANT: Empty edges for tool actors
-
-  # Downstream: notify with the final result + workspace zip
-  ACTR01kd6notify0000000000000000:
-    type: SendEmailActor
-    version: 1
-    name: Notify Analyst
-    msgVar: notify_analyst
-    description: Email the final summary and workspace zip link
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      inputs:
-        agentResult: ${{ msg.report_agent.result }}
-        endReason: ${{ msg.report_agent.meta.endReason }}
-      options:
-        to: analyst@example.com
-        subject: 'Report analysis: ${{ inputs.endReason }}'
-        body: ${{ inputs.agentResult }}
-    id: ACTR01kd6notify0000000000000000
-    position:
-      x: 0
-      'y': 200
-    edges: {}
-```
+A research agent wires web-search and HTTP tool actors, and a multi-agent system wires sub-agents as CallFlowActor
+tools: see [agent-tools.md](agent-tools.md).
 
 ## Accessing Agent Data in Downstream Actors
 
-### From Done Port (final result)
+From the Done port:
 
 ```yaml
 configuration:
   inputs:
-    finalText: ${{ msg.report_agent.result }}
+    finalText: "${{ msg.report_agent.result || 'agent ended: ' + msg.report_agent.meta.endReason }}"
     succeeded: ${{ msg.report_agent.success }}
     endReason: ${{ msg.report_agent.meta.endReason }}
     workspaceZip: ${{ msg.report_agent.outputZipFile }}
     sessionId: ${{ msg.report_agent.sessionId }}   # store to continue the session later
 ```
 
-`result` can be absent (e.g. some error paths) — guard with a fallback where it matters:
-
-```yaml
-    finalText: ${{ msg.report_agent.result || 'agent ended: ' + msg.report_agent.meta.endReason }}
-```
-
-### From Status Port (intermediate results)
-
-Connect to the Status port to process assistant turns and tool results in real time. A loop's `reasoning` is optional, and a loop may be reasoning-only (empty `response`), so read the two fields separately:
+From the Status port, read `reasoning` and `response` separately, since a loop may be reasoning-only:
 
 ```yaml
 configuration:
@@ -895,71 +351,19 @@ configuration:
     payload:
       eventType: ${{ msg.report_agent.type }}
       thinking: ${{ msg.report_agent.reasoning || '' }}
-      content: ${{ msg.report_agent.type === 'ai-agent-loop' ? msg.report_agent.response : msg.report_agent.output }}
+      content: "${{ msg.report_agent.type === 'ai-agent-loop' ? msg.report_agent.response : msg.report_agent.output }}"
 ```
 
-## Migrating from DeprecatedAiAgent
+A plain YAML value cannot hold `: ` (a ternary, or a string such as `'agent ended: '`), so quote such an expression.
 
-Existing flows built on the legacy loop agent keep running as `DeprecatedAiAgent`. When rebuilding one on the new actor:
+## Legacy: DeprecatedAiAgent
 
-| Legacy option | Replacement |
-|---------------|-------------|
-| `temperature`, `maxTokens`, `enableTodoTool` | Removed — no equivalent (the agent manages its own generation and planning) |
-| `messages` (multi-turn history) | Use `sessionId` continuation — re-invoke the same session instead of replaying message arrays |
-| `prompt` / `systemPrompt` / `maxLoopCount` | Same names, same intent |
-| `model: gpt-6-luna` (legacy default) | Set an agent-grade model explicitly (the editor fills in `claude-sonnet-5`) |
-| — | New: `thinkingLevel` (`off` … `high`, default `medium`) controls how much the model thinks; the legacy agent never requested thinking |
-
-Output contract changes for downstream actors:
-
-| Legacy done port | New done port |
-|------------------|---------------|
-| `response` (full `BIQAiMessage[]` history) | `result` (final text only). Conversation history lives in the session, not the payload |
-| `meta.endReason: done \| max_loop_count_reached \| max_output` | `meta.endReason: completed \| timeout \| error \| max-loop-count` |
-| `meta.usage` (token totals) | Not on the done port — usage is metered to the workspace AI log |
-| — | New: `sessionId`, `success`, `outputZipFile`, `sessionDataFile`, `meta.segments` |
-
-On the Status port, `ai-agent-loop` keeps its legacy shape and gains an optional `reasoning` field; a loop may now be reasoning-only with an empty `response` (see [Status Port Output](#status-port-output)).
-
-Tool wiring (`aiAgentToolActorIds`, `${{aiInput}}`, tool schemas) is unchanged — tool actors migrate as-is, unless their `msgVar` collides with a built-in tool name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, plus `code_execution` while `enableCodeExecution` is on), which requires a rename.
-
-See [deprecated-ai-agent.md](deprecated-ai-agent.md) for the full legacy reference.
-
-## Use Cases
-
-### File & Data Processing
-
-Unpack archives, transform data, edit files, and return the workspace — the built-in tools cover the whole loop without any custom tool actors. Set `enableCodeExecution: true` when the transformation needs real code rather than bash built-ins.
-
-### Code Generation & Execution
-
-Write code, run it, read the output, and iterate — set `enableCodeExecution: true` and the agent can execute what it writes.
-
-### Research & Information Gathering
-
-Wire web-search/HTTP tool actors; the agent searches, extracts, and synthesizes findings into workspace files.
-
-### Long-Running / Resumable Work
-
-Sessions checkpoint automatically and continue via `sessionId` — a task can span many invocations, or a conversation can resume days later (within the 7-day TTL).
-
-### Multi-Agent Systems
-
-Compose agents hierarchically using CallFlowActor tools to create specialized sub-agents.
-
-## Best Practices
-
-1. **Size the runtime for the workspace** — ≥ 4 GB ephemeral storage for real file work; the workspace cap is 20% of ephemeral storage
-2. **Use agent-grade models** — start with `claude-sonnet-5`; step up to `claude-opus-5-5` or `claude-fable-5-1` for complex multi-step tasks
-3. **Make bash side effects idempotent** — bash is at-least-once across segment retries; external calls (APIs, emails) may repeat
-4. **Prefer built-in tools for file work** — don't wire file-system tool actors; the agent already has `read`/`write`/`edit`/`bash`
-5. **Define clear tool schemas** — the agent uses tool descriptions and schemas to decide when and how to call wired tools
-6. **Handle tool errors** — set `continueOnError: true` on tool actors so the agent can recover from failures
-7. **Restrict tools when you can** — `disallowedTools` for read-only agents; `denyNetList`/`allowNetList` for tool-runtime egress (they cover bash's `curl` and Code Execution scripts; `allowNetList` needs `allowNet: true`)
-8. **Store `sessionId` when you need continuation** — persist it (e.g. in a Collection) to resume the session in a later flowrun
-9. **Guard `result` downstream** — it is optional; branch on `success`/`meta.endReason` for control flow
-10. **Set `thinkingLevel` on purpose** — the default `medium` is billed as output tokens every turn; `off` for cheap high-volume agents, `high` for hard multi-step work
-
-## TypeScript Schema Hint
-
-See [typescript/actorSchemas/task/aiAgent.md](typescript/actorSchemas/task/aiAgent.md) for the complete TypeScript definitions of AiAgentActor options and result schemas.
+`DeprecatedAiAgent` is the orchestrator-loop agent that carried the `AiAgentActor` type name until mid-2026: no
+filesystem, bash or sessions. It is hidden from the palette and still runs; read or migrate it, never create one.
+Options: `model` (default `gpt-6-luna`), `prompt` or `messages`, `systemPrompt`, `temperature` (0.2), `maxTokens`
+(10000), `maxLoopCount`, `enableTodoTool`; no `outputSchema`. Tool wiring is the same. Done port: `response` (the whole
+`BIQAiMessage[]` history; the final text is the last message's `content`) and `meta` (`model`, `usage`, `endReason`:
+`done`, `max_loop_count_reached`, `max_output`); its Status loops carry `meta.model` and `meta.usage`. To migrate:
+drop `temperature`, `maxTokens` and `enableTodoTool`; replace `messages` with `sessionId` continuation; set `model`
+explicitly; downstream, read `result` instead of `response`; rename tools whose `msgVar` is a built-in name. Types:
+[typescript/legacy/actorSchemas/task/deprecatedAiAgent.md](typescript/legacy/actorSchemas/task/deprecatedAiAgent.md).

@@ -1,133 +1,65 @@
 # Agent Harness Actor Reference
 
-The AgentHarnessActor is **Claude in a Box** — it packages Claude Code into a workflow node so that any business process codified as Claude Code commands or skills can run as an actor in a BorgIQ automation. Instead of scripting each step imperatively, you describe what you want done in a prompt, and Claude Code executes it in an isolated sandbox (E2B or Daytona) with full filesystem access, code execution, and session persistence.
+The AgentHarnessActor runs a harness CLI (Claude Code by default; Codex, OpenCode or pi) in an isolated sandbox VM
+with a full machine, session persistence and BorgIQ actors as tools. Anything a person can do at a terminal with that
+CLI (write code, run commands, install packages, call APIs, use skills and slash commands) becomes a workflow node:
+upstream actors trigger it and downstream actors use its results. Read it to configure one. Tool wiring and MCP
+servers are in [agent-tools.md](agent-tools.md), models in [ai-models.md](ai-models.md), exact types in
+[typescript/actorSchemas/task/agentHarness.md](typescript/actorSchemas/task/agentHarness.md).
 
-**The core idea:** If a task can be done by a human sitting at a terminal running Claude Code — writing code, running commands, installing packages, calling APIs, using slash commands — then AgentHarnessActor can do that same task as a node in a workflow, triggered by upstream actors and feeding results to downstream actors.
-
-## Table of Contents
+## Contents
 
 - [Overview](#overview)
-- [Key Differences from AiAgentActor](#key-differences-from-aiagentactor)
-- [When to Use AgentHarnessActor vs AiAgentActor](#when-to-use-agentharnessactor-vs-aiagentactor)
-- [The "Claude in a Box" Pattern](#the-claude-in-a-box-pattern)
+- [Skills as a Workflow Node](#skills-as-a-workflow-node)
 - [Configuration Structure](#configuration-structure)
-- [Source Ports](#source-ports)
 - [Options Reference](#options-reference)
-- [Sandbox Providers](#sandbox-providers)
-- [Sandbox Architecture](#sandbox-architecture)
-- [Network Control](#network-control)
+- [Sandbox Providers and Network Control](#sandbox-providers-and-network-control)
+- [Sandbox Layout and Working Directory](#sandbox-layout-and-working-directory)
 - [Session Continuation](#session-continuation)
-- [MCP Servers](#mcp-servers)
-- [Connecting Tools](#connecting-tools)
-- [Volume Zip File and Working Directory](#volume-zip-file-and-working-directory)
-- [Building Context with a DenoActor](#building-context-with-a-denoactor)
-- [Extracting Output Files](#extracting-output-files)
-- [Results Object](#results-object)
+- [Tools and MCP Servers](#tools-and-mcp-servers)
 - [Credentials and Environment Variables](#credentials-and-environment-variables)
-- [Common Patterns](#common-patterns)
-- [Complete Example: Deep Research Agent with Context Building](#complete-example-deep-research-agent-with-context-building)
+- [Extracting Output Files](#extracting-output-files)
+- [Source Ports](#source-ports)
 - [Accessing Agent Harness Data in Downstream Actors](#accessing-agent-harness-data-in-downstream-actors)
-- [Use Cases](#use-cases)
-- [Best Practices](#best-practices)
-- [TypeScript Schema Hint](#typescript-schema-hint)
+- [Common Patterns](#common-patterns)
 
 ## Overview
 
-AgentHarnessActor creates an isolated sandbox (via an external vendor — E2B or Daytona, **not** AWS Lambda) where Claude Code runs with:
+The sandbox is provisioned from an external vendor (E2B or Daytona, **not** AWS Lambda). Inside it the harness has
+full filesystem access, runs Bash commands and scripts (Python, Node.js), installs packages, keeps background
+processes for the sandbox's lifetime, and gets a PTY. Network access is controlled by allow/deny lists enforced with
+iptables.
 
-- **Full filesystem access**: Read, write, create, delete files
-- **Command execution**: Run Bash commands, scripts, install packages
-- **Session persistence**: Reuse sessions via `sessionId` — the sandbox state and Claude conversation history are restored
-- **Queued execution**: When a session ID is reused, inbound messages are processed one at a time using a Redis-backed queue with mutex locking
-- **Connected BorgIQ tools**: Tool actors are exposed as Claude Code skills via an auto-generated BorgIQ plugin
-- **MCP server support**: remote servers proxied through BorgIQ, MCP Server Actors inside BorgIQ, and stdio subprocess servers
-- **Network isolation**: Fine-grained allow/deny lists enforced via iptables firewall
-- **Output artifacts**: Returns workspace zip and harness session data zip
+| `harness` | CLI | Models | BorgIQ tools reach it as | Session data |
+|---|---|---|---|---|
+| `claude` (default) | Claude Code | Anthropic agent models | Skills in an auto-generated plugin, `~/borgiq-plugin/` | `~/.claude` |
+| `codex` | Codex | OpenAI agent models | A BorgIQ MCP server in the sandbox | `~/.codex` |
+| `opencode` | OpenCode | Every agent model | The same BorgIQ MCP server | `~/.local/share/opencode` |
+| `pi` | pi | Every agent model | A generated pi extension (pi has no stdio MCP) | `~/.pi` |
 
-### Execution Flow
+A run:
 
-1. A sandbox is provisioned (E2B or Daytona)
-2. `volumeZipFile` (if provided) is extracted to `~/workspace/`
-3. Claude Code starts in the working directory with the given prompt
-4. Claude executes commands, writes files, calls tools as needed
-5. On completion, the workspace is zipped and returned as `outputZipFile`
-6. The harness session data (`~/.claude` for Claude Code, `~/.codex` for Codex) is returned as `sessionDataFile`
-7. The sandbox remains hot for 5 minutes for fast continuation, then shuts down
+1. provisions a sandbox, or reuses the session's hot one;
+2. extracts `volumeZipFile` (if any) to `~/workspace/`;
+3. starts the harness in the working directory with the prompt; it runs commands, writes files and calls tools;
+4. on completion returns the workspace as `outputZipFile` and the harness session data as `sessionDataFile`;
+5. keeps the sandbox hot for 5 minutes for fast continuation, then shuts it down.
 
-## Key Differences from AiAgentActor
+Choose between the AI actors with the `borgiq-agent-builder` skill's matrix. Use the harness for a harness CLI itself
+(skills, slash commands, plugins), stdio MCP servers, custom CLI tools, background processes (dev servers, daemons),
+firewall-enforced isolation of every process, or heavy environments (large installs, big builds). It starts in tens
+of seconds to minutes (sandbox provision plus harness install) and is billed by sandbox wall-clock time; for plain
+file, script and tool-orchestration work, AiAgentActor starts in seconds on serverless billing.
 
-> Both actors are now coding agents with a workspace, bash, sessions, and BorgIQ actor tools. AiAgentActor runs a pi coding agent in checkpointed serverless segments; AgentHarnessActor runs Claude Code in a full sandbox VM. See [ai-agent-actor.md](ai-agent-actor.md) for the AI Agent's own reference (and [deprecated-ai-agent.md](deprecated-ai-agent.md) if you're looking at the pre-2026 loop agent this table used to compare against).
+## Skills as a Workflow Node
 
-| Aspect | AiAgentActor | AgentHarnessActor |
-|--------|-------------|-------------------|
-| **Runtime** | Serverless segments on the workspace runtime (checkpointed) | Isolated sandbox VM (E2B or Daytona) |
-| **Harness** | pi coding agent | Claude Code (skills, slash commands, plugins) |
-| **Code execution** | Built-in `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls` against a private workspace, plus an opt-in `code_execution` tool (`enableCodeExecution`) that runs workspace TypeScript/JavaScript with Deno; no package installs | Full machine: Bash, file I/O, package installs, PTY |
-| **Startup latency** | Low (serverless invoke; cold restore adds seconds) | Sandbox provision + harness install (tens of seconds to minutes) |
-| **Session reuse** | `sessionId` + checkpoint restore (7-day sliding TTL) | `sessionId` + sandbox/session zips, queued messages |
-| **Background processes** | Not supported (nothing survives a segment boundary) | Supported within sandbox lifetime |
-| **Network control** | Deno-level allow/deny lists across the whole tool runtime, bash included | Fine-grained allow/deny lists enforced with iptables |
-| **MCP servers** | Remote (`type: http`) + BorgIQ (`type: borgiq`) | Those two plus stdio subprocess servers |
-| **Output artifacts** | Final text + workspace zip + pi session data zip | Final text + workspace zip + harness session data zip |
-| **Environment vars** | Supported (encrypted in transit; reserved names rejected) | Full support (encrypted in transit) |
-| **Tools** | Built-ins + BorgIQ actors via `aiAgentToolActorIds` | Claude Code built-in tools + BorgIQ actors + MCP servers |
-| **Timeout** | `timeoutInMinutes` across segments (default 30); no per-invocation wall-clock cap | Explicit timeout in minutes (default 15) |
-| **Cost model** | Serverless billing on the workspace runtime | Sandbox VM wall-clock billing |
-
-## When to Use AgentHarnessActor vs AiAgentActor
-
-| Scenario | Recommended Actor |
-|----------|-------------------|
-| File/data processing, scripting, code-run-iterate loops | **AiAgentActor** |
-| Orchestrate BorgIQ tool actors (API calls, sub-flows) | **AiAgentActor** |
-| Multi-turn sessions with persistent workspace | Either — both support `sessionId` continuation |
-| Claude Code skills / slash commands / plugins | **AgentHarnessActor** |
-| Need a stdio MCP server or custom CLI tools | **AgentHarnessActor** |
-| Background processes (dev servers, daemons) | **AgentHarnessActor** |
-| Firewall-enforced network isolation for all processes | **AgentHarnessActor** |
-| Heavy environments (large installs, big builds) | **AgentHarnessActor** |
-| Cost-sensitive / minimize startup latency | **AiAgentActor** |
-
-Rule of thumb: start with AiAgentActor; step up to AgentHarnessActor when you need Claude Code itself, stdio MCP servers, daemons, or a full VM.
-
-## The "Claude in a Box" Pattern
-
-The power of AgentHarnessActor is that **any business process you can codify as Claude Code commands or skills becomes a reusable workflow node**. This inverts the traditional automation approach:
-
-- **Traditional:** Write imperative code for every step (parse this, transform that, call this API, format the output)
-- **Claude in a Box:** Describe the outcome, supply the right context (skills, CLAUDE.md, input files), and let Claude Code figure out the steps
-
-### How It Works
-
-1. **Codify the process** — Create Claude Code skills (slash commands, CLAUDE.md instructions, reference files) that encode your business logic, conventions, and domain knowledge
-2. **Package as context** — Use a `volumeZipFile` to deliver those skills, instructions, and input data into the sandbox workspace
-3. **Prompt the outcome** — The actor's `prompt` describes what needs to be done, referencing the skills available in the workspace
-4. **Extract the result** — Downstream actors pull specific output files from the `outputZipFile` or read structured data from the result
-
-### Examples of Codified Business Processes
-
-| Business Process | Claude Code Skill/Command | As a Workflow Node |
-|-----------------|--------------------------|-------------------|
-| Code review against team standards | `/review` skill with team conventions in CLAUDE.md | PR webhook → AgentHarness runs review → posts comments |
-| Generate API client from OpenAPI spec | `/generate-client` skill with language templates | Spec file uploaded → AgentHarness generates code → zip output |
-| Data migration between schemas | Migration skill with schema mappings | Scheduled trigger → AgentHarness runs migration → reports results |
-| Security audit of dependencies | `/audit` skill with policy rules | Nightly trigger → AgentHarness audits → sends email report |
-| Document generation from structured data | `/generate-report` skill with templates | Data arrives via webhook → AgentHarness generates PDF → stores in collection |
-| Competitive analysis research | `/research` skill with search + extraction tools | Button trigger → AgentHarness researches → returns structured findings |
-
-### Why Skills Matter
-
-Without skills, the AgentHarnessActor is a general-purpose Claude Code session — capable but unbounded. With skills loaded into the workspace:
-
-- **Consistency** — The same skill produces the same kind of output every time, regardless of prompt variation
-- **Domain encoding** — Business rules, naming conventions, output formats, and quality checks are encoded once and reused
-- **Composability** — A skill that works at a terminal works identically as a workflow node — no rewriting required
-- **Versioning** — Update the skill zip, and every workflow using it gets the new behavior
-
-### Minimal Pattern
+Codify the process once as skills, slash commands and project instructions (for Claude Code: `CLAUDE.md` and
+`.claude/skills/`). Deliver them with the input data in a `volumeZipFile`, keep the `prompt` to *what* to do (the skills
+encode *how*), and pull the results out of `outputZipFile` downstream. The same skill then produces the same kind of
+output on every run, and updating the zip updates every workflow that uses it.
 
 ```yaml
-# 1. Build context zip with skills and input files
+# 1. Build the context zip (skills, instructions, input data)
 ACTR01context:
   type: DenoActor
   name: Build Context
@@ -141,13 +73,10 @@ ACTR01context:
           import { stashFile } from "@borgiq/actors";
           export default async function receive(req: Request): Promise<Response> {
             const zip = new JSZip();
-            // Add CLAUDE.md with instructions
             zip.file("CLAUDE.md", "# Instructions\nUse /analyze to process the input data.");
-            // Add the skill
             zip.file(".claude/skills/analyze/SKILL.md", req.inputs.skillContent);
-            // Add input data
             zip.file("input/data.json", JSON.stringify(req.inputs.data));
-            // Generate the zip and stash it to BorgIQ storage (requires allowNet: true)
+            zip.folder("outputs");
             const zipBuffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
             const contextZip = await stashFile(zipBuffer, "context.zip", "application/zip");
             return { results: { contextZip } };
@@ -155,7 +84,7 @@ ACTR01context:
     options:
       allowNet: true  # required for stashFile
 
-# 2. Run Claude Code with the context
+# 2. Run the harness on it
 ACTR01agent:
   type: AgentHarnessActor
   name: Run Analysis
@@ -168,7 +97,8 @@ ACTR01agent:
       sandboxProvider: e2b
 ```
 
-The key insight: the `prompt` stays simple because the complexity lives in the skills. The skill encodes *how* to analyze; the prompt just says *what* to analyze.
+The context DenoActor can also fetch skill directories (for example from GitHub) into the zip. Pass the API keys the
+skills need through [credentials and `env`](#credentials-and-environment-variables).
 
 ## Configuration Structure
 
@@ -227,551 +157,103 @@ actors:
     edges: {}
 ```
 
-## Source Ports
-
-AgentHarnessActor has two source ports:
-
-| Port ID | Name | Description |
-|---------|------|-------------|
-| `SPRTdone000` | Done | Emits final result when agent completes (success, timeout, or error) |
-| `SPRTdefault` | Status | Emits real-time updates during execution |
-
-### Done Port Output
-
-The Done port emits when the agent completes:
-
-```json
-{
-  "sessionId": "session-abc123",
-  "success": true,
-  "result": "...",
-  "outputZipFile": {
-    "id": "file-xyz",
-    "name": "workspace-output.zip",
-    "mimeType": "application/zip",
-    "size": 12345
-  },
-  "sessionDataFile": {
-    "id": "file-abc",
-    "name": "claude-session-data.zip",
-    "mimeType": "application/zip",
-    "size": 6789
-  },
-  "meta": {
-    "endReason": "completed",
-    "model": "claude-sonnet-5",
-    "duration": 45000,
-    "usage": {
-      "promptTokens": 1500,
-      "completionTokens": 800,
-      "totalTokens": 2300
-    }
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `sessionId` | The session ID (auto-generated or the custom ID you provided) |
-| `success` | Whether the execution completed successfully |
-| `result` | The result text/data from the agent |
-| `outputZipFile` | BIQFile reference to the workspace zip (if `returnOutputZipFile` is true) |
-| `sessionDataFile` | BIQFile reference to the harness session data zip (if `returnSessionDataFile` is true). The same file is also sent as the deprecated alias `claudeSessionDataFile` |
-| `meta.endReason` | Why the agent stopped: `completed`, `timeout`, or `error` |
-| `meta.model` | The Claude model used |
-| `meta.duration` | Total execution time in milliseconds |
-| `meta.usage` | Cumulative token usage |
-
-### Status Port Output
-
-The Status port emits real-time updates with five message types:
-
-**Agent Loop (response + tool calls, plus the model's thinking when the harness surfaced it):**
-
-```json
-{
-  "type": "agent-harness-loop",
-  "response": "I'll search for information on this topic using the available tools.",
-  "reasoning": "The question is about 2025 trends, so a fresh web search beats my training data.",
-  "toolCalls": [
-    {
-      "toolCallId": "toolu_01abc",
-      "toolName": "exa_search",
-      "input": { "query": "AI trends 2025" }
-    }
-  ],
-  "meta": {
-    "cwd": "/home/user/workspace",
-    "timestamp": 1711234567890
-  }
-}
-```
-
-`reasoning` is optional and clipped by the platform at 16 000 characters (a clipped one ends with `… [thinking truncated]`). The Codex, pi and OpenCode harnesses buffer assistant text until the next tool call, so they post the turn's thinking first as a **reasoning-only loop** (`response: ""`, `toolCalls: []`, `reasoning` set). Claude Code posts thinking on the loop that carries the tool call, and the final text-only turn's thinking on `agent-harness-complete`. Anthropic models whose thinking display is off return empty thinking, so those turns simply carry none.
-
-**Tool Result:**
-
-```json
-{
-  "type": "tool-result",
-  "toolCallId": "toolu_01abc",
-  "toolName": "exa_search",
-  "output": { "type": "json", "value": { "results": [...] } },
-  "isError": false,
-  "meta": { "cwd": "/home/user/workspace", "timestamp": 1711234567891 }
-}
-```
-
-**Error:**
-
-```json
-{
-  "type": "agent-harness-error",
-  "message": "Sandbox process died unexpectedly",
-  "code": "SANDBOX_DIED",
-  "meta": { "timestamp": 1711234567892 }
-}
-```
-
-**Notification:**
-
-```json
-{
-  "type": "agent-harness-notification",
-  "notificationType": "permission_prompt",
-  "title": "Permission Required",
-  "message": "Claude is requesting permission to install npm packages",
-  "meta": { "timestamp": 1711234567893 }
-}
-```
-
-Codex reasoning summaries used to arrive here as a notification with `notificationType: "reasoning"`; they are now posted as reasoning-only loops, and only old flowruns still carry the notification form.
-
-**Complete:**
-
-```json
-{
-  "type": "agent-harness-complete",
-  "message": "Execution completed successfully",
-  "response": "Here is the report: ...",
-  "reasoning": "All sections are written; summarize and stop.",
-  "meta": { "timestamp": 1711234567894 }
-}
-```
-
 ## Options Reference
 
-### Required
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `prompt` | string | The task instruction sent to Claude Code. This is the main directive. |
-
-### Optional
+All options live under `configuration.options`; only `prompt` is required.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `harness` | `claude` \| `codex` \| `opencode` \| `pi` | `claude` | The agent harness CLI to run in the sandbox. Use the exact lowercase string value (e.g. `claude`, not `Claude` or `BIQAgentHarnessType.Claude`). `model` must be one valid for the selected harness. |
-| `model` | string | first model of the harness's list | The model to use in the agent harness. Must be valid for the selected `harness`: `claude` accepts the Anthropic agent models (default `claude-sonnet-5`), `codex` the OpenAI agent models (default `gpt-6-sol`), and `opencode` / `pi` any `AiAgentModels` value (default `claude-sonnet-5`), resolving the credential from the chosen model's provider. See the AI Agent's [Available Models](ai-agent-actor.md#available-models) for the current lists. Harness models are enum-validated: workspace [custom providers](custom-ai-providers.md) (`<slug>/<model-id>`) are not available to the sandbox harnesses — use the AiAgentActor for those. |
-| `systemPrompt` | string | - | Additional context/instructions for Claude Code |
+| `prompt` | string | — | **Required.** The task instruction sent to the harness |
+| `harness` | `claude` \| `codex` \| `opencode` \| `pi` | `claude` | The harness CLI to run. Use the exact lowercase value (`claude`, not `Claude` or `BIQAgentHarnessType.Claude`) |
+| `model` | string | the harness's first model | Must be valid for `harness`: `claude` takes the Anthropic agent models (default `claude-sonnet-5`), `codex` the OpenAI ones (default `gpt-6-sol`), `opencode` and `pi` any agent model (default `claude-sonnet-5`), with the credential of the model's provider. Enum-validated: no custom providers (`<slug>/<model-id>`); use AiAgentActor for those. See [ai-models.md](ai-models.md) |
+| `systemPrompt` | string | — | Additional context and instructions for the harness |
 | `sandboxProvider` | `e2b` \| `daytona` | `e2b` | The sandbox infrastructure provider |
 | `sessionId` | string | auto-generated | Session ID to continue or create (max 64 characters) |
-| `volumeZipFile` | BIQFile | - | Zip file to extract into `~/workspace/` |
-| `workingDirectory` | string | - | Working directory relative to workspace (e.g., `my-project`) |
-| `timeoutInMinutes` | integer | `15` | Maximum execution time before session is terminated |
-| `maxLoopCount` | integer | unlimited | Maximum number of agentic loops (tool calls) |
-| `maxTokens` | integer | `16384` | Maximum tokens per Claude response |
-| `temperature` | number | `1` | Creativity level (0-1, lower = more deterministic) |
-| `allowedTools` | string[] | all tools | Whitelist specific Claude Code tools (empty = all allowed) |
-| `disallowedTools` | string[] | - | Blacklist specific Claude Code tools |
-| `allowNet` | boolean | `true` | Allow outbound network access from sandbox |
-| `allowNetList` | string[] | - | Only these hosts/CIDRs (plus system endpoints) are reachable. Ignored when `allowNet: false`, which blocks everything but system endpoints. Mutually exclusive with `denyNetList` |
-| `denyNetList` | string[] | - | Block these hosts/CIDRs; everything else stays reachable. Ignored when `allowNet: false`. Mutually exclusive with `allowNetList` |
-| `mcpServers` | object[] | - | MCP servers: `type: http` (remote, proxied), `type: borgiq` (an MCP Server Actor), `type: stdio` (subprocess) |
-| `env` | object | - | Environment variables (encrypted in transit) |
-| `returnOutputZipFile` | boolean | `true` | Include workspace zip in done port result |
-| `returnSessionDataFile` | boolean | `true` | Include the harness session data zip in done port result. `returnClaudeSessionDataFile` is its deprecated alias |
+| `volumeZipFile` | BIQFile | — | Zip file to extract into `~/workspace/` |
+| `workingDirectory` | string | — | Working directory relative to the workspace (e.g., `my-project`) |
+| `timeoutInMinutes` | integer | `15` | Maximum execution time before the session is terminated; raise it for complex tasks |
+| `maxLoopCount` | integer | unlimited | Maximum number of agentic loops (tool calls). Set it to bound runaway runs and cost |
+| `maxTokens` | integer | `16384` | Maximum tokens per response. Accepted, but not currently passed to the harness CLI |
+| `temperature` | number | `1` | 0–1. Accepted, but not currently passed to the harness CLI |
+| `allowedTools` | string[] | all tools | Allow-list of the harness's own tools (empty = all allowed) |
+| `disallowedTools` | string[] | — | Deny-list of the harness's own tools |
+| `allowNet` | boolean | `true` | Allow outbound network access from the sandbox |
+| `allowNetList` | string[] | — | Only these hosts/CIDRs (plus system endpoints) are reachable. Ignored when `allowNet: false`, which blocks everything but system endpoints. Mutually exclusive with `denyNetList` |
+| `denyNetList` | string[] | — | Block these hosts/CIDRs; everything else stays reachable. Ignored when `allowNet: false`. Mutually exclusive with `allowNetList` |
+| `mcpServers` | object[] | — | MCP servers: `type: http`, `type: borgiq` or `type: stdio`; see [agent-tools.md](agent-tools.md#mcp-servers-mcpservers) |
+| `env` | object | — | Environment variables (encrypted in transit) |
+| `returnOutputZipFile` | boolean | `true` | Include the workspace zip in the Done result |
+| `returnSessionDataFile` | boolean | `true` | Include the harness session data zip in the Done result. `returnClaudeSessionDataFile` is its deprecated alias |
 
-### aiAgentToolActorIds (for connected tools)
+Set both `return…` options to `false` for fast runs whose files nobody needs.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `aiAgentToolActorIds` | array | Array of actor IDs that Claude can use as tools in the sandbox |
+## Sandbox Providers and Network Control
 
-**Location:** `configuration.aiAgentToolActorIds` (sibling to `options`, NOT inside `options`)
-
-Connected tools are exposed as Claude Code skills via the auto-generated BorgIQ plugin in `~/borgiq-plugin/`.
-
-## Sandbox Providers
-
-### E2B (Default)
-
-- **Full internet access** by default
-- Ubuntu-based environment
-- Faster startup time
-- Pre-installed: Claude CLI, Node.js 22 LTS, uv, iptables, jq, zip
-- Best for: Tasks requiring external resources, npm/pip installs, API integrations
-
-### Daytona
-
-- **Isolated network** by default (no external internet)
-- Persistent volumes available
-- Best for: Sensitive code processing, internal-only workflows
-
-## Sandbox Architecture
-
-```
-$HOME/
-├── workspace/                      # Main working directory
-│   └── [contents of volumeZipFile] # Your uploaded files are extracted here
-│
-├── .claude/                        # Claude Code configuration
-│   ├── settings.json              # Claude Code settings and hooks
-│   ├── projects/                  # Conversation history (for session continuation)
-│   └── .credentials.json          # Authentication credentials
-│
-└── borgiq-plugin/                  # BorgIQ tools plugin (if tools connected)
-    ├── .claude-plugin/
-    │   └── plugin.json            # Plugin manifest
-    ├── scripts/
-    │   ├── invoke.sh              # Tool invocation script
-    │   └── .env                   # Session credentials
-    └── skills/                    # Tool skill definitions
-        └── {tool-name}/
-            └── SKILL.md           # Tool documentation
-```
-
-### How `workingDirectory` Affects Execution
-
-| Scenario | Claude runs from | Output zip contains |
-|----------|-----------------|---------------------|
-| `workingDirectory` not set | `~/workspace/` | Everything in `~/workspace/` |
-| `workingDirectory: "my-project"` | `~/workspace/my-project/` | Everything in `~/workspace/my-project/` |
-| `workingDirectory: "/tmp/work"` | `/tmp/work/` | Everything in `/tmp/work/` |
-
-**Key**: `volumeZipFile` always extracts to `~/workspace/` regardless of `workingDirectory`.
-
-## Network Control
+- **E2B (default):** full internet access by default; Ubuntu-based; faster startup; pre-installed Claude CLI, Node.js
+  22 LTS, uv, iptables, jq, zip. Best for tasks that need external resources, npm/pip installs and API integrations.
+- **Daytona:** isolated network by default (no external internet); persistent volumes available. Best for sensitive
+  code and internal-only workflows.
 
 | Scenario | Properties | Effect |
 |----------|-----------|--------|
 | Allow all (default) | `allowNet: true` | Full outbound access |
 | Block all outbound | `allowNet: false` | No network except AI provider & BorgIQ API |
 | Block all except specific | `allowNetList: ["api.example.com"]` (leave `allowNet` unset or `true`) | Only the listed hosts |
-| Allow all except specific | `allowNet: true`, `denyNetList: ["internal.corp.com"]` | All traffic except blacklisted |
+| Allow all except specific | `allowNet: true`, `denyNetList: ["internal.corp.com"]` | All traffic except the listed hosts |
 
-Network rules are enforced via iptables at sandbox launch. System endpoints (AI provider API, BorgIQ API) are always allowed and cannot be denied.
+Network rules are enforced via iptables at sandbox launch. System endpoints (AI provider API, BorgIQ API) are always
+allowed and cannot be denied.
+
+## Sandbox Layout and Working Directory
+
+```
+$HOME/
+├── workspace/                      # volumeZipFile is extracted here
+├── .claude/                        # Claude Code: settings.json (settings, hooks), projects/ (history), .credentials.json
+└── borgiq-plugin/                  # Claude Code: the BorgIQ tools plugin, when tools are connected
+    ├── .claude-plugin/plugin.json
+    ├── scripts/invoke.sh           # tool invocation script (+ .env with session credentials)
+    └── skills/{tool-name}/SKILL.md # one skill per tool
+```
+
+| `workingDirectory` | The harness runs from | The output zip contains |
+|---|---|---|
+| not set | `~/workspace/` | Everything in `~/workspace/` |
+| `my-project` | `~/workspace/my-project/` | Everything in `~/workspace/my-project/` |
+| `/tmp/work` | `/tmp/work/` | Everything in `/tmp/work/` |
+
+`volumeZipFile` always extracts to `~/workspace/`, whatever `workingDirectory` says.
 
 ## Session Continuation
 
-### How It Works
+- **First run**: leave `sessionId` empty (`''`) for an auto-generated ID, returned on the Done port. For
+  deterministic continuation use a custom ID (`my-research-session-001`) or one from upstream data
+  (`${{ msg.trigger.customerId }}`).
+- **Later runs**: pass the same `sessionId` to continue with the sandbox state and conversation history.
+- **One run per session at a time**: a run that targets an active session is queued, and queued runs start FIFO when
+  the current one completes. The session lock expires after the timeout plus 5 minutes, so a crashed run cannot
+  deadlock the session.
+- **Lifecycle**: after a run the sandbox stays hot for 5 minutes. Then the workspace and harness session data are
+  snapshotted, the sandbox is destroyed and the queue drained; the next run restores both into a new sandbox. Sessions
+  expire after 7 days.
 
-1. **First execution** — no `sessionId` provided, auto-generated ID returned in result
-2. **Subsequent executions** — pass the `sessionId` to continue the session
-3. **Queue pattern** — if a session is already active, the new execution is queued and starts when the current one completes
+## Tools and MCP Servers
 
-### Session Lifecycle
+Wire BorgIQ actors as tools with `aiAgentToolActorIds`, exactly as for AiAgentActor, and add MCP servers with
+`mcpServers` (`http`, `borgiq`, `stdio`): see [agent-tools.md](agent-tools.md). Specific to the harness:
 
-1. **Active Execution**: Sandbox runs Claude Code
-2. **Hot Duration (5 minutes)**: After completion, sandbox stays alive for fast continuation
-3. **Scheduled Shutdown**: Workspace snapshot saved, harness session data saved, sandbox destroyed, queue drained
-4. **Cold Restoration**: New sandbox created, workspace and session data restored from snapshots
-5. **Expiration**: Sessions expire after 7 days
-
-### Queuing & Locking
-
-Only one execution can use a session at a time:
-
-- New executions targeting an active session are **queued**
-- Queued jobs are processed FIFO when the current execution completes
-- Locks have a TTL (timeout + 5 minute buffer) to prevent deadlocks
-- Queue operations are atomic via Redis Lua scripts
-
-### Session ID Best Practices
-
-```yaml
-# Auto-generated session ID (one-off execution)
-sessionId: ''
-
-# Custom session ID for deterministic continuation
-sessionId: my-research-session-001
-
-# Dynamic session ID from upstream data
-sessionId: ${{ msg.trigger.customerId }}
-```
-
-## MCP Servers
-
-Configure MCP servers available to the harness. Three kinds, distinguished by `type`:
-
-```yaml
-options:
-  mcpServers:
-    # Remote server, proxied through BorgIQ. The sandbox only ever receives the
-    # BorgIQ gateway URL and its own session token — never the upstream URL or
-    # your credentials. Auth resolves per request, so OAuth tokens refresh mid-session.
-    - type: http
-      name: linear
-      url: https://mcp.linear.app/mcp
-      auth: ${{ credentials.linearMcp }}
-
-    # An MCP Server Actor elsewhere in BorgIQ. No auth — the agent's session is
-    # already scoped to exactly the servers listed here. Slugs default to this
-    # actor's own workspace/canvas.
-    - type: borgiq
-      name: support-tools
-      actorId: ACTR01mcpserveractorid00000000   # the McpServerActor on your canvas
-      canvasSlug: support-desk        # optional
-      workspaceSlug: otherws          # optional
-
-    # Subprocess inside the sandbox. Not supported by the Pi harness.
-    - type: stdio
-      name: filesystem-server
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
-      env:
-        LOG_LEVEL: info
-```
-
-Every entry needs a unique `name` (letters, numbers, hyphens, underscores). `type: http`
-also requires `url`; `type: borgiq` requires `actorId`; `type: stdio` requires `command`
-and treats `args`/`env` as optional. An entry with no `type` is read as stdio, for
-back-compat with configs written before remote servers existed.
-
-Protocol versions are the CLI's business, not yours. Each harness ships its own MCP client and
-negotiates MCP `2026-07-28` (the stateless core) or the older `initialize` handshake with the
-server directly; BorgIQ forwards the traffic without reshaping it. The BorgIQ tool server generated
-into the sandbox for Codex and OpenCode serves both, so it works whichever the CLI picks.
-
-Secrets never travel in the clear: stdio `env` values and literal `http` auth values are
-encrypted in transit, and connection-backed auth is resolved server-side per request.
-
-## Connecting Tools
-
-Tool actors are connected to AgentHarnessActor via `aiAgentToolActorIds`, exactly like AiAgentActor. Connected tools become Claude Code skills inside the sandbox.
-
-### Tool Invocation Pattern (fire-then-poll)
-
-1. Claude calls a tool via the BorgIQ plugin's `invoke.sh`
-2. `invoke.sh` sends `POST /sandbox/invoke-tool` to BorgIQ API
-3. BorgIQ queues the tool actor and initializes a pending Redis key
-4. `invoke.sh` long-polls `POST /sandbox/poll-tool-result` (25-second intervals)
-5. When the tool completes, the result is returned to Claude
-6. Default tool timeout: 30 seconds
-
-### Tool Actor Configuration
-
-Tool actors follow the same pattern as AiAgentActor tools:
-
-```yaml
-ACTR01toolactor:
-  type: HttpRequestActor
-  version: 1
-  name: Exa Search
-  msgVar: exa_search
-  description: Search the web using Exa API
-  isActive: true
-  continueOnError: true
-  sourcePorts:
-    - id: SPRTdefault
-  configuration:
-    inputs:
-      query: ${{aiInput}}
-    options:
-      url: https://api.exa.ai/search
-      method: POST
-      body:
-        query: ${{ inputs.query }}
-      auth: ${{ connection.auth }}
-    connection:
-      key: exa
-  schemas:
-    inputs:
-      type: object
-      properties:
-        query:
-          type: string
-          description: The search query
-      required:
-        - query
-  edges: {}  # IMPORTANT: Empty edges for tool actors
-```
-
-## Volume Zip File and Working Directory
-
-The `volumeZipFile` provides initial files to the sandbox. Common pattern: use a DenoActor to build a context zip containing skills, configuration, and project files, then pass it to the AgentHarnessActor.
-
-### What Goes in the Volume Zip
-
-```
-volumeZipFile contents:
-├── CLAUDE.md                   # Instructions for Claude Code
-├── .claude/
-│   └── skills/                 # Claude Code skills
-│       └── my-skill/
-│           └── SKILL.md
-├── inputs/                     # Input files for the task
-│   └── data.csv
-└── outputs/                    # Directory for Claude to write results
-```
-
-### Passing the Volume
-
-```yaml
-# From a DenoActor that builds the zip
-options:
-  volumeZipFile: ${{ msg.build_context.file }}
-  workingDirectory: ''  # Claude runs from ~/workspace/ where the zip was extracted
-```
-
-## Building Context with a DenoActor
-
-A powerful pattern is using a DenoActor upstream to build a context zip file with skills, CLAUDE.md instructions, and input/output directories. The DenoActor downloads skills from GitHub, creates the directory structure, and returns a zip file via `stashFile()`.
-
-**Key elements of a context-building DenoActor:**
-
-1. **Create CLAUDE.md** at the zip root — this becomes Claude Code's project instructions
-2. **Create `.claude/skills/`** — populate with skill directories from GitHub or other sources
-3. **Create `inputs/` and `outputs/`** — standard directories for task data
-4. **Use `stashFile()`** to upload the zip to BorgIQ storage and return a BIQFile reference
-5. **Pass environment variables** via `env` and `credentials` on the AgentHarnessActor for API keys needed by skills
-
-```yaml
-# DenoActor builds context, then AgentHarnessActor uses it
-# DenoActor -> AgentHarnessActor -> DenoActor (extract output)
-
-# Agent harness receives the zip
-ACTR01agent:
-  type: AgentHarnessActor
-  configuration:
-    options:
-      prompt: Research the topic and write results to outputs/report.md
-      volumeZipFile: ${{ msg.build_context.file }}
-      model: claude-sonnet-4-5
-      env:
-        API_KEY: ${{ credentials.api_key }}
-      sessionId: ''
-    credentials:
-      api_key:
-        workspaceKey: my-api-key
-    aiAgentToolActorIds: []
-```
-
-## Extracting Output Files
-
-After the AgentHarnessActor completes, the `outputZipFile` contains all files in the working directory. Use a downstream DenoActor to extract specific files:
-
-```yaml
-# Extract specific files from the output zip
-ACTR01extract:
-  type: DenoActor
-  name: Extract Output
-  msgVar: extract_output
-  configuration:
-    codeDir:
-      - path: main.ts
-        content: |
-          import JSZip from "npm:jszip@3.10.1";
-          import type { Request, Response } from "@borgiq/actors";
-          import { mountFile } from "@borgiq/actors";
-
-          export default async function receive(req: Request): Promise<Response> {
-            const { file, paths } = req.inputs;
-            const filePath = await mountFile(file);
-            const fileBytes = await Deno.readFile(filePath);
-            const zip = await JSZip.loadAsync(fileBytes);
-
-            const extracted = [];
-            for (const requestedPath of paths) {
-              const normalizedPath = requestedPath.replace(/^\/+/, "");
-              const zipEntry = zip.files[normalizedPath];
-              if (!zipEntry || zipEntry.dir) {
-                extracted.push({ fileName: normalizedPath, content: "" });
-                continue;
-              }
-              const content = await zipEntry.async("string");
-              extracted.push({ fileName: normalizedPath.split("/").pop() || normalizedPath, content });
-            }
-
-            return { results: { files: extracted } };
-          }
-    inputs:
-      file: ${{ msg.research_agent.outputZipFile }}
-      paths:
-        - outputs/report.md
-    options:
-      allowNet: true
-      allowFs: true
-```
-
-## Results Object
-
-### Done Port Result
-
-```typescript
-interface AgentHarnessActorResult {
-  sessionId: string;
-  success: boolean;
-  result?: unknown;
-  outputZipFile?: BIQFile;        // Workspace zip (if returnOutputZipFile is true)
-  sessionDataFile?: BIQFile;      // Harness session data zip (if returnSessionDataFile is true)
-  meta: {
-    endReason: 'completed' | 'timeout' | 'error';
-    model?: string;
-    duration?: number;             // Milliseconds
-    usage?: {
-      promptTokens?: number;
-      completionTokens?: number;
-      totalTokens?: number;
-    };
-  };
-}
-```
-
-### Status Port Result
-
-```typescript
-type AgentHarnessStatusPortResult =
-  | {
-      type: 'agent-harness-loop';
-      response: string;            // '' on a reasoning-only loop
-      reasoning?: string | null;   // the model's thinking, clipped at 16 000 chars
-      toolCalls?: AiToolCall[];
-      meta: { cwd?: string; timestamp: number };
-    }
-  | {
-      type: 'tool-result';
-      toolCallId: string;
-      toolName: string;
-      output: AiToolMessageOutput;
-      isError?: boolean;
-      meta: { cwd?: string; timestamp: number };
-    }
-  | {
-      type: 'agent-harness-error';
-      message: string;
-      code?: string;
-      meta: { cwd?: string; timestamp: number };
-    }
-  | {
-      type: 'agent-harness-notification';
-      notificationType?: string;
-      title?: string;
-      message?: string;
-      meta: { cwd?: string; timestamp: number };
-    }
-  | {
-      type: 'agent-harness-complete';
-      message?: string;
-      response?: string;           // the final assistant text, when the harness reported one
-      reasoning?: string | null;   // the final turn's thinking (Claude Code reports a text-only final turn only here)
-      meta: { cwd?: string; timestamp: number };
-    };
-```
+- The tools reach each harness as the table in [Overview](#overview) shows. A call starts the tool actor, then polls
+  BorgIQ for its result (with Claude Code, through the plugin's `invoke.sh`): up to 15 polls of 25 seconds, so a tool
+  that takes longer than about six minutes fails the call.
+- An `mcpServers` entry without `type` is **stdio**. The `pi` harness takes no stdio servers.
+- Each harness CLI uses its own MCP client and negotiates the protocol version with the server; BorgIQ forwards the
+  traffic unchanged. The BorgIQ tool server generated for Codex and OpenCode serves both protocol eras.
+- For a remote server the sandbox receives only the BorgIQ gateway URL and its own session token, never the upstream
+  URL or your credentials.
 
 ## Credentials and Environment Variables
 
-AgentHarnessActor supports passing secrets to the sandbox as environment variables:
+Never put secrets in prompts. Map each one in `configuration.credentials` and pass it in `env`:
 
 ```yaml
 configuration:
@@ -787,374 +269,141 @@ configuration:
       workspaceKey: serpapi
 ```
 
-- `credentials` maps a local key to a workspace connection key
-- `${{ credentials.firecrawl }}` resolves the credential value at runtime
-- Values are encrypted during transit to the sandbox
-- Environment variables are available to Claude Code and any processes it spawns
+- `credentials` maps a local key to a workspace connection key; `${{ credentials.firecrawl }}` resolves the value at
+  run time.
+- Values are encrypted in transit to the sandbox, and the variables are visible to the harness and every process it
+  spawns.
 
-## Common Patterns
+## Extracting Output Files
 
-### Simple Code Generation (No Volume)
-
-```yaml
-options:
-  prompt: |
-    Create a Python script that reads a CSV file and generates
-    a summary report. Save it as report_generator.py
-  model: claude-sonnet-4-6
-  timeoutInMinutes: 10
-  returnOutputZipFile: true
-```
-
-### Session Continuation
+`outputZipFile` holds every file in the working directory. Pull out the ones you need with a downstream DenoActor
+rather than processing the whole zip:
 
 ```yaml
-# First execution
-options:
-  prompt: Set up a Node.js project with Express and write a basic REST API
-  sessionId: my-project-session
-
-# Second execution (continues the session)
-options:
-  prompt: Now add authentication middleware and a /users endpoint
-  sessionId: my-project-session
-```
-
-### Deep Research with Skills
-
-```yaml
-# Agent harness with skills loaded via volumeZipFile
-options:
-  prompt: |
-    Research the topic and write a comprehensive report to outputs/report.md.
-    Use the SerpAPI skill to search and Firecrawl to extract page content.
-  volumeZipFile: ${{ msg.build_context.file }}
-  model: claude-sonnet-4-5
-  env:
-    FIRECRAWL_API_KEY: ${{ credentials.firecrawl }}
-    SERPAPI_API_KEY: ${{ credentials.serpapi }}
-```
-
-### Network-Restricted Code Processing
-
-```yaml
-options:
-  prompt: Review the uploaded codebase for security vulnerabilities
-  volumeZipFile: ${{ msg.upload.file }}
-  allowNet: false
-  sandboxProvider: daytona
-  timeoutInMinutes: 30
-```
-
-### Agent with Connected BorgIQ Tools
-
-```yaml
-# AgentHarnessActor with tool actors
-ACTR01agent:
-  type: AgentHarnessActor
+ACTR01extract:
+  type: DenoActor
+  name: Extract Output
+  msgVar: extract_output
   configuration:
+    codeDir:
+      - path: main.ts
+        content: |
+          import JSZip from "npm:jszip@3.10.1";
+          import type { Request, Response } from "@borgiq/actors";
+          import { mountFile } from "@borgiq/actors";
+
+          export default async function receive(req: Request): Promise<Response> {
+            const { file, paths } = req.inputs;
+            if (!file) throw new Error("Missing required input: file");
+            const filePath = await mountFile(file);
+            const zip = await JSZip.loadAsync(await Deno.readFile(filePath));
+
+            const extracted = [];
+            for (const requestedPath of paths) {
+              const normalizedPath = requestedPath.replace(/^\/+/, "");
+              const zipEntry = zip.files[normalizedPath];
+              if (!zipEntry || zipEntry.dir) {
+                extracted.push({ fileName: normalizedPath, content: "" });
+                continue;
+              }
+              const content = await zipEntry.async("string");
+              extracted.push({ fileName: normalizedPath.split("/").pop() || normalizedPath, content });
+            }
+            return { results: { files: extracted } };
+          }
+    inputs:
+      file: ${{ msg.research_agent.outputZipFile }}
+      paths:
+        - outputs/report.md
     options:
-      prompt: |
-        Search for information about the topic, get page contents,
-        then write a summary to output.md
-      model: claude-sonnet-4-6
-      allowNet: false
-    aiAgentToolActorIds:
-      - ACTR01exasearch   # Exa Search tool
-      - ACTR01exacontents # Exa Get Contents tool
+      allowNet: true
+      allowFs: true
 ```
 
-### Fast Execution (No File Output)
+## Source Ports
 
-```yaml
-options:
-  prompt: What is 2 + 2? Reply with just the number.
-  returnOutputZipFile: false
-  returnSessionDataFile: false
-  timeoutInMinutes: 5
-```
+| Port ID | Name | Emits |
+|---------|------|-------|
+| `SPRTdone000` | Done | Once, when the run completes, times out or fails |
+| `SPRTdefault` | Status | Real-time updates while the harness runs |
 
-## Complete Example: Deep Research Agent with Context Building
+**Done port:**
 
-This example shows the full pattern: DenoActor builds context zip -> AgentHarnessActor runs research -> DenoActor extracts output.
+| Field | Description |
+|-------|-------------|
+| `sessionId` | The session ID (auto-generated or the one you set) |
+| `success` | Whether the run completed successfully |
+| `result` | The final assistant text, or the error message |
+| `outputZipFile` | The workspace zip (when `returnOutputZipFile` is true) |
+| `sessionDataFile` | The harness session data zip (when `returnSessionDataFile` is true). The same file is also sent as the deprecated alias `claudeSessionDataFile` |
+| `meta.endReason` | `completed`, `timeout`, or `error` |
+| `meta.model` | The model used |
 
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  # Step 1: Build context zip with skills and CLAUDE.md
-  ACTR01kd6build0000000000000000:
-    type: DenoActor
-    version: 1
-    name: Build Context
-    msgVar: build_context
-    description: Downloads skills from GitHub, builds .claude/skills/ directory, creates CLAUDE.md
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      codeDir:
-        - path: main.ts
-          content: |
-            import JSZip from "npm:jszip@3.10.1";
-            import type { Request, Response } from "@borgiq/actors";
-            import { stashFile } from "@borgiq/actors";
+The result type also declares optional `meta.duration` and `meta.usage`; they are not set, so do not read them.
 
-            export default async function receive(req: Request): Promise<Response> {
-              const { skills, claudeMd } = req.inputs;
-              if (!Array.isArray(skills) || skills.length === 0) {
-                throw new Error("Missing required input: skills (array of GitHub URLs)");
-              }
+**Status port** (`type`, then fields; every message has `meta.timestamp`, most also `meta.cwd`):
 
-              const zip = new JSZip();
-              zip.file("CLAUDE.md", claudeMd);
-              zip.folder("inputs");
-              zip.folder("outputs");
+| `type` | Fields |
+|---|---|
+| `agent-harness-loop` | `response`, `toolCalls` (`toolCallId`, `toolName`, `input`), optional `reasoning` |
+| `tool-result` | `toolCallId`, `toolName`, `output` (e.g. `{ type: json, value }`), `isError` |
+| `agent-harness-error` | `message`, optional `code` (e.g. `SANDBOX_DIED`) |
+| `agent-harness-notification` | `notificationType` (e.g. `permission_prompt`, `idle_prompt`), `title`, `message` |
+| `agent-harness-complete` | `message`, optional `response` (the final text) and `reasoning` |
 
-              // Download and add skills to .claude/skills/
-              // (skill downloading logic here — fetch from GitHub tree API)
-
-              const zipBuffer = await zip.generateAsync({
-                type: "uint8array",
-                compression: "DEFLATE",
-                compressionOptions: { level: 6 },
-              });
-
-              const biqFile = await stashFile(zipBuffer, "skills-directory.zip", "application/zip");
-              return { results: { success: true, file: biqFile } };
-            }
-      inputs:
-        skills:
-          - https://github.com/vm0-ai/vm0-skills/tree/main/firecrawl
-          - https://github.com/vm0-ai/vm0-skills/tree/main/serpapi
-        claudeMd: |
-          # Deep Research Agent
-          You are a deep research agent. Use SerpAPI for discovery and
-          Firecrawl for content extraction. Write results to outputs/.
-      options:
-        allowNet: true
-        allowFs: true
-    schemas:
-      inputs:
-        type: object
-        properties:
-          skills:
-            type: array
-            title: Skill URLs
-            items:
-              type: string
-          claudeMd:
-            type: string
-            title: CLAUDE.md Content
-        required:
-          - skills
-          - claudeMd
-    id: ACTR01kd6build0000000000000000
-    position:
-      x: 0
-      'y': -200
-    edges:
-      EDGE01build_to_agent:
-        id: EDGE01build_to_agent
-        sourceActorId: ACTR01kd6build0000000000000000
-        sourcePortId: SPRTdefault
-        targetActorId: ACTR01kd6agent0000000000000000
-        targetPortId: TPRTdefault
-        label: ''
-        type: borgiqEdge
-
-  # Step 2: Run Claude Code in sandbox with context
-  ACTR01kd6agent0000000000000000:
-    type: AgentHarnessActor
-    version: 1
-    name: Deep Research Agent
-    msgVar: deep_research_agent
-    description: Run Claude Code with skills to research and generate reports
-    isActive: true
-    continueOnError: false
-    enableLTM: true
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdone000
-        name: Done
-      - id: SPRTdefault
-        name: Status
-    configuration:
-      options:
-        prompt: |
-          Research the given topic thoroughly using the available skills.
-          Write your findings to outputs/report.md with proper citations.
-        volumeZipFile: ${{ msg.build_context.file }}
-        model: claude-sonnet-4-5
-        env:
-          FIRECRAWL_API_KEY: ${{ credentials.firecrawl }}
-          SERPAPI_API_KEY: ${{ credentials.serpapi }}
-        sessionId: ''
-      credentials:
-        firecrawl:
-          workspaceKey: firecrawl
-        serpapi:
-          workspaceKey: serpapi
-      aiAgentToolActorIds: []
-    schemas: {}
-    id: ACTR01kd6agent0000000000000000
-    position:
-      x: 0
-      'y': 0
-    edges:
-      EDGE01agent_to_extract:
-        id: EDGE01agent_to_extract
-        sourceActorId: ACTR01kd6agent0000000000000000
-        sourcePortId: SPRTdone000
-        targetActorId: ACTR01kd6extract000000000000000
-        targetPortId: TPRTdefault
-        label: Done
-        type: borgiqEdge
-
-  # Step 3: Extract output files from workspace zip
-  ACTR01kd6extract000000000000000:
-    type: DenoActor
-    version: 1
-    name: Extract Output
-    msgVar: extract_output
-    description: Extracts specific files from the agent harness output zip
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      codeDir:
-        - path: main.ts
-          content: |
-            import JSZip from "npm:jszip@3.10.1";
-            import type { Request, Response } from "@borgiq/actors";
-            import { mountFile } from "@borgiq/actors";
-
-            export default async function receive(req: Request): Promise<Response> {
-              const { file, paths } = req.inputs;
-              if (!file) throw new Error("Missing required input: file");
-              if (!paths?.length) throw new Error("Missing required input: paths");
-
-              const filePath = await mountFile(file);
-              const fileBytes = await Deno.readFile(filePath);
-              const zip = await JSZip.loadAsync(fileBytes);
-
-              const extracted = [];
-              for (const requestedPath of paths) {
-                const normalizedPath = requestedPath.replace(/^\/+/, "");
-                const zipEntry = zip.files[normalizedPath];
-                if (!zipEntry || zipEntry.dir) {
-                  extracted.push({ fileName: normalizedPath, content: "" });
-                  continue;
-                }
-                const content = await zipEntry.async("string");
-                extracted.push({
-                  fileName: normalizedPath.split("/").pop() || normalizedPath,
-                  content,
-                });
-              }
-
-              return {
-                results: {
-                  totalExtracted: extracted.filter(r => r.content.length > 0).length,
-                  files: extracted,
-                },
-              };
-            }
-      inputs:
-        file: ${{ msg.deep_research_agent.outputZipFile }}
-        paths:
-          - outputs/report.md
-      options:
-        allowNet: true
-        allowFs: true
-    schemas:
-      inputs:
-        type: object
-        properties:
-          file:
-            type: any
-            title: Zip File
-          paths:
-            type: array
-            title: File Paths
-            items:
-              type: string
-        required:
-          - file
-          - paths
-    id: ACTR01kd6extract000000000000000
-    position:
-      x: 0
-      'y': 200
-    edges: {}
-```
+`reasoning` is optional and clipped by the platform at 16 000 characters (a clipped one ends with `… [thinking truncated]`).
+The Codex, pi and OpenCode harnesses buffer assistant text until the next tool call, so they post the turn's thinking
+first as a **reasoning-only loop** (`response: ""`, `toolCalls: []`, `reasoning` set). Claude Code posts thinking on
+the loop that carries the tool call, and the final text-only turn's thinking on `agent-harness-complete`. Anthropic
+models whose thinking display is off return empty thinking, so those turns carry none. Old flowruns may carry Codex
+reasoning as a notification with `notificationType: "reasoning"`.
 
 ## Accessing Agent Harness Data in Downstream Actors
 
-### From Done Port
-
 ```yaml
-# Access session ID, output files, and metadata
+# From the Done port
 configuration:
   inputs:
     sessionId: ${{ msg.research_agent.sessionId }}
     success: ${{ msg.research_agent.success }}
     outputZip: ${{ msg.research_agent.outputZipFile }}
     endReason: ${{ msg.research_agent.meta.endReason }}
-    duration: ${{ msg.research_agent.meta.duration }}
-    totalTokens: ${{ msg.research_agent.meta.usage.totalTokens }}
 ```
 
-### From Status Port
-
 ```yaml
-# Process real-time status updates
+# From the Status port (quote the value: a plain YAML value cannot hold the ternary's ": ")
 configuration:
   inputs:
     eventType: ${{ msg.research_agent.type }}
-    content: ${{ msg.research_agent.type === 'agent-harness-loop' ? msg.research_agent.response : msg.research_agent.message }}
+    content: "${{ msg.research_agent.type === 'agent-harness-loop' ? msg.research_agent.response : msg.research_agent.message }}"
 ```
 
-## Use Cases
+## Common Patterns
 
-### Code Generation & Review
-Run Claude Code to generate, review, or refactor code in an isolated sandbox with full development tooling.
+```yaml
+# Continue a session: the second run picks up the first one's project
+options:
+  prompt: Now add authentication middleware and a /users endpoint
+  sessionId: my-project-session   # the first run used the same ID
 
-### Deep Research
-Build context with skills (web search, content extraction), run research tasks, and extract structured output.
+# Sensitive code, no network
+options:
+  prompt: Review the uploaded codebase for security vulnerabilities
+  volumeZipFile: ${{ msg.upload.file }}
+  allowNet: false
+  sandboxProvider: daytona
+  timeoutInMinutes: 30
 
-### Data Processing
-Process uploaded data files with Python/Node.js, generate analytics, and return results as zip.
+# BorgIQ tools only (the harness reaches them through BorgIQ even with allowNet: false)
+options:
+  prompt: Search for the topic, read the top pages, then write a summary to output.md
+  allowNet: false
+# aiAgentToolActorIds (sibling of options): the search and page-content tool actors
 
-### Multi-Turn Development
-Use session continuation to iteratively build projects across multiple executions.
-
-### Secure Code Processing
-Use Daytona provider with `allowNet: false` for processing sensitive code without external network access.
-
-### Automated Testing
-Upload a codebase via `volumeZipFile`, run tests, and extract results.
-
-## Best Practices
-
-1. **Use `volumeZipFile` for context** — Build a context zip with CLAUDE.md, skills, and input files using a DenoActor
-2. **Extract specific files from output** — Use a downstream DenoActor to pull specific files from `outputZipFile` rather than processing the entire zip
-3. **Set `maxLoopCount`** — Prevent runaway executions and control costs
-4. **Use `timeoutInMinutes` appropriately** — Default is 15 minutes; increase for complex tasks, decrease for simple ones
-5. **Use sessions for multi-step work** — Pass a consistent `sessionId` for iterative development tasks
-6. **Pass secrets via `env` + `credentials`** — Never hardcode API keys in prompts
-7. **Choose the right sandbox provider** — E2B for internet access, Daytona for isolation
-8. **Set `continueOnError: true` on tool actors** — Let Claude handle tool failures gracefully
-9. **Use lower temperature for deterministic tasks** — Code generation benefits from `temperature: 0` or `0.3`
-10. **Disable file output for fast tasks** — Set `returnOutputZipFile: false` and `returnSessionDataFile: false` when you don't need workspace files
-
-## TypeScript Schema Hint
-
-See [typescript/actorSchemas/task/agentHarness.md](typescript/actorSchemas/task/agentHarness.md) for the complete TypeScript definitions of AgentHarnessActor options, result schemas, and status port types.
+# Fast answer, no files back
+options:
+  prompt: What is 2 + 2? Reply with just the number.
+  returnOutputZipFile: false
+  returnSessionDataFile: false
+  timeoutInMinutes: 5
+```
