@@ -29,7 +29,7 @@ If several candidates exist, ask which one to validate. Prefer the bundle when i
 For a bundle directory, verify the capability and run bundle validation:
 
 ```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 borgiq bundle validate <dir>
 # Add --strict when requested or before deployment to make warnings fatal.
 ```
@@ -47,15 +47,17 @@ borgiq validate <file>
 If direct validation emits errors:
 
 1. Read each error literally — they reference actor IDs, field paths, and line numbers.
-2. For schema errors, cross-reference the relevant actor doc in `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/<actor-type>.md`.
+2. For schema errors, cross-reference the relevant actor doc in `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/<kebab-case-actor-type>.md` (e.g. `http-request-actor.md` for `HttpRequestActor`).
 3. For ID/edge errors, see `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/edges-and-positioning.md`.
 4. Fix the YAML directly. Re-run validate.
 
-If direct validation emits a post-process suggestion (renamed msgVar, regenerated ID), apply it:
+Once validation passes, optionally normalize the document:
 
 ```bash
 borgiq validate <file> --post-process --in-place
 ```
+
+`--post-process` does not validate and never renames a msgVar or regenerates an ID. It adds a missing `schemas: {}` to each actor and removes `label` from edges, skipping RouterActor and AiRouterActor; when it changes anything, it rewrites the whole file in the CLI's YAML formatting.
 
 ## After validation passes
 

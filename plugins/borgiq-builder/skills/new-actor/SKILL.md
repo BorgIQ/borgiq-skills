@@ -31,13 +31,23 @@ ACTOR_ID=$(borgiq generate id actor)
 MSG_VAR=$(borgiq generate msgvar "$ARGUMENTS[1]")
 ```
 
+## Actor type schema
+
+Ask the platform for the type's defaults instead of guessing them. This calls the API, so it needs a logged-in CLI (`borgiq auth login`); an unknown type returns 404:
+
+```bash
+borgiq actors schema <ActorType> --json
+```
+
+`defaultOptions` is the starting `configuration.options`, `sourcePorts.fixedPorts` lists the port IDs, `code.entrypoint` names the required entrypoint file, `supportsConnection` says whether it takes a `connection`, and `optionsSchema` describes every option.
+
 ## Detect bundle context
 
 If an explicit target directory contains `canvas.yaml`, or the current directory contains `canvas.yaml`, use the bundle branch below. Otherwise use the standalone YAML branch.
 
 !`test -f canvas.yaml && echo "BUNDLE:."; ls -d *.borgiq-canvas 2>/dev/null`
 
-If multiple bundles are present and no target was specified, ask which one. For a bundle, confirm `borgiq bundle --help` succeeds; if not, tell the user to upgrade `@borgiq/cli`.
+If multiple bundles are present and no target was specified, ask which one. For a bundle, confirm `borgiq help bundle` succeeds (`borgiq bundle --help` exits 0 even on a CLI without bundles); if not, tell the user to upgrade `@borgiq/cli`.
 
 ## Inside a canvas bundle
 
@@ -52,7 +62,7 @@ If multiple bundles are present and no target was specified, ask which one. For 
 borgiq bundle validate <bundle-dir> --strict
 ```
 
-7. Fill in the actor-specific `configuration.options` using the reference read in step 1 — a structurally valid but empty actor only fails at server validation or first flowrun. Then apply the spoke handoff from [After scaffolding](#after-scaffolding) and re-run `bundle validate` after the options are complete.
+7. Fill in the actor-specific `configuration.options` using the reference read in step 1 and the type's schema (see [Actor type schema](#actor-type-schema)) — a structurally valid but empty actor only fails at server validation or first flowrun. Then apply the spoke handoff from [After scaffolding](#after-scaffolding) and re-run `bundle validate` after the options are complete.
 
 Do not write `outputs/<msgVar>.yaml` in bundle context. Do not add a separate CommentActor as part of a single-actor scaffold unless the user requests documentation; that would be another actor requiring its own folder, index entry, and graph node.
 
@@ -60,10 +70,10 @@ Do not write `outputs/<msgVar>.yaml` in bundle context. Do not add a separate Co
 
 ### Build the starter YAML
 
-1. Read the actor-specific reference at `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/<lowercased-actor-type>.md` to find:
+1. Read the type's schema (see [Actor type schema](#actor-type-schema)) and the actor-specific reference at `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/<kebab-case-actor-type>.md` (e.g. `http-request-actor.md` for `HttpRequestActor`) to find:
    - The `version` field value
    - The minimum `configuration.options` required for the actor to be valid
-   - Whether the actor needs `connection`, `connections`, or `credentials`
+   - Whether the actor needs `connection` or `credentials`
 2. Build a YAML following the structure in the hub SKILL.md's **Common Actor Structure** section. Required top-level keys: `metadata`, `actors`. Inside the actor entry: `type`, `version`, `name`, `msgVar`, `description`, `isActive: true`, `continueOnError: false`, `sourcePorts: [{id: SPRTdefault}]`, `configuration` (with `inputs`, `options`, and `outputs` as relevant), `schemas.inputs` (start with `type: any` per generation rule #12), `id`, `position: {x: 0, y: 0}`, `edges: {}`.
 
    For `DenoActor`, `DenoTestActor`, `UniversalTriggerActor`, and `PythonActor`, the source goes in `configuration.codeDir` — a list of `{path, content}` files, sibling of `options`, containing the required entrypoint `main.ts` (`main.py` for Python):
@@ -80,7 +90,7 @@ Do not write `outputs/<msgVar>.yaml` in bundle context. Do not add a separate Co
              return { results: req.inputs };
            }
    ```
-3. Include a **CommentActor** at the top with setup notes, prerequisites, and a brief spec for what this actor does. Position it with negative `y` (`y: -300`) so it renders above the actor in the canvas (per hub generation rule #19).
+3. Do not add a CommentActor to a single-actor scaffold unless the user asks for documentation; a CommentActor belongs above a new multi-actor workflow. When one is requested, position it with negative `y` (`y: -300`) so it renders above the actor in the canvas.
 
 ### Write the file
 

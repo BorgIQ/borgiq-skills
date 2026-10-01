@@ -1,14 +1,14 @@
 ---
 name: deploy
-description: Deploy a BorgIQ canvas bundle directory or workflow YAML to the platform via the borgiq CLI. Confirms auth status first, validates the selected artifact, surfaces server-side errors verbatim, and returns the canvas URL.
+description: Deploy a BorgIQ canvas bundle directory or workflow YAML via the borgiq CLI. Confirms auth status first, validates the selected artifact, surfaces server-side errors verbatim, and reports the deployed canvas.
 disable-model-invocation: true
 argument-hint: "[path/to/bundle-or-workflow.yaml] [--workspace <slug>]"
-allowed-tools: Bash(borgiq auth*) Bash(borgiq bundle*) Bash(borgiq canvases*) Bash(borgiq workspaces*) Bash(borgiq connections*) Bash(borgiq credentials*) Bash(borgiq secrets*) Bash(borgiq assets*) Bash(ls*) Bash(test*)
+allowed-tools: Bash(borgiq auth*) Bash(borgiq bundle*) Bash(borgiq canvases*) Bash(borgiq canvas-actors*) Bash(borgiq workspaces*) Bash(borgiq connections*) Bash(borgiq secrets*) Bash(borgiq assets*) Bash(borgiq triggers*) Bash(borgiq flowruns*) Bash(ls*) Bash(test*)
 ---
 
 # /deploy — deploy a BorgIQ workflow
 
-Push the current canvas bundle or workflow YAML to BorgIQ and return the canvas URL. This is a real action with side effects — invoked by you, never auto-triggered.
+Push the current canvas bundle or workflow YAML to BorgIQ and report the deployed canvas. This is a real action with side effects — invoked by you, never auto-triggered.
 
 ## Confirm authentication
 
@@ -49,7 +49,7 @@ Cross-reference these against `connection.key`, credentials, and asset reference
 First confirm the installed CLI supports bundles, then validate the directory:
 
 ```bash
-borgiq bundle --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
+borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
 borgiq bundle validate <dir> --strict
 ```
 
@@ -65,7 +65,7 @@ borgiq bundle push <dir> --create --auto-layout --json
 borgiq bundle push <dir> --json
 ```
 
-Existing-canvas push is incremental and conflict-aware by default (three-way, per-actor). Do not add `--mode` unless the user explicitly wants the legacy whole-document path. If the push aborts, first run bare `bundle pull <dir>` — it safely applies server-only changes and keeps local edits — then re-push. If the pull also aborts (actors with both local and server changes), never choose `--force-local` or `pull --replace` automatically; report the conflicted actors and let the user choose `bundle pull --replace` (server wins) or `push --force-local` (local wins).
+Existing-canvas push is incremental and conflict-aware by default (three-way, per-actor). Do not add `--mode` unless the user explicitly wants the legacy whole-document path. If the push aborts, first run `borgiq bundle pull <canvas> <dir>` with no flags — it safely applies server-only changes and keeps local edits — then re-push. If the pull also aborts (actors with both local and server changes), never choose `--force-local` or `pull --replace` automatically; report the conflicted actors and let the user choose `bundle pull --replace` (server wins) or `push --force-local` (local wins).
 
 ### Direct YAML/YML document
 
@@ -82,11 +82,11 @@ The YAML must be in **ExportedCanvasData** envelope format (`name`, `slug`, `mes
 borgiq canvas-actors batch <canvasSlugOrId> --file <changes.json> --json
 ```
 
-This format requires JSON with each config field as a YAML string (see the same reference doc). Don't use `create-with-data` against an existing canvas — you'll get a slug conflict.
+`--file` takes JSON, or YAML when the file ends in `.yaml`/`.yml`. Actors in it use the CanvasActor shape, where `configuration.options`, `inputs`, `vars` and `outputs` are YAML strings and `codeDir` stays an array (see the same reference doc). Don't use `create-with-data` against an existing canvas — you'll get a slug conflict.
 
 ## After deploy
 
-1. Print the canvas URL from the deploy response so the user can open it.
+1. Report the canvas slug. The CLI returns no canvas URL; do not invent one.
 2. Run a server-side validation to catch issues local validation can't:
    ```bash
    borgiq canvases validate <canvasSlugOrId> --json
@@ -109,7 +109,13 @@ This format requires JSON with each config field as a YAML string (see the same 
    (`borgiq bundle push <dir> --runtime-build` does the push and the build in one step; use it when
    you already know the workspace is deployed. `borgiq bundle build <dir>` also pushes and builds,
    and checks the deployment status itself — canvas build when deployed, react-app build when not.)
-4. If the user wants to verify the flow actually runs, suggest `/borgiq-builder:test` next.
+4. **Run the migration trigger** if the canvas has one (the manually invoked UniversalTriggerActor that creates its collections and streams; they must exist before any actor uses them). Run it after the first deploy to a workspace and after adding migrations; on a deployed workspace, after the build:
+   ```bash
+   borgiq triggers run --canvas <canvasId> --actor-id <migrationTriggerActorId> --json
+   borgiq flowruns summary <flowrun.id> --json   # poll until completed; errors must be empty
+   ```
+   `--canvas` takes the canvas ID (`metadata.id` from `borgiq canvases get <slug> --json`), not the slug. See [Wiring and running migrations](../borgiq-builder/references/collection-migrations.md#wiring-and-running-migrations).
+5. If the user wants to verify the flow actually runs, suggest `/borgiq-builder:test` next.
 
 ## Failure modes
 
@@ -120,10 +126,10 @@ This format requires JSON with each config field as a YAML string (see the same 
 | `Schema validation failed` server-side | Run `/borgiq-builder:validate` locally first — local errors are easier to read |
 | `Slug conflict` | For a bundle, rerun push without `--create`; for a direct document, switch to `canvas-actors batch` against the existing canvasId |
 | Bundle validation reports `path` + `message` | Fix the named `canvas.yaml`, `actor.yaml`, or `code/*` file, then rerun `bundle validate` |
-| `Push aborted: ... actor conflict(s)` | Run bare `bundle pull` (safe: applies server-only changes, keeps local edits), then re-push; if the pull also aborts, ask the user to choose `pull --replace` (server wins) or `push --force-local` (local wins) |
+| `Push aborted: ... actor conflict(s)` | Run `borgiq bundle pull <canvas> <dir>` with no flags (safe: applies server-only changes, keeps local edits), then re-push; if the pull also aborts, ask the user to choose `pull --replace` (server wins) or `push --force-local` (local wins) |
 | `Unknown actor type 'X'` | Upgrade `@borgiq/cli`; do not guess an actor folder path |
-| Deployed workspace, but a trigger still runs the old code | The push was not followed by a build | `borgiq canvases runtime-build <canvas>` |
-| Build reports `runtime-too-small` | The canvas's runtime is configured below what a build needs | Raise the runtime's timeout, memory and ephemeral storage in the workspace's Runtimes settings, then build again |
-| Build reports `build-in-progress` (409) | A build of this canvas is already running | Wait for it — builds of one canvas are serialised |
-| An actor's build result has `guard: rejected` | The actor imports a file outside its own files | Move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
-| An actor's build result has `warm: failed` | Dependencies installed, but the actor's code threw at start-up | Test-run the actor and fix the error; it will throw at run time too |
+| Deployed workspace, but a trigger still runs the old code | The push was not followed by a build: run `borgiq canvases runtime-build <canvas>` |
+| Build reports `runtime-too-small` | The canvas's runtime is configured below what a build needs: raise the runtime's timeout, memory and ephemeral storage in the workspace's Runtimes settings, then build again |
+| Build reports `build-in-progress` (409) | A build of this canvas is already running: wait for it — builds of one canvas are serialised |
+| An actor's build result has `guard: rejected` | The actor imports a file outside its own files: move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
+| An actor's build result has `warm: failed` | Dependencies installed, but the actor's code threw at start-up: test-run the actor and fix the error; it will throw at run time too |
