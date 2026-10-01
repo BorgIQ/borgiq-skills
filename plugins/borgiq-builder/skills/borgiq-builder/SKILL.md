@@ -138,7 +138,7 @@ Complete TypeScript/Zod schema definitions for all actors are available in [refe
 | [actor-schemas-task-core.md](references/typescript/actor-schemas-task-core.md) | Core task actor schemas (AiActor, AiAgentActor, DenoActor, PythonActor, RouterActor, etc.) |
 | [actor-schemas-task-http.md](references/typescript/actor-schemas-task-http.md) | HttpRequestActor options and authentication types |
 | [actor-schemas-task-datastore.md](references/typescript/actor-schemas-task-datastore.md) | DataStoreActor actions (legacy — kept for TypeScript type reference) |
-| [actor-schemas-task-collection.md](references/typescript/actor-schemas-task-collection.md) | CollectionActor actions (query, getItem, putItem, batchGet, batchWrite, etc.) |
+| [actor-schemas-task-collection.md](references/typescript/actor-schemas-task-collection.md) | CollectionActor actions (query, getItem, putItem, batchGetItem, batchWriteItem, etc.) |
 | [actor-schemas-task-stream.md](references/typescript/actor-schemas-task-stream.md) | StreamActor actions (createStream, appendData, readStream, getStreamInfo, etc.) |
 | [actor-schemas-task-messageprocessor.md](references/typescript/actor-schemas-task-messageprocessor.md) | MessageProcessorActor actions (inject, split, collect, fork, forkJoin, delay, etc.) |
 | [actor-schemas-comment.md](references/typescript/actor-schemas-comment.md) | CommentActor schema |
@@ -774,9 +774,9 @@ A collection-backed app shipped without a migration actor is a gap: it works in 
 
 Three rules an agent must design around:
 
-- **Streams are not implicit and they expire.** `appendData` against a slug that was never created fails with `STREAM_NOT_FOUND`, and a stream created with neither `persistent: true` nor `idleTtlSeconds` is hard-deleted one hour after its last append. Any app or scheduled consumer that depends on a stream creates it `persistent: true` in the same idempotent provisioning step as its collection ([collection-migrations.md](references/collection-migrations.md)); scratch logs get a TTL and clean themselves up.
+- **Streams are not implicit and they expire.** `appendData` against a slug that was never created fails with `STREAM_NOT_FOUND`, and a stream created with neither `persistent: true` nor `idleTtlSeconds` is hard-deleted one hour after its last append. Any app or scheduled consumer that depends on a stream creates it `persistent: true` in the same idempotent provisioning step as its collection ([collection-migrations.md](references/collection-migrations.md#provisioning-streams)); scratch logs get a TTL and clean themselves up.
 - **`readStream` returns one bounded page, never the stream.** The page is budgeted by the workspace message-size limit and carries `nextCursor` and `hasMore`. Loop the cursor on a canvas edge for a backlog; persist it in the app's collection to resume across flowruns.
-- **There is no "record arrived" trigger in v1.** A ScheduledTriggerActor calls `getStreamInfo`, compares `tailCursor` to the persisted cursor, and reads only when it moved — cheap enough for a one-minute schedule. Live views (a web app, a dashboard) tail the stream over SSE from the REST API instead.
+- **There is no "record arrived" trigger in v1.** A ScheduledTriggerActor calls `getStreamInfo`, compares `tailCursor` to the persisted cursor, and reads only when it moved — cheap enough for a one-minute schedule. Live views tail over SSE instead: React apps via `useStreamTail`, external dashboards via the REST API.
 
 Worked canvases for all three — ingestion, a chunked backlog loop, and the scheduled resumable consumer — are in [stream-actor.md](references/stream-actor.md); the full action, cursor, lifecycle, SDK, REST, and SSE reference is [stream-api.md](references/stream-api.md).
 
