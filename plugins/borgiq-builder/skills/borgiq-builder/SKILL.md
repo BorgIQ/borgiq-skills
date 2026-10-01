@@ -101,7 +101,7 @@ There are two categories of actors:
 
 **When to use `fork`/`forkJoin`:**
 
-Only use the `fork` and `forkJoin` MessageProcessorActor actions when you need to **synchronize** parallel paths and emit a **single combined message**. See [message-processor-actor.md](references/message-processor-actor.md#fork-actions) for detailed documentation, [workflow-patterns.md](references/workflow-patterns.md#pattern-1-multi-source-data-aggregation) for complete examples, and [fork-join-common-mistakes.md](references/fork-join-common-mistakes.md) for common pitfalls to avoid.
+Only use the `fork` and `forkJoin` MessageProcessorActor actions when you need to **synchronize** parallel paths and emit a **single combined message**. See [message-processor-actor.md](references/message-processor-actor.md#fork-actions) for detailed documentation, a complete example and common pitfalls to avoid, and [workflow-patterns.md](references/workflow-patterns.md) for the pattern index.
 
 | Scenario | Use Fork/ForkJoin? |
 |----------|-------------------|
@@ -727,7 +727,7 @@ For complete workflow examples with full YAML, see [workflow-example.md](referen
 - Edge configuration and actor positioning
 - Router with multiple source ports
 
-For advanced patterns (callback tokens, sub-flows, data storage, LTM), see [email-reply-workflow-example.md](references/email-reply-workflow-example.md).
+For the callback-token (human approval) pattern, see [message-processor-actor.md](references/message-processor-actor.md#human-approval-pattern).
 
 ## Workflow Patterns
 

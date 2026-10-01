@@ -1,94 +1,86 @@
-# Error Handling Patterns
+# Error Handling
 
-## Table of Contents
+How an actor fails, how a failure reaches downstream actors as `err.<msgVar>`, and the `error` block that turns a
+result into a failure. Read it when a flow must survive or route a failed step. Run and job states when debugging:
+[flowrun-job-states.md](flowrun-job-states.md).
 
-- [Error Handling with continueOnError](#error-handling-with-continueonerror)
-- [Error Handling in Split/Collect and Fork/ForkJoin Patterns](#error-handling-in-splitcollect-and-forkforkjoin-patterns)
+## continueOnError and err.<msgVar>
 
-**See also:** [flowrun-job-states.md](flowrun-job-states.md) for understanding flowrun states, job states, and counters when debugging execution via the CLI.
-
-## Error Handling with continueOnError
-
-When an actor has `continueOnError: true` and encounters an error:
-- The actor's output is stored in `err.ActorName` (not `msg.ActorName`)
-- `msg.ActorName` will be `undefined`
-- Downstream actors can check for errors and handle them gracefully
+- By default a failed actor fails its job and emits nothing.
+- With `continueOnError: true`, the failure is emitted to the connected actors as `err.<msgVar>`, and
+  `msg.<msgVar>` is `undefined`. An error with `canEmit: false` still fails the job.
+- Test for failure with `!Q.isNil(err.<msgVar>)`, for success with `Q.isNil(err.<msgVar>)`, and fall back with
+  `${{ msg.<msgVar> ?? err.<msgVar> }}`.
 
 ```yaml
-# Upstream actor with continueOnError
-ACTR01upstream:
-  continueOnError: true
-  # ... rest of config
-
-# Downstream actor checking for error
+# downstream of fetch_data (continueOnError: true)
 configuration:
   inputs:
-    # Check if upstream failed
-    hasError: ${{ !Q.isNil(err.upstream_actor) }}
-    # Access error details if present
-    errorMessage: ${{ err.upstream_actor?.message }}
-    # Access success data if present
-    data: ${{ msg.upstream_actor?.body }}
+    hasError: ${{ !Q.isNil(err.fetch_data) }}
+    errorMessage: ${{ err.fetch_data?.message }}
+    data: ${{ msg.fetch_data?.body }}
 ```
 
-## Error Handling in Split/Collect and Fork/ForkJoin Patterns
+To branch on the outcome, use a RouterActor condition such as
+`Success: ${{ Q.isNil(err.fetch_data) && !Q.isNil(msg.fetch_data) }}` with the default port as the error path
+([router-actor.md](router-actor.md)).
 
-**Critical:** When using `split`/`collect` or `fork`/`forkJoin` patterns, actors between the split and collect (or fork and forkJoin) **must** have `continueOnError: true`. Otherwise, if any actor fails, the workflow will get stuck waiting for messages that will never arrive.
+## The err object
 
-```
-Split -> Actor A -> Actor B -> Collect
-         ↑                      ↑
-    continueOnError: true   Handle missing msg
-```
+| Field | Meaning |
+|---|---|
+| `name` | Error name, e.g. `<ActorType>.ErrorIfConditionMet` (the `error` block), `<ActorType>.ReceiveError`, `TimeoutError` (a callback wait), `CallableResponseError` (a sub-flow's `throwError`) |
+| `message` | The message: the `error` block's `message`, or the failure's own |
+| `location` | `runtime` or `orchestrator` |
+| `stack` | Stack text (may be empty) |
+| `retry` | Whether the job is retried |
+| `canEmit` | Whether the error can reach downstream actors at all |
+| `metadata` | Extra data: `metadata.results` holds the actor's result when the `error` block sets `includeResult: true` |
 
-**Why this matters:**
-- `collect` and `forkJoin` wait for a specific number of messages (based on `size`)
-- If an actor fails without `continueOnError: true`, it stops execution and never emits a message
-- The `collect`/`forkJoin` actor will wait indefinitely for the missing message
+## The error block
 
-**Example: Safe split/collect pattern**
+`configuration.error` decides from the actor's own result whether it failed. Its fields are exactly these
+([schemas/error.md](typescript/schemas/error.md)):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `if` | boolean, required | The result is a failure when true |
+| `retryIf` | boolean | Retry the job when true (rate limits, server errors) |
+| `message` | string | The error's `message` |
+| `includeResult` | boolean | Attach the result as `err.<msgVar>.metadata.results` |
+
+It is interpolated after the actor runs, with the result in `results`:
 
 ```yaml
-# Split actor
-ACTR01split:
-  type: MessageProcessorActor
-  msgVar: split_items
-  configuration:
-    options:
-      action: split
-      valueToSplit: ${{ msg.data.items }}
-      emitKey: item
-
-# Processing actor - MUST have continueOnError: true
-ACTR01process:
-  type: HttpRequestActor
-  msgVar: process_result
-  continueOnError: true  # Critical!
-  configuration:
-    options:
-      url: https://api.example.com/process/${{ msg.split_items.item.id }}
-      method: POST
-
-# Collect actor - handle both success and error cases
-ACTR01collect:
-  type: MessageProcessorActor
-  msgVar: collected
-  enableSTM: true
-  configuration:
-    options:
-      action: collect
-      splitId: ${{ msg.split_items.splitId }}
-      size: ${{ msg.split_items.size }}
-      # Handle missing msg on error - use err fallback
-      captureValue:
-        id: ${{ msg.split_items.item.id }}
-        success: ${{ !Q.isNil(msg.process_result) }}
-        result: ${{ msg.process_result ?? err.process_result }}
-      emitKey: results
+error:
+  if: ${{ !Q.isHTTPStatusInRange(results.statusCode, ["200-299"]) }}
+  retryIf: ${{ Q.isHTTPStatusInRange(results.statusCode, ["429", "500-599"]) }}
+  includeResult: true
+  message: ${{ Q.toJSON(results) }}
 ```
 
-**Key points:**
-1. Set `continueOnError: true` on all actors between split and collect
-2. In `captureValue`, check if `msg.ActorName` exists to determine success
-3. Access error details via `err.ActorName` when the actor failed
-4. Use `??` operator to fallback: `${{ msg.actor ?? err.actor }}`
+## Joins hang when a branch fails
+
+`collect` and `forkJoin` wait for `size` messages. An actor between `split` and `collect`, or between `fork` and
+`forkJoin`, that fails without `continueOnError: true` emits nothing, so the join waits forever. Set
+`continueOnError: true` on every actor in between, and capture both outcomes:
+
+```
+split -> actor A -> actor B -> collect
+         ^ continueOnError: true   ^ handle the missing msg
+```
+
+```yaml
+# process_result: HttpRequestActor between split_items and collected, continueOnError: true
+# collected (enableSTM: true)
+configuration:
+  options:
+    action: collect
+    splitId: ${{ msg.split_items.splitId }}
+    size: ${{ msg.split_items.size }}
+    captureValue:
+      id: ${{ msg.split_items.item.id }}
+      success: ${{ !Q.isNil(msg.process_result) }}
+      result: ${{ msg.process_result ?? err.process_result }}
+    emitKey: results
+```

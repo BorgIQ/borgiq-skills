@@ -5,10 +5,7 @@
       "task": "HTTP actor that posts to Slack (no template fits)",
       "files": [
         "borgiq-builder/SKILL.md",
-        "borgiq-builder/references/http-request-actor.md",
-        "borgiq-builder/references/http-request-actor-examples.md",
-        "borgiq-builder/references/auth-types.md",
-        "borgiq-builder/references/context.md"
+        "borgiq-builder/references/http-request-actor.md"
       ]
     },
     {
@@ -18,9 +15,7 @@
         "borgiq-builder/references/webhook-trigger-actor.md",
         "borgiq-builder/references/router-actor.md",
         "borgiq-builder/references/webhook-response-actor.md",
-        "borgiq-builder/references/workflow-example.md",
-        "borgiq-builder/references/context.md",
-        "borgiq-builder/references/edges-and-positioning.md"
+        "borgiq-builder/references/workflow-example.md"
       ]
     },
     {
@@ -29,10 +24,7 @@
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/scheduled-trigger-actor.md",
         "borgiq-builder/references/message-processor-actor.md",
-        "borgiq-builder/references/fork-join-common-mistakes.md",
-        "borgiq-builder/references/workflow-patterns.md",
-        "borgiq-builder/references/error-handling.md",
-        "borgiq-builder/references/edges-and-positioning.md"
+        "borgiq-builder/references/error-handling.md"
       ]
     },
     {
@@ -40,7 +32,6 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/message-processor-actor.md",
-        "borgiq-builder/references/email-reply-workflow-example.md",
         "borgiq-builder/references/router-actor.md",
         "borgiq-builder/references/send-email-actor.md"
       ]
