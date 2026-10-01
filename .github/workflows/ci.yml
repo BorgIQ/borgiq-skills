@@ -1,8 +1,9 @@
 name: ci
 
+# Every pull request, whatever its base: a PR stacked on another PR's branch
+# is checked too, not only when it is retargeted to main.
 on:
   pull_request:
-    branches: [main]
 
 # Action references pinned to commit SHAs — see release.yml for rationale.
 # Trailing comment is the version this SHA resolved to at pin time;
@@ -18,3 +19,4 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: pip install pyyaml
       - run: python3 scripts/quick_validate.py .
+      - run: python3 scripts/skill_stats.py --check
