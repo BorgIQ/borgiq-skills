@@ -1,358 +1,154 @@
 ---
 name: borgiq-react-app-builder
-description: Build custom app UIs on a BorgIQ canvas with a React (Vite + TypeScript) app inside a ReactAppTriggerActor — compiled server-side, served in a sandboxed iframe. This is the standard surface for dashboards, data explorers, SPAs, and any bespoke frontend; it also covers maintaining legacy raw-HTML AppTriggerActor apps. Forms and data-entry pages stay in `borgiq-form-builder`. Triggers on "ReactAppTriggerActor", "app thumbnail", "screenshot the app", "React app in BorgIQ", "build a web app", "custom dashboard", "single-page app", "data explorer UI", "AppTriggerActor", "vite", "useEndpoint", "useGetSession", "useStreamTail", "live feed in a React app", "tail a stream from an app", "react SPA on a canvas", "multi-file app", "tsx component app", "app theme", "hearth theme", "consistent app styling".
+description: Build custom app UIs on a BorgIQ canvas as a React (Vite + TypeScript) app in a ReactAppTriggerActor, compiled server-side and served in a sandboxed iframe, for dashboards, data explorers and SPAs. Also maintains legacy AppTriggerActor apps; forms go to borgiq-form-builder. Triggers on "ReactAppTriggerActor", "AppTriggerActor", "build a web app", "custom dashboard", "single-page app", "useEndpoint", "useGetSession", "useStreamTail", "vite", "app theme", "hearth theme", "app thumbnail".
 ---
 
 # BorgIQ React App Builder
 
-Build a **React SPA** inside a **ReactAppTriggerActor** — the standard surface for custom app UIs on a canvas. The actor holds a real Vite + TypeScript project that BorgIQ **compiles server-side** (`deno install` + `deno task build`) and serves as static `dist/` assets in a sandboxed iframe with a short-lived content token.
-
-A data-entry form belongs in `borgiq-form-builder`. The legacy raw-HTML **AppTriggerActor** (no build step) remains supported for maintaining existing apps — its configuration, backend wiring and styling (the same theme library) are in the hub's [`app-trigger-actor.md`](../borgiq-builder/references/app-trigger-actor.md) reference — but new apps are built here.
+Build a **React SPA** inside a **ReactAppTriggerActor**: a Vite + TypeScript project that BorgIQ compiles server-side
+and serves as static assets in a sandboxed iframe with a short-lived content token. Forms and data-entry pages belong
+to the `borgiq-form-builder` skill. A legacy raw-HTML AppTriggerActor app is maintained, not extended:
+[app-trigger-actor.md](../borgiq-builder/references/app-trigger-actor.md). This skill relies on the `borgiq-builder`
+skill (the hub) for wiring and IDs, and on its shared references under `../borgiq-builder/references/`.
 
 ## Mental model
 
-Two edit surfaces, one actor:
+- **`configuration.codeDir`** is the source: a plain array of `{ path, content }` text files (`package.json`,
+  `vite.config.ts`, `index.html`, `src/**`). It is never interpolated, so `${{ … }}` in JSX is literal text.
+- **`configuration.options.files`** is an overlay applied at build time. It is interpolated with the actor's full
+  scope (`assets`, `vars`, `credentials`, `secrets`, `ctx`), wins over `codeDir` on a path collision, and is how
+  binaries (`${{ assets.<key> }}`) get into the build.
+- **Build, then serve.** Nothing is served until a Build compiles the project and stores `dist/`; an unbuilt app
+  answers `409`. The page runs in the same sandboxed iframe, `frame-ancestors` restriction and origin-checked token
+  model as an AppTriggerActor. On a deployed workspace the canvas's runtime build compiles the app instead.
+- **Endpoints** are named calls to webhook-capable triggers, resolved and baked into the build. The `@borgiq/actors`
+  SDK calls them with the app token.
+- **Streams** are workspace streams the app declares and tails live, read only, through the same SDK.
 
-- **`configuration.codeDir`** — the React/TypeScript source: a plain array of `{ path, content }` files (`package.json`, `vite.config.ts`, `index.html`, `src/**`). **Never interpolated** — so JSX containing `${{ ... }}` is safe literal text, and user source can't smuggle `${{ credentials.* }}` exfiltration. Text only.
-- **`configuration.options.files`** — an overlay of asset-backed or templated files, applied onto the project at build time. These **are** interpolated — with this actor's **full** expression scope (`assets`, `vars`, `credentials`, `secrets`, `ctx`), not just assets — so `content: ${{ assets.<key> }}` resolves an uploaded asset into a real binary (a BIQFile — images, fonts). Overlay files **win over `codeDir`** on a path collision. This is how binaries get into the build (codeDir is text-only). **⚠ Never interpolate a secret into an overlay's `content`**: the resolved value is bundled into the client-served `dist/` output (browser-visible JavaScript), so `${{ credentials.* }}` / `${{ secrets.* }}` in an overlay leaks the secret to every visitor. Keep secrets server-side behind a webhook backend and pass the browser only what it may see.
+## Non-negotiables
 
-**Build → serve.** A ReactAppTriggerActor does nothing until you **Build** it: the build compiles the project and persists every `dist/` file as a durable artifact. **Serving requires a successful build** — a fresh actor returns `409 No build available` until you build. Rendering then uses the same sandboxed iframe, `frame-ancestors` restriction, and origin-checked short-lived content token as AppTriggerActor. Rebuild after every source change to publish it. **On a deployed workspace the app builds with the canvas's runtime build instead**: the editor's Build action is refused there (409 "Build the canvas instead"), and viewers get the app the active runtime build compiled — see the hub's [deployment reference](../borgiq-builder/references/deployment.md).
-
-**Calling backends.** The app talks to backends through endpoints: declare **endpoints** on the actor targeting a **webhook-capable trigger** (a **WebhookTriggerActor**, or a **UniversalTriggerActor** with its webhook source enabled), and call them by name with the `@borgiq/actors` SDK (`useEndpoint`/`callEndpoint`). Endpoints are **resolved and baked into the built artifact at Build time**, and the SDK attaches the `X-App-Actor-Token` to **its own fetches only** — a raw `fetch()` to a `/msg/` URL is **not** token-bridged, so always call through the SDK. Because endpoints are frozen into the build, **editing the endpoint list takes effect on the next Build**, not the next save.
-
-**Following a stream.** An app can read a workspace **stream** live with `useStreamTail`. Declare the stream on the actor under `options.streams` — an exact `slug`, or a `slugPrefix` for streams a flow creates per session — and the SDK opens a Server-Sent Events tail against a BorgIQ endpoint (`/v1/app-streams/…`) with the app token it already holds: never a storage credential, never anything in a query string. Stream declarations are **frozen into the build like endpoints**, so a stream declared after the last Build is unreadable until the next one. Apps only **read** streams: to write one, call an endpoint whose flow appends — the write is then authored, validated, rate-limited and attributed by flow code.
+1. **Theme every app.** Create `src/theme.css` (Base Contract + exactly one theme block, from
+   [react-app-themes.md](../borgiq-builder/references/react-app-themes.md)) and import it first in `src/main.tsx`. Default to `hearth` unless the customer names `ledger`, `meridian`, `signal` or `bloom`, or
+   supplies brand colors (then follow the brand-override procedure). Components use tokens only (no literal colors,
+   fonts, radii or shadows) and Tabler icons. An app with hard-coded styling or no `theme.css` is incomplete: fix it
+   before Build.
+2. **Keep the single-file Vite settings:** `base: './'`, `cssCodeSplit: false`, `assetsInlineLimit: 0`,
+   `rollupOptions.maxParallelFileOps: 20`, `output.inlineDynamicImports: true` and hash-free output names. The builder
+   rejects any dist but one JS, at most one CSS and `index.html`, and icon packages fail with `EMFILE` without the cap.
+3. **No secrets in overlays.** A `${{ credentials.* }}` or `${{ secrets.* }}` in `options.files` is bundled into the
+   browser-visible `dist/`. Keep secrets server-side behind an endpoint; overlay only binaries and non-secret
+   templated values (`${{ vars.* }}`).
+4. **Fetch only through the SDK.** `useEndpoint`/`callEndpoint` and `useStreamTail`/`tailStream`/`readStream` attach
+   the app token; a raw `fetch()` to a `/msg/` or `/app-streams/` URL carries none.
+5. **Everything is frozen at Build.** Source, overlays, endpoints (a target's `triggerKey` included), streams and the
+   CSP options take effect on the next Build, never on save. Before the first Build, serving answers `409` and
+   endpoints `401`. On a deployed workspace, build the canvas.
+6. **One endpoint per route, at `apps`.** Give each UI action its own declared endpoint on a webhook-capable trigger
+   set to `authorizationLevel: apps` (`appsAndApiKey` if external API callers share it); never branch one endpoint on
+   `?action=`. The list is the app's authorization grant: an undeclared webhook answers `401`, even on this canvas.
+7. **Binaries through `src/assets`.** Overlay images and fonts under `src/assets/` and `import` them; never `public/`.
+8. **`useGetSession` is display-only.** Flows authorize with the server-attested `trigger.user`, never a user or
+   session id sent in a request.
+9. **Declare streams narrowly.** Every viewer's token reads every declared stream, so declare exact slugs or a narrow
+   prefix, and mint per-session slugs from an unguessable part, handed out through an endpoint. Apps never write
+   streams, and records reach the browser as plaintext.
 
 ## Key decisions
 
-1. **App vs. form.** Custom app UI (dashboard, data explorer, SPA, bespoke frontend) → ReactAppTriggerActor, here. A form/survey/data-entry page → `borgiq-form-builder`. An existing raw-HTML AppTriggerActor app → maintain it via the hub's `app-trigger-actor.md` reference; don't rebuild it in React unless the customer asks.
-2. **codeDir (source) vs. options.files (overlay).** Author all `.tsx/.ts/.css/.html/.json` in `codeDir`. Use `options.files` **only** for (a) binaries via `${{ assets.<key> }}`, or (b) a file whose content must be templated at build from **non-secret** values (e.g. `${{ vars.* }}`). **Never** put `${{ credentials.* }}` / `${{ secrets.* }}` in an overlay — the resolved value ships to the browser in the built `dist/`. Remember overlay wins on collision.
-3. **Endpoints + `authorizationLevel: 'apps'`.** Every backend call pairs an endpoint with a webhook-capable trigger — a `WebhookTriggerActor`, or a `UniversalTriggerActor` with its webhook source enabled — set to `authorizationLevel: 'apps'` (only tokened app calls fire it). A WebhookTriggerActor replies via downstream actors → a **WebhookResponseActor**; a UniversalTriggerActor can instead reply from its own `receive` code (`Signal.webhookRespond`) with no downstream chain — choose per route, see [Designing the backend — endpoint-first](#designing-the-backend--endpoint-first). `'public'` webhooks skip token verification entirely — only use them for genuinely public endpoints.
-4. **Endpoints are the authorization grant — per app-actor, frozen at Build.** An app can fire **only** the webhooks it declares as endpoints: the webhook allowlist is baked into the build manifest, so the API returns `401` for any undeclared webhook — even one on the same canvas (and `401` until the app is built at all). Leave an endpoint's workspace/canvas blank to target a webhook on **this** canvas (the common case), or set them (by **slug**) to target another canvas/workspace **in the same org** (org is the hard boundary). Endpoint edits — including a target's `triggerKey` — take effect on the **next Build**, not the next save.
-5. **Every app ships a theme — no exceptions.** Create `src/theme.css` (Base Contract + exactly one theme block from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md)) and import it first in `src/main.tsx`. **Default to the `hearth` theme** unless the customer names one of the five themes (`hearth`, `ledger`, `meridian`, `signal`, `bloom`) or supplies brand colors (then apply the reference's brand-override procedure). Components use only the theme's tokens — never literal colors, fonts, radii, or shadows. An app with hard-coded styling or no `theme.css` is incomplete; fix it before Build.
-6. **Keep `vite.config.ts`'s single-file build settings.** `base: './'`, `cssCodeSplit: false`, `rollupOptions.output.inlineDynamicImports: true`, and the stable hash-free `output` file names are what guarantee the required **one JS, at most one CSS, and `index.html`** dist shape (the builder rejects anything else). Keep `rollupOptions.maxParallelFileOps: 20` as well, or icon packages such as `@tabler/icons-react` fail the build with `EMFILE: too many open files`. Assets are served **same-origin, piped through the API** (no 302-to-S3), so no `renderBuiltUrl`/`__BIQ_ASSET_BASE__` rebasing is needed.
-7. **Streams are declared, not inferred.** An app can tail **only** the streams its actor declares under `options.streams` — an exact `slug` or a `slugPrefix`, exactly one per entry — and the list is frozen into the build manifest beside `endpoints`: a stream declared after the last Build answers `403 STREAM_NOT_DECLARED` (the SDK throws `StreamNotDeclaredError` by name) until you rebuild. Declarations resolve in the app's **own workspace only** in v1 — a stream grant carries no workspace/canvas coordinates. A prefix (`chat-`) is how an app follows the per-session streams a flow creates (`chat-<id>`), whose slugs don't exist when the app is authored. **Per-viewer caveat:** every viewer of the app holds a token authorized by the same manifest, so a `chat-` prefix lets viewer A read viewer B's `chat-<id>` if A learns the slug. Mint per-session slugs from an unguessable component (the stream's own ULID, a random suffix) and hand each to the app through an endpoint response — never derive them from something enumerable (a user id, a counter).
+1. **App, form or legacy.** A custom UI (dashboard, data explorer, SPA) is a ReactAppTriggerActor, built here. A form,
+   survey or data-entry page goes to `borgiq-form-builder`. Keep an existing AppTriggerActor app as it is unless the
+   customer asks for a rebuild.
+2. **Backend per route, endpoint-first.** List every UI action (`listTasks`, `createTask`, `summarize`); each becomes
+   one endpoint. Choose its trigger with the hub's
+   [Universal Trigger vs Webhook Trigger](../borgiq-builder/SKILL.md#universal-trigger-vs-webhook-trigger-http-endpoints)
+   matrix; one app usually mixes both:
+   - CRUD and lookups: a webhook-enabled **UniversalTriggerActor** whose `receive` code validates, calls the
+     collection and replies with `Signal.webhookRespond` (`options.webhook.respondImmediately: false`). No downstream
+     actors.
+   - AI, third-party APIs or routing: a **WebhookTriggerActor** feeding task actors and a **WebhookResponseActor**.
+3. **Storage.** Back an app with **one collection** holding every entity type under key prefixes (`task:<id>`,
+   `user:<id>`) plus a `$meta` manifest row; split only for a security boundary or on request. Collections are not
+   implicit (`COLLECTION_NOT_FOUND` until created), so ship an idempotent migration runner that creates and seeds it.
+   See the hub's [Collection migrations and provisioning](../borgiq-builder/SKILL.md#collection-migrations-and-provisioning),
+   [single-collection design](../borgiq-builder/references/collection-api.md#single-collection-design) and
+   [collection-migrations.md](../borgiq-builder/references/collection-migrations.md).
+4. **Live data.** Tail a stream when a flow produces events the viewer should see as they happen; otherwise call an
+   endpoint.
 
-## Anatomy of a ReactAppTriggerActor
-
-The `codeDir` below is abbreviated. The scaffold the editor seeds also has `deno.json` (7-day minimum dependency age) and `tsconfig.json`, `tsconfig.app.json` and `tsconfig.node.json`; the `build` script's `tsc -b` fails without a `tsconfig.json`. Start from that scaffold (create the actor in the editor, then `borgiq bundle pull`) rather than from this sketch, and pin exact versions as it does.
+## The `options` block
 
 ```yaml
 ACTR01reactapp:
   type: ReactAppTriggerActor
   configuration:
-    # ---- SOURCE (never interpolated; text only) --------------------------------
-    codeDir:
-      - path: package.json
-        content: |
-          {
-            "name": "my-app", "private": true, "type": "module",
-            "scripts": { "build": "tsc -b && vite build" },
-            "dependencies": {
-              "react": "19.2.7", "react-dom": "19.2.7",
-              "@borgiq/actors": "file:./__borgiq_sdk_placeholder__"
-            },
-            "devDependencies": {
-              "typescript": "6.0.3", "vite": "7.3.6", "@vitejs/plugin-react": "5.2.0"
-            }
-          }
-      - path: vite.config.ts
-        content: |
-          import { defineConfig } from 'vite'
-          import react from '@vitejs/plugin-react'
-          export default defineConfig({
-            base: './',                       // REQUIRED: relative asset paths under the token root
-            plugins: [react()],
-            resolve: { dedupe: ['react', 'react-dom'] },
-            build: {
-              cssCodeSplit: false,            // REQUIRED: merge all CSS into one file
-              assetsInlineLimit: 0,           // REQUIRED: emit real asset files, never base64-inline
-              rollupOptions: {
-                maxParallelFileOps: 20,       // REQUIRED: icon packages otherwise fail the build with EMFILE
-                output: {
-                  inlineDynamicImports: true, // REQUIRED: fold dynamic imports into one JS chunk
-                  entryFileNames: 'assets/[name].js',   // stable, hash-free names
-                  chunkFileNames: 'assets/[name].js',
-                  assetFileNames: 'assets/[name][extname]',
-                },
-              },
-            },
-          })
-      - path: index.html
-        content: |
-          <!doctype html>
-          <html><head><meta charset="UTF-8" /><title>My App</title></head>
-          <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
-      - path: src/main.tsx
-        content: |
-          import { StrictMode } from 'react'
-          import { createRoot } from 'react-dom/client'
-          import './theme.css'                     // REQUIRED: theme import comes before App
-          import App from './App.tsx'
-          createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
-      - path: src/theme.css
-        content: |
-          /* REQUIRED in every app: Base Contract + exactly ONE theme block, both
-             copied verbatim from references/react-app-themes.md (hub skill).
-             Default theme: hearth — use it unless the customer names another
-             theme or supplies brand colors. Never author components with literal
-             colors/fonts/radii; use the tokens this file defines. */
-      - path: src/App.tsx
-        content: |
-          import { useEndpoint, useGetSession } from '@borgiq/actors'
-          export default function App() {
-            // Who is viewing the app: { id, userId, email, name, appSessionId }. Passive — resolves on mount, no trigger().
-            // Null outside the BorgIQ iframe (local dev), so gate identity UI on it.
-            const { data: session } = useGetSession()
-            // browser-fetch semantics: search (query) + init (method/headers/body/signal). body passes through.
-            const { trigger, loading, error, data } = useEndpoint('saveRecord', undefined, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ hi: 1 }),
-            })
-            return (
-              <main>
-                <h1>My App</h1>
-                {session && <p>Signed in as {session.name || session.email}</p>}
-                <button disabled={loading} onClick={() => { void trigger().catch(() => {}) }}>
-                  {loading ? 'Saving…' : 'Save'}
-                </button>
-                {error && <p>{error.message}</p>}
-                {data != null && <pre>{JSON.stringify(data, null, 2)}</pre>}
-              </main>
-            )
-          }
-    # ---- OPTIONS (interpolated overlays + wiring) ------------------------------
+    codeDir: [...]                        # the seeded Vite project (react-app-build.md)
     options:
       files:
-        - path: src/assets/logo.png               # NOT public/ — import it from source (see note below)
-          content: ${{ assets.company_logo }}     # binary from an uploaded asset (BIQFile)
+        - path: src/assets/logo.png       # import it from source; not public/
+          content: ${{ assets.company_logo }}
       endpoints:
-        - name: saveRecord                          # <- useEndpoint('saveRecord')
-          actorId: ACTR01webhookhandler…            # a WebhookTriggerActor (or webhook-enabled UniversalTriggerActor), authorizationLevel: 'apps'
-          # workspaceSlug / canvasSlug: optional, SLUGS, blank = this canvas; same org only
+        - name: saveRecord                # useEndpoint('saveRecord')
+          actorId: ACTR01webhookhandler…  # WebhookTriggerActor or webhook-enabled UniversalTriggerActor, at apps
+          # workspaceSlug / canvasSlug: optional slugs; blank = this canvas; same org only
       streams:
-        - name: activity                            # an identifier, like an endpoint name (not what the hook takes)
-          slug: agent-activity                      # <- useStreamTail('agent-activity') — exact slug, THIS workspace only
-        - name: chats
-          slugPrefix: chat-                         # every stream whose slug starts with chat- (per-session streams a flow creates)
-          # exactly one of slug / slugPrefix per entry; ≤ 50 entries; changes apply on the next Build
-      allowedScriptDomains: []                    # ${{ vars.cdn_host }} works here — evaluated at build
+        - name: activity
+          slug: agent-activity            # or slugPrefix: chat- ; exactly one per entry
+      allowedScriptDomains: []            # CSP options, resolved at Build
       allowedStyleDomains: []
       allowedPermissions: []
-      allowWebAssembly: false                     # true → WebAssembly may compile (never JS eval)
-      allowBlobWorkers: false                     # true → inline ?worker&inline workers may start
+      allowWebAssembly: false
+      allowBlobWorkers: false
 ```
 
-Pair it with a backend (the hub wires the edges):
+The trigger it targets (the hub wires its edges to task actors and a WebhookResponseActor):
 
 ```yaml
 ACTR01webhookhandler:
   type: WebhookTriggerActor
   configuration:
-    webhook:
-      triggerKey: save-record
-      authorizationLevel: apps          # only tokened app calls fire this
-# … edges: webhook -> (task actors) -> WebhookResponseActor (returns JSON to trigger())
+    webhook: { triggerKey: save-record, authorizationLevel: apps }
 ```
 
-## Designing the backend — endpoint-first
+## Limits
 
-Design the backend **endpoint-first**, not actor-first:
-
-1. **List the UI actions.** Walk the frontend and enumerate every distinct thing it calls the backend for — `listTasks`, `createTask`, `deleteTask`, `summarizeWithAI`, etc. Each becomes one declared endpoint on the actor.
-2. **Choose the trigger per endpoint** (see the hub's [Universal Trigger vs Webhook Trigger](../borgiq-builder/SKILL.md#universal-trigger-vs-webhook-trigger-http-endpoints) matrix). Decide route by route — a single app commonly mixes both:
-   - **CRUD / storage endpoints** (list, get, create, update, delete a Collection item) → a **webhook-enabled UniversalTriggerActor** at `authorizationLevel: 'apps'`. Parsing, validation, the Collection call, and the JSON reply (`Signal.webhookRespond`, with `options.webhook.respondImmediately: false`) all live in the trigger's `receive` code. No downstream actors.
-   - **AI / generation endpoints** (summarize, draft, classify, call a third-party API) → a **WebhookTriggerActor** at `authorizationLevel: 'apps'` feeding task actors and a **WebhookResponseActor**. The route needs an AiActor / integration actor / router, so it enters a real flow.
-3. **Declare one endpoint per route** in the actor's `endpoints:` list and call each by name with `useEndpoint`/`callEndpoint`. Don't funnel the whole app through a single endpoint that branches on a `?action=` query param — separate endpoints keep latency, response shape, and orchestration independent per route, and since the endpoint list is the app's authorization grant, the allowlist stays explicit.
-
-This keeps fast CRUD routes off the AI critical path and avoids cramming AI/integration logic into trigger code just to save an actor — or the reverse, spinning up a multi-actor flow for a route one trigger's code handles fine.
-
-**If the app is backed by Collections, use ONE collection for the whole app and ship a migration actor with it.** Model every entity type the app stores in a single collection with key prefixes (`task:<id>`, `user:<id>`, `config:<name>`) plus a `$meta` manifest row that lists those prefixes — never one collection per entity type; split only for a security boundary or an explicit user request (see [single-collection design](../borgiq-builder/references/collection-api.md#single-collection-design)). Collections aren't implicit — endpoints fail with `COLLECTION_NOT_FOUND` until the collection is created. Add an idempotent provisioning step (create the app's collection + seed defaults, safe to re-run per workspace/deploy) before the app goes live. See the hub's [Collection migrations and provisioning](../borgiq-builder/SKILL.md#collection-migrations-and-provisioning) and [collection-migrations.md](../borgiq-builder/references/collection-migrations.md).
-
-## Calling endpoints — the `@borgiq/actors` SDK
-
-The SDK ships with every React app (injected as a `file:` dep). Endpoints are baked into the built
-artifact and the `X-App-Actor-Token` is attached to **SDK fetches only** — a raw `fetch()` to a `/msg/`
-URL is **not** token-bridged, so always call through the SDK. The surface follows **browser `fetch`**:
-
-```tsx
-import { useEndpoint, callEndpoint } from '@borgiq/actors'
-
-// Hook form — request state included. Does NOT auto-fetch; call trigger() to fire.
-//   useEndpoint(name, search?, init?)
-//   - search: appended to the endpoint URL's query (string | URLSearchParams | Record<string,string>)
-//   - init:   RequestInit subset (method, headers, body, signal); body passes through untouched
-//             (URLSearchParams → form-encoded, FormData → multipart, string/Blob as-is)
-const { trigger, loading, error, data } = useEndpoint('saveRecord', '?page=1', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: new URLSearchParams({ name: 'Ada' }),
-})
-await trigger()                          // resolves with the parsed response body (JSON or text)
-await trigger({ body: JSON.stringify({ name: 'Bob' }), headers: { 'Content-Type': 'application/json' } }) // per-call override
-
-// Non-hook form — anywhere (event handlers, effects, non-component code):
-const result = await callEndpoint('saveRecord', '?page=1', { method: 'POST', body: new URLSearchParams({ name: 'Ada' }) })
-```
-
-- `getBasename()` → router basename for the token path (from `document.baseURI`; feed it to a React Router `basename`).
-- Non-2xx → `EndpointHttpError` (carries `status` + parsed `body`). The body resolves as JSON when the content-type says so, else text.
-- Errors thrown: `EndpointNotFoundError` (name not declared), `EndpointResolutionError` (the endpoint baked an `{ error }` because the target couldn't be resolved at Build), `EndpointHttpError` (non-2xx), `TokenTimeoutError`, `SessionUnavailableError` (see below).
-- Each declared endpoint should point at a webhook-capable trigger — a `WebhookTrigger`, or a `UniversalTrigger` with its webhook source enabled — at `authorizationLevel: 'apps'`, wired `→ … → WebhookResponse`.
-
-### Who is viewing the app — `useGetSession`
-
-```tsx
-import { useGetSession, getSession } from '@borgiq/actors'
-
-// Hook form — passive data, resolved on mount. Unlike useEndpoint there is NO trigger().
-const { data: session, loading, error } = useGetSession()
-if (session) return <p>Hello, {session.name || session.email}</p>
-
-// Non-hook form — parity with callEndpoint; rejects instead of returning an error state.
-const viewer = await getSession()   // { id, userId, email, name, appSessionId }
-```
-
-- Resolves the **signed-in viewer** as `{ id, userId, email, name, appSessionId }` — the same identity flows behind the endpoints see at `trigger.user`. `userId` is an alias of `id`; prefer it in new code, since it cannot be confused with `appSessionId`. `name` may be `''`; `data` is `null` until it resolves and on error.
-- **`appSessionId` identifies the visit, not the person: one id per (BorgIQ login × this app).** It is stable across page reloads and token refreshes, a different app under the same login gets a different id, and a new BorgIQ login gets a new one. Use it to key per-visit state — a draft, a wizard position, a chat thread, a scoped cache — typically as a collection key, with `userId` alongside when the data belongs to the person rather than the visit. Two consequences worth knowing before they surprise you: **multiple tabs of the same app share one id** (derive your own per-tab suffix if you need tab identity), and **a new login is a new id** — including a session handoff, so per-visit state does not follow the viewer across logins.
-- `appSessionId` may be **absent** (older tokens predate it) — treat absence as "no session information" and degrade gracefully, never crash.
-- Decoded from the app token the SDK already holds, so it costs **no extra request** and needs no configuration. The result is cached for the login: a profile rename shows the old `name` until reload, but a re-login in the parent (even without a reload) refreshes the session on the next read.
-- Outside the BorgIQ iframe there is no viewer — under a local `npm run dev` it settles **immediately** with `SessionUnavailableError` rather than waiting on the token bridge. Gate identity UI on `session` so the page still renders locally.
-- **Do not use it as an authorization check — and `appSessionId` is not an authorization token.** Both are display-level identity; enforce access on the canvas side (`authorizationLevel: 'apps'` endpoints + per-app grants), where `trigger.user` is server-attested. Flows must trust `trigger.user.appSessionId` and never a session id arriving in a request body or query string — the first was lifted from a signature-verified token, the second is whatever the caller typed.
-
-## Following a stream — `useStreamTail`
-
-A React app can follow a workspace [stream](../borgiq-builder/references/stream-api.md) live. Declare the stream on the actor (`options.streams`, see [Anatomy](#anatomy-of-a-reactapptriggeractor) and [Key decisions](#key-decisions) #7), Build, then tail it by **slug**. The SDK opens a Server-Sent Events tail against `GET /v1/app-streams/…/tail` with the app token in `X-App-Actor-Token` (see the hub's [Tailing from a React app](../borgiq-builder/references/stream-api.md#tailing-from-a-react-app)) and owns the connection, the cursor, reconnection, buffering and the polling fallback — never open the route with a raw `fetch()`.
-
-```tsx
-import { useStreamTail, readStream } from '@borgiq/actors'
-
-// Live feed from now on; history loaded once by the paged read.
-const { records, status, dropped } = useStreamTail('agent-activity', { from: 'tail' })
-
-// Per-session stream whose slug an endpoint handed back; resume across reloads in this tab.
-const { records } = useStreamTail(session.streamSlug, { from: 'start', resumeKey: 'chat' })
-```
-
-with the actor declaring:
-
-```yaml
-options:
-  streams:
-    - name: activity
-      slug: agent-activity
-    - name: chats
-      slugPrefix: chat-
-```
-
-### Signature and result
-
-```ts
-useStreamTail(streamRef: string, options?: UseStreamTailOptions): { records, dropped, status, cursor, error, retryNow }
-```
-
-| Option | Default | Meaning |
-|---|---|---|
-| `from` | `'tail'` | Where the **first** session starts: `'start'`, `'tail'`, or a cursor this stream issued. Later sessions resume from the SDK's own cursor |
-| `enabled` | `true` | `false` closes the tail (and releases its connection) |
-| `resumeKey` | — | Keep the resume cursor in `sessionStorage` under this key, so the tail survives a reload **in this tab** |
-| `maxBufferedRecords` / `maxBufferedChars` | `1000` / `1,000,000` | Drop-oldest buffer bounds (records / payload characters); evictions count in `dropped` |
-| `onRecord` | — | Called per record as it lands — the path for an app that wants every record without keeping them |
-| `pollFallbackMs` | `5000` | While the tail is capped (`429`), poll the paged read at this interval instead of waiting; `0` disables |
-
-The result: `records` (the buffer, newest last — each `{ cursor, timestamp, payload }`, `payload` being the string the flow appended), `dropped` (evicted since mount), `status` (below), `cursor` (the position to resume from), `error`, and `retryNow()` (cut a backoff or `Retry-After` wait short).
-
-| `status` | What the app should show |
+| Limit | Value |
 |---|---|
-| `idle` | nothing yet — `enabled: false`, or before the first connect |
-| `connecting` | a "connecting…" affordance; no records yet |
-| `live` | the feed. A clean server `end` (60 s idle / 300 s total budget) reconnects silently and stays `live` |
-| `reconnecting` | the feed as-is plus a quiet "reconnecting" hint — backing off after a network error or a retryable failure |
-| `capped` | "the workspace is busy" — a `429`; the SDK waits out `Retry-After` (or drops to `polling`); `retryNow()` shortens the wait |
-| `polling` | the feed, updating on a timer — records still arrive, later, through the paged read until the tail can reopen |
-| `gone` | "this stream has ended" — deleted or **idle-expired**; terminal, the buffer is kept. Stop offering a retry |
-| `error` | `error.message` — terminal: undeclared stream, non-retryable error frame, repeated 5xx, or local dev without a session |
-
-### Non-hook forms
-
-```ts
-import { tailStream, readStream } from '@borgiq/actors'
-
-// Async iterable of records; ends only on abort or a terminal condition (gone / not declared).
-for await (const record of tailStream('agent-activity', { from: 'tail', signal })) { /* … */ }
-
-// One page, a snapshot, never blocking — the same shape as the platform's paged read.
-const { records, nextCursor, tailCursor, hasMore } = await readStream('agent-activity', { from: 'start', maxRecords: 200 })
-```
-
-### Errors
-
-- `StreamNotDeclaredError` (carries `stream`) — the slug matches no declaration in the built manifest. Thrown **before any request** for a slug; a stream addressed by id is sent through and comes back as the server's `403 STREAM_NOT_DECLARED`. Declare it on the actor and **rebuild**.
-- `StreamGoneError` (carries `stream`) — `404` on a (re)connect: deleted or idle-expired. The hook reports `gone` and keeps its buffer.
-- `StreamHttpError` (carries `status` + parsed `body`) — any other non-2xx, including `429 VIEWER_TAIL_LIMIT_EXCEEDED` (this viewer already has 4 tails open on this app — close a tab) and the 30-opens-per-minute rate limit.
-- `SessionUnavailableError` — outside the BorgIQ iframe (a local `npm run dev`) there is no token, so the hook settles **immediately** in `error`, exactly as `useGetSession` does. Gate the feed on `status !== 'error'` so the page still renders locally.
-
-### Recipes and rules
-
-- **History, then live.** There is no "last N records" position yet: `from: 'tail'` shows nothing until the next append, and `from: 'start'` replays **everything** the stream holds. Render history with `readStream(slug, { from: 'start' })` (page on `nextCursor` while `hasMore`), then mount `useStreamTail(slug, { from: 'tail' })` for what happens next — and know that on a long stream the history read is a full replay today. Keep long-lived streams short (an idle TTL) or mint per-session ones.
-- **Resume is per tab.** The SDK keeps the cursor in memory; `resumeKey` moves it to `sessionStorage` (`borgiq:stream:<appActorId>:<resumeKey>`) — per tab, gone when the tab closes, never the token. For resume across devices, park `cursor` through an endpoint and pass it back as `from`.
-- **A tail is not activity.** Only appends refresh a stream's idle TTL. An app watching a stream nobody writes to will see it expire: the next reconnect is `404` and the hook goes `gone`. The fix lives in the **flow that creates the stream** (a longer `idleTtlSeconds`, or `persistent: true`), not in the reader.
-- **One connection per stream per page.** Components tailing the same slug share one connection, cursor and buffer; the SDK refuses a **fifth** distinct concurrent tail on a page rather than let a sixth connection stall the app's own endpoint calls. Tail a few streams, not one per row.
-- **Read only.** There is no append from an app. Write through an endpoint whose flow appends — the write is then authored, validated, rate-limited and attributed to a flowrun.
-- **Sensitive data.** Records reach the browser as **plaintext** (decrypted in the API, like every endpoint response) and are visible in devtools for as long as the tail is open. The SDK persists only a cursor, never a record; **do not write records to `localStorage`**. Encryption at rest protects nothing against a viewer the app has authorized — the **declaration is the control that matters**, so declare narrowly and mint unguessable per-session slugs.
-
-## Theming — required on every app
-
-Full token sets, base stylesheet, component recipes, and rules live in
-[react-app-themes.md](../borgiq-builder/references/react-app-themes.md). The short version:
-
-- **Always create `src/theme.css`** = the reference's Base Contract + exactly one theme block, imported **first** in `src/main.tsx`. Never skip this, even for a "quick" app — an unthemed app is a bug.
-- **Default: `hearth`** (the BorgIQ house look). Use it whenever the customer doesn't name a theme or supply a brand.
-- Customer picks by name or genre: `hearth` (internal tools, default) · `ledger` (finance/ops, paper + pine + serif) · `meridian` (enterprise data, slate + cobalt) · `signal` (monitoring, dark-first graphite + amber) · `bloom` (portals/surveys, blush + plum, rounded).
-- Components use **tokens only** (`--bg`, `--surface-*`, `--text-1/2/3`, `--accent`, `--ink`/`--ivory`, `--space-*`, `--radius-*`) and the reference's component recipes. No literal colors, fonts, radii, or shadows in components.
-- Light + dark come free: every theme block carries both modes wired to `prefers-color-scheme` with `data-theme` overrides.
-- **Icons: Tabler only** (`@tabler/icons-react`), planned as part of the UI design — nav items, action buttons, empty states — per the reference's Icons section. Icons inherit `currentColor` (never hard-code an icon color); keep one size/stroke per context; icon-only buttons need `aria-label`; no emoji-as-icons and no second icon family.
-- Customer brand colors → start from the closest theme and remap only the accent/ink token group per the reference's brand-override procedure; neutrals, status channels, and shape stay.
-- Do not confuse with [interface page colors](../borgiq-builder/references/interface-pages.md#page-colors) — React apps use the token library above.
-
-## Constraints
-
-| Constraint | Limit / rule |
-|---|---|
-| `codeDir` file count | ≤ 200 files |
-| `codeDir` total size | ≤ 1 MiB (1,048,576 bytes; text only — no binaries) |
-| Binaries (images, fonts) | overlay them under `src/assets/…` via `options.files` + `${{ assets.<key> }}`, then **import** from source (`import logo from './assets/logo.png'` → `<img src={logo} />`). **Do not use `public/`** — Vite serves `public/` verbatim (never `import`ed), and a `public/` asset needs a `import.meta.env.BASE_URL`-prefixed URL to resolve under the token base path. Max 50 overlay files |
-| Endpoints | ≤ 50 per actor; an app fires **only** its declared endpoints, frozen into the build (undeclared ⇒ `401`; unbuilt ⇒ `401`) |
-| Endpoint `name` | a valid identifier — letters, digits, underscore, not starting with a digit (it's the `useEndpoint('<name>')` key) |
-| Stream declarations | ≤ 50 per actor under `options.streams`; each entry names **exactly one** of `slug` (exact) or `slugPrefix`, plus an identifier `name`; **same workspace only** (no workspace/canvas coordinates); frozen into the build — changes apply on the **next Build**; undeclared ⇒ `403 STREAM_NOT_DECLARED` (`StreamNotDeclaredError`) |
-| Stream tails per page | the SDK shares **one connection per stream** across components and refuses a **5th** distinct concurrent tail; the server's per-viewer ceiling is **4** open tails and **30** opens/min per app (`429 VIEWER_TAIL_LIMIT_EXCEEDED` / rate limit — close a tab); the workspace's **app-tail pool is 100**, separate from the 20 public/actor tails (`429 TAIL_LIMIT_EXCEEDED`), on which the hook goes `capped` → `polling` the paged read until `Retry-After` elapses |
-| Stream reads only | apps **read** streams (`useStreamTail` / `tailStream` / `readStream`); there is no append from an app — write through an endpoint whose flow appends |
-| Build output shape | **exactly one `.js`, at most one `.css`, and `index.html`** — the builder rejects a multi-file build with an actionable message. Keep the `vite.config.ts` single-file settings. A Web Worker must therefore be **inlined** (`import MyWorker from './worker?worker&inline'`) — `new Worker(new URL('./worker.ts', import.meta.url))` emits a second `.js` and fails the build |
-| WebAssembly / workers | **off by default** — `WebAssembly.compile`/`instantiate` needs `allowWebAssembly: true`, and an inline worker needs `allowBlobWorkers: true`; a worker that compiles WebAssembly (e.g. SQLite WASM) needs **both** (CSP effects: [app-trigger-actor.md → WebAssembly and workers](../borgiq-builder/references/app-trigger-actor.md#webassembly-and-workers-react-apps-only)). Ship the `.wasm` as a same-origin dist asset (counts toward the 50-file / 100 MB limits) and hand the worker an absolute URL resolved on the page (`new URL('assets/x.wasm', document.baseURI).href`) — relative URLs don't resolve inside a `blob:` worker. Fetch it (and any database file) at startup: after the ~2-minute token lifetime a late asset fetch fails. Changes apply on the **next Build** |
-| Theming | **every app ships `src/theme.css`** (Base Contract + one theme block from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md)), imported first in `main.tsx`; default theme `hearth`; components use tokens only — no literal colors/fonts/radii |
-| Build output size | ≤ 100 MB total; ≤ 50 `dist` files (static assets — a single-JS/single-CSS build leaves plenty) |
-| CSP / permissions options | **interpolatable, evaluated at build time** — `${{ }}` in the seven security options (`allowedScriptDomains`, `allowedStyleDomains`, `allowInlineScripts`, `allowInlineStyling`, `allowedPermissions`, `allowWebAssembly`, `allowBlobWorkers`) is resolved by the build and frozen into the manifest; a `${{ vars.* }}` change takes effect on the **next Build**, not the next page load |
-| Endpoint options | **interpolatable** — `${{ }}` is allowed in `endpoints` string fields (`actorId`/`workspaceSlug`/`canvasSlug`), resolved at Build; an unresolvable target bakes an `{ error }` that makes `useEndpoint` throw `EndpointResolutionError` by name |
-| `vite.config.ts` | must keep `base: './'`, `cssCodeSplit: false`, `inlineDynamicImports: true`, `maxParallelFileOps: 20`, and the stable hash-free `output` names |
-| Serving | dist assets are **piped same-origin through the API** (no 302-to-S3, no S3 origin in the CSP) |
-| npm packages | installed, but **postinstall scripts do not run** (unsupported) |
-| Token TTL / late asset fetch | the content token is short-lived (~2 minutes) and scopes the served assets; assets are cacheable but not immutable. Prefer eager imports; a `React.lazy` chunk isn't possible anyway (dynamic imports fold into the single JS) |
-| Serve before build | returns `409` — you must Build first, and rebuild after every source edit or endpoint/stream change |
+| `codeDir` | ≤ 200 files, ≤ 1 MiB, text only |
+| Overlays, endpoints, stream declarations | ≤ 50 each |
+| Build output | one JS, at most one CSS, `index.html`; ≤ 50 files, ≤ 100 MB |
+| Content token | ~2 minutes: load assets at startup, not lazily |
+| npm | installed by `deno install`; postinstall scripts do not run |
 
 ## Workflow
 
-1. **Create** the actor from the template (drag `ReactAppTriggerActor` onto a canvas — the file tree pre-seeds with a working Vite scaffold).
-2. **Edit** files in the full-page React editor (file tree + code editor) or via the `borgiq` CLI. Create `src/theme.css` from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) (default `hearth`) before writing components. Declare **endpoints** — and any **streams** the app follows (`options.streams`) — in the options form (or YAML), and asset overlays under `options.files`.
-3. **Build** — the editor's Build button, or `POST /v1/orgs/{org}/workspaces/{wsp}/canvases/{canvas}/apps/{actorId}/build`. Watch the status badge; on failure the editor surfaces the build error.
-4. **Open** the running app at `/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`.
-5. **Thumbnail** — once the built app renders correctly, screenshot it and attach the image as the actor's thumbnail ([app-thumbnail.md](../borgiq-builder/references/app-thumbnail.md)). Refresh it after a visible UI change.
+1. **Create** the actor in the editor, which seeds a working Vite scaffold, then `borgiq bundle pull` to work on it
+   locally.
+2. **Theme** first: write `src/theme.css` and replace the scaffold's sample CSS.
+3. **Design the backend** endpoint-first (decision 2), build it with the hub, and add the collection's migration
+   runner.
+4. **Declare** endpoints, streams and asset overlays in `options`.
+5. **Build**: the editor's Build button, `borgiq bundle build <dir>`, or
+   `POST /v1/orgs/{org}/workspaces/{wsp}/canvases/{canvas}/apps/{actorId}/build`.
+6. **Open** `/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}` and check it with real data.
+7. **Thumbnail**: screenshot the built app and attach it
+   ([app-thumbnail.md](../borgiq-builder/references/app-thumbnail.md)); refresh it after a visible UI change.
 
-## App thumbnail
+## Read when
 
-Give every app a thumbnail (the image on its canvas node and the workspace apps page): capture it with `borgiq canvas-actors app-url` and a headless browser, then attach it with `borgiq canvas-actors thumbnail set` or a bundle `thumbnail.<ext>` file, as [app-thumbnail.md](../borgiq-builder/references/app-thumbnail.md) describes.
+| Read | When |
+|---|---|
+| [react-app-sdk.md](../borgiq-builder/references/react-app-sdk.md) | Writing calls to endpoints, the viewer session or streams; explaining an SDK error |
+| [react-app-build.md](../borgiq-builder/references/react-app-build.md) | Creating or restructuring the project, `vite.config.ts`, a failed Build, WebAssembly or workers, every constraint |
+| [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) | Before writing components: tokens, Base Contract, recipes, icons, theme rules |
+| [react-app-theme-blocks.md](../borgiq-builder/references/react-app-theme-blocks.md) | Copying the chosen theme's CSS (read only that block) |
+| [app-trigger-actor.md → Content Security Policy](../borgiq-builder/references/app-trigger-actor.md#content-security-policy) | CDN domains, inline scripts or styles, browser permissions |
+| [app-thumbnail.md](../borgiq-builder/references/app-thumbnail.md) | Capturing and attaching the thumbnail |
+| [universal-trigger-actor.md](../borgiq-builder/references/universal-trigger-actor.md), [webhook-trigger-actor.md](../borgiq-builder/references/webhook-trigger-actor.md) | Configuring an endpoint's trigger |
+| [deployment.md](../borgiq-builder/references/deployment.md) | The app lives on a deployed workspace |
+| [app-trigger-actor.md](../borgiq-builder/references/app-trigger-actor.md) | Maintaining a legacy AppTriggerActor app |
 
-## Boundaries with the hub and sibling skills
+## Boundaries
 
-- **Wiring is the hub's job.** `borgiq-builder` owns edges, msgVars, IDs, and connecting the WebhookTrigger → task actors → WebhookResponse chain your endpoints target. Ask it to build the backend flow.
-- **Forms/interface pages → `borgiq-form-builder`.** Legacy raw-HTML AppTriggerActor apps are maintained via the hub's [`app-trigger-actor.md`](../borgiq-builder/references/app-trigger-actor.md) reference.
-- Same iframe/token/CSP model as AppTriggerActor — the security posture and `allowed*Domains` / `allowedPermissions` semantics are documented in the hub's [`app-trigger-actor.md` → Content Security Policy](../borgiq-builder/references/app-trigger-actor.md#content-security-policy). `allowWebAssembly` / `allowBlobWorkers` are React-app-only (see its [WebAssembly and workers](../borgiq-builder/references/app-trigger-actor.md#webassembly-and-workers-react-apps-only) section).
+- The hub owns edges, msgVars, IDs and the trigger → task actors → response chain your endpoints target. Use it to
+  build the backend flow.
+- Forms and interface pages go to `borgiq-form-builder`.

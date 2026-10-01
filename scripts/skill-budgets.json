@@ -7,9 +7,9 @@
       "description": 943
     },
     "borgiq-react-app-builder": {
-      "words": 5417,
-      "lines": 358,
-      "description": 804
+      "words": 1310,
+      "lines": 154,
+      "description": 490
     },
     "borgiq-agent-builder": {
       "words": 2038,
@@ -66,8 +66,7 @@
     "collection-api.md": 11211,
     "deno-actor.md": 9753,
     "python-actor.md": 6904,
-    "react-app-themes.md": 4128,
-    "stream-api.md": 5395
+    "stream-api.md": 5393
   },
   "arguments_in_shell_allowed": [
     "new-actor/SKILL.md"

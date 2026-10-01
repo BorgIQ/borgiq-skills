@@ -567,7 +567,7 @@ Accept: text/event-stream
 - **A separate cap pool.** App tails draw from their own pool of **100 per workspace** (`TAIL_LIMIT_EXCEEDED`), never from the 20 public/actor tails, plus a per-viewer ceiling of **4** open tails per app (`VIEWER_TAIL_LIMIT_EXCEEDED`) and **30 opens/min** per viewer. All carry `Retry-After: 30`.
 - **Read only.** There is no app-token append; an app writes to a stream by calling an endpoint whose flow appends.
 
-Do not call these routes by hand from app code — use the SDK, which attaches the token, dedupes connections per stream, resumes from its cursor, and falls back to polling `…/records` while capped. `useStreamTail`, `tailStream` and `readStream` are documented in the [React app builder skill](../../borgiq-react-app-builder/SKILL.md#following-a-stream--usestreamtail).
+Do not call these routes by hand from app code — use the SDK, which attaches the token, dedupes connections per stream, resumes from its cursor, and falls back to polling `…/records` while capped. `useStreamTail`, `tailStream` and `readStream` are documented in [react-app-sdk.md → Streams](react-app-sdk.md#streams).
 
 ## Response Format Reference
 
