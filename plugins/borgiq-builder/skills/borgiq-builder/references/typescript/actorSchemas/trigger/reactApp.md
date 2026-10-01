@@ -124,6 +124,12 @@ export function streamGrantMatches(grant: { slug?: string | null; slugPrefix?: s
 
 /** The options schema for the ReactAppTriggerActor (interpolated at build time). */
 export const ReactAppTriggerActorOptionsSchema = z.object({
+  /**
+   * The browser tab title of the app's own page, used when the app's code sets none through the
+   * SDK (`useTitle` / `setTitle`, which win while set). Shown as written; blank or absent keeps the
+   * platform default. Frozen into the build like every other option.
+   */
+  title: z.string().nullish(),
   /** interpolatable file overlay: asset-backed or templated files (wins on path collision) */
   files: z.array(ReactAppOptionsFileSchema).max(MAX_OPTIONS_FILES).nullish(),
   /** Phase II — named webhook-trigger endpoints consumed via `useEndpoint` (§15.4) */
@@ -157,6 +163,12 @@ export type ReactAppTriggerActorOptions = z.infer<typeof ReactAppTriggerActorOpt
  */
 export const ReactAppTriggerActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
+    title: {
+      type: BIQJsonSchemaType.String,
+      title: 'Tab title',
+      description: 'The browser tab title shown on the app\'s own page, as written. The app\'s code can override it per page with useTitle() / setTitle() from @borgiq/actors. Leave blank for the default. Takes effect after the app is rebuilt.',
+      ui: { options: { placeholder: 'e.g. Acme orders' } },
+    },
     files: {
       type: BIQJsonSchemaType.Array,
       title: 'Files',

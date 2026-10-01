@@ -1,8 +1,9 @@
 # React app SDK (`@borgiq/actors`)
 
 The browser SDK every ReactAppTriggerActor app ships with: named endpoints (`useEndpoint`, `callEndpoint`), the
-viewer's session (`useGetSession`, `getSession`) and live workspace streams (`useStreamTail`, `tailStream`,
-`readStream`). Read it when you write the app code that talks to BorgIQ, or when an SDK error needs explaining.
+viewer's session (`useGetSession`, `getSession`), the browser tab title (`useTitle`, `setTitle`) and live workspace
+streams (`useStreamTail`, `tailStream`, `readStream`). Read it when you write the app code that talks to BorgIQ, or
+when an SDK error needs explaining.
 
 ## Contents
 
@@ -10,6 +11,7 @@ viewer's session (`useGetSession`, `getSession`) and live workspace streams (`us
 - [Endpoints](#endpoints)
 - [Declaring endpoints](#declaring-endpoints)
 - [Viewer session](#viewer-session)
+- [Tab title](#tab-title)
 - [Streams](#streams)
 - [Declaring streams](#declaring-streams)
 - [Stream recipes](#stream-recipes)
@@ -105,6 +107,37 @@ const viewer = await getSession()                            // non-hook; reject
   on `session`.
 - It authorizes nothing. Enforce access with `apps` endpoints and per-app grants, and trust `trigger.user.appSessionId`,
   never a session id sent in a body or query.
+
+## Tab title
+
+The app runs in a cross-origin iframe and cannot write the tab's title itself, so the SDK asks the BorgIQ page that
+hosts it.
+
+```tsx
+import { useTitle, setTitle } from '@borgiq/actors'
+
+function OrderPage({ order }) {
+  useTitle(order ? `Order ${order.number}` : null)   // held while mounted, given back on unmount
+  …
+}
+
+setTitle('Saving…')   // non-hook: anywhere; setTitle(null) withdraws it
+```
+
+- **Precedence:** a title set in code, then the actor's `options.title`, then BorgIQ's default (`App | BorgIQ`).
+  `options.title` is a static title that needs no code; it accepts `${{ }}` and is frozen at Build
+  ([react-app-build.md](react-app-build.md#build-time-options)).
+- The tab shows the text as written, with nothing appended. BorgIQ strips control and invisible characters, collapses
+  whitespace and cuts it at 150 characters.
+- When several mounted components call `useTitle`, the most deeply nested, most recently mounted one wins: set a
+  general title in a layout and a specific one in each route. `null`, `undefined` or a blank string claims nothing, so
+  pass `null` while data loads. The latest `setTitle` outranks every mounted hook until `setTitle(null)`.
+- Only the app's own page (`/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`) honours it. A page that embeds the app
+  some other way, such as an interface page's web viewer, keeps its own tab title.
+- The `<title>` in `index.html`, and `document.title` written by the app, never reach the tab.
+- Both calls return nothing and never throw. They need SDK 2.4.0 (`version` from `@borgiq/actors`); on a BorgIQ that
+  predates them the tab keeps its default.
+- Under a local `npm run dev` they set the local page's `document.title`, and clearing restores the original.
 
 ## Streams
 
