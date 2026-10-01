@@ -45,13 +45,13 @@ borgiq auth login
 
 If `borgiq` commands fail with `401`, run `borgiq auth login` again. The five lifecycle slash commands (`/validate`, `/new-actor`, `/deploy`, `/test`, `/debug-flow`) wrap this CLI. See [borgiq-cli.md](plugins/borgiq-builder/skills/borgiq-builder/references/borgiq-cli.md) for the full reference.
 
-**Offline helpers (no auth, no script install).** ID generation, workflow validation, and JSON scaffolding are provided by the CLI itself — `borgiq generate`, `borgiq validate`, and `borgiq scaffold`. These replaced the local `skills/borgiq-builder/scripts/` TypeScript validators/generators that the skill used to run via `npx tsx`; the skill now shells out to the verified CLI instead. This requires **`@borgiq/cli` >= 0.8.0**; older CLIs lack these commands. The `scaffold-*.sh` helpers under `references/cli/scripts/` are retained and now mint IDs via `borgiq generate`.
+**Offline helpers (no auth, no script install).** ID generation, workflow validation, and JSON scaffolding are provided by the CLI itself — `borgiq generate`, `borgiq validate`, and `borgiq scaffold` (except `scaffold actor`, which reads the actor type's schema from the API and so needs auth). These replaced the local `skills/borgiq-builder/scripts/` TypeScript validators/generators that the skill used to run via `npx tsx`; the skill now shells out to the verified CLI instead. `generate` and `validate` require **`@borgiq/cli` >= 0.6.0** and `scaffold` requires **>= 0.8.0**; older CLIs lack these commands.
 
 **AI providers.** `borgiq ai-providers list/models/create/edit/delete` (workspace AI providers, including custom OpenAI-compatible providers referenced as `<slug>/<model-id>`) require **`@borgiq/cli` >= 0.12.0**; see `references/custom-ai-providers.md`.
 
 **App thumbnails.** `borgiq canvas-actors app-url` and `borgiq canvas-actors thumbnail set/get/rm`, and the bundle's `thumbnail.<ext>` file, require **`@borgiq/cli` >= 0.12.0**; see `references/app-thumbnail.md`.
 
-**Recipes.** `borgiq recipes list/get/apps/add` (saved, unversioned multi-actor starting points the API adds to a canvas) require **`@borgiq/cli` >= 0.13.0** (0.12.0 shipped without them; `borgiq recipes --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"`); see `references/borgiq-cli.md` *Start from a recipe*.
+**Recipes.** `borgiq recipes list/get/apps/add` (saved, unversioned multi-actor starting points the API adds to a canvas) require **`@borgiq/cli` >= 0.13.0** (0.12.0 shipped without them; check with `borgiq help recipes >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"`, since `borgiq recipes --help` exits 0 even when the command is missing); see `references/borgiq-cli.md` *Start from a recipe*.
 
 **Canvas bundles.** `borgiq bundle init/pull/push/pack/unpack/validate` require **`@borgiq/cli` >= 0.8.0**. If `borgiq bundle` is unavailable, upgrade (`npm install -g @borgiq/cli`); agents must fall back to the direct document/batch workflow when the command is unavailable.
 

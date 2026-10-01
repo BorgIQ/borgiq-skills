@@ -190,6 +190,39 @@ address (see [the base URL rules](#the-base-url-must-be-publicly-reachable)). A 
 URL: an AI Agent segment on a provider with none is refused before it is dispatched. The AI Agent's runtime logs name
 the provider `custom:<slug>`; canvases always reference `<slug>/<model-id>`.
 
+## CLI output and errors
+
+Flags: `borgiq ai-providers <command> --help`. What the output means:
+
+- `list [--provider <id>] --json`: an array of settings, built-in provider credential links (`name` is the provider)
+  and custom providers (`provider: custom`, `name` is the slug), with `id`, `connectionId`, `connectionMissing` and
+  `modelCount` (entries in `data.models`; the table's `MODELS`). `connectionMissing: true` means the linked connection
+  was deleted, so the models cannot resolve until `ai-providers edit <name> --connection <key>`. A custom row also has
+  `effectiveBaseUrl` (the setting's `data.baseURL` override, else `derivedBaseUrl`: the connection's own base URL, else
+  the connection type's vendor default; absent when nothing supplies one; the table's `BASE URL`) and `baseUrlSource`
+  (`setting`, `connection` or `connectionType`).
+- `models [--custom] [--provider <id-or-slug>] --json`: a top-level array of `{ ref, label, provider, group, custom,
+  agent }`, the known models and then each custom catalog as `<slug>/<model-id>`. A built-in provider's unlisted
+  `<provider>/<model-id>` works in actors but is not listed. `agent` (the `AGENT` column) says whether the model may
+  drive an AI Agent actor: a known model when the AI Agent's curated list has it, a catalog model unless its entry says
+  `agent: false`.
+- `create --provider openai --connection <key>` links a built-in provider's connection (the name defaults to the
+  provider id). A custom provider created with no models gets a warning: actors cannot use it until its catalog is
+  filled.
+- `edit` sends a full replacement, resending unchanged parts; with no flags it prints `Nothing to update.` and sends
+  nothing. `--data-file` replaces the whole non-secret `data` object and warns when that replaces a catalog.
+- `delete <name> -y` (or `--force`).
+
+| Situation | Result |
+|---|---|
+| A custom-only flag (`--base-url`, `--no-base-url`, `--models`, `--models-file`, `--add-model`, `--remove-model`) on a built-in provider | Usage error, exit 2: `<flag> applies to custom providers only …` |
+| `--provider custom` without `--name`, not interactive | Usage error, exit 2: `--name is required for a custom provider.` |
+| `--base-url` with `--no-base-url`, `--connection` with `--no-connection`, or `--models` with `--models-file` | Usage error, exit 2: `Use either … not both.` |
+| `--connection` names a key that does not exist | Usage error, exit 2: `Connection '<x>' not found. …` |
+| `models --provider <x>` matches nothing | `No provider named '<x>'. …` on stderr |
+| `edit` / `delete` names no provider | Not found, exit 5: `AI provider '<x>' not found in workspace. …` |
+| `edit --name` or `delete` of a provider canvases reference | Proceeds after a stderr warning naming them: `Warning: <n> canvas(es) reference this provider (<names>) — their "<slug>/<model-id>" models will stop resolving after the rename` (or `delete`) |
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |

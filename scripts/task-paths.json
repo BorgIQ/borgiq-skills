@@ -155,15 +155,13 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/borgiq-cli.md",
-        "borgiq-builder/references/cli/canvas-bundles.md",
-        "borgiq-builder/references/cli/cli-setup-scripts.md"
+        "borgiq-builder/references/cli/canvas-bundles.md"
       ]
     },
     {
       "task": "Deploy a bundle (model-invoked)",
       "files": [
         "borgiq-builder/SKILL.md",
-        "borgiq-builder/references/borgiq-cli.md",
         "borgiq-builder/references/cli/canvas-bundles.md",
         "borgiq-builder/references/deployment.md"
       ]
@@ -172,7 +170,7 @@
       "task": "Deploy via the deploy command",
       "files": [
         "deploy/SKILL.md",
-        "borgiq-builder/references/cli/cli-data-formats.md"
+        "borgiq-builder/references/deployment.md"
       ]
     },
     {

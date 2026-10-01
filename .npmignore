@@ -25,7 +25,6 @@ release-please-config.json
 # of @borgiq/skills don't run TypeScript validators (they invoke the borgiq
 # CLI directly). The validators stay accessible via git clone.
 plugins/borgiq-builder/skills/borgiq-builder/scripts/
-plugins/borgiq-builder/skills/borgiq-builder/references/cli/scripts/
 
 # Test/build artifacts
 *.skill
