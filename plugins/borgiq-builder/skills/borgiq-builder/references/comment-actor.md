@@ -1,23 +1,22 @@
 # CommentActor
 
-CommentActor is a non-functional actor used for adding visual annotations to workflows. It does not participate in message flow or execution—it's purely for documentation purposes.
+A CommentActor is a note on the canvas: its `description` renders as markdown; it has no ports or edges and never runs.
 
-## Workflow Setup Comment
+## When to add one
 
-A CommentActor is optional. In a canvas bundle, the canvas's setup instructions, prerequisites, and spec belong in its `README.md` (bundle root). Add a setup CommentActor when the user wants the notes on the canvas itself, or when you return a YAML document without a bundle; make it the first actor in the YAML and position it above all other actors (negative `y` value).
+- It is optional. In a canvas bundle, the canvas's setup instructions, prerequisites and brief spec go in the bundle's `README.md` ([the canvas README](cli/canvas-bundles.md#the-canvas-readme)).
+- Add a setup CommentActor only when the user wants the notes on the canvas itself, or when you return a YAML document without a bundle. Make it the first actor in the YAML and place it above the new workflow: negative `y` (e.g. `y: -300`), with the trigger at `y: 0`. In a bundle the position goes in `canvas.yaml` like any other actor's.
+- Never add one as part of a single-actor addition.
+- Update a comment when what it describes changes.
 
-The setup comment should include:
-- **Brief description** of what the workflow does
-- **Setup instructions** (connections to configure, webhook URLs to register, etc.)
-- **Prerequisites** (required workspace settings, external service configuration)
-- **TODOs** for known limitations or future improvements
+A setup comment gives what the workflow does, setup steps (connections, webhook URLs to register), prerequisites (workspace settings, external services) and known TODOs.
 
-### Example - Setup Comment
+## Example
 
 ```yaml
 ACTR01jpskpc493pyaf8mmgby52sw5:
-  version: 1
   type: CommentActor
+  version: 1
   name: Comment
   msgVar: comment
   description: |
@@ -27,7 +26,6 @@ ACTR01jpskpc493pyaf8mmgby52sw5:
     ## Setup
     1. Configure Gmail connection in workspace settings
     2. Set up webhook URL in external service
-    3. Test with sample payload
 
     ## TODO
     - Support monitoring multiple inboxes via Connection ID
@@ -40,76 +38,7 @@ ACTR01jpskpc493pyaf8mmgby52sw5:
       bgColor: '#ffe066'
       textColor: black
   schemas: {}
-  continueOnError: false
-  enableLTM: false
-  enableSTM: false
   id: ACTR01jpskpc493pyaf8mmgby52sw5
-  position:
-    x: 0
-    'y': -300
-  edges: {}
-```
-
-### Positioning
-
-Position the CommentActor **above** all other actors by using a negative `y` value (e.g., `y: -300`). The first functional actor (trigger) should start at `y: 0`.
-
-## Use Cases
-
-- **Workflow setup comment** — setup instructions and spec at the top of a workflow
-- Document workflow sections with explanations
-- Add TODO notes for future improvements
-- Provide setup instructions or prerequisites
-- Explain complex logic to other team members
-
-## More Examples
-
-### TODO Comment
-
-```yaml
-ACTR01jpskpc493pyaf8mmgby52sw5:
-  version: 1
-  type: CommentActor
-  name: Comment
-  msgVar: comment
-  description: '# TODO: Support for Monitoring Multiple Inboxes (via Connection ID)'
-  isActive: true
-  sourcePorts: []
-  configuration:
-    options:
-      width: 510px
-      height: 115px
-      bgColor: '#ffe066'
-      textColor: black
-  schemas: {}
-  continueOnError: false
-  enableLTM: false
-  enableSTM: false
-  id: ACTR01jpskpc493pyaf8mmgby52sw5
-  position:
-    x: 0
-    'y': -300
-  edges: {}
-```
-
-### Minimal Comment (no styling)
-
-```yaml
-ACTR01kk5b1et45zvmrkpt7qgsey1x:
-  type: CommentActor
-  version: 1
-  name: Comment
-  msgVar: comment
-  description: The Comment actor allows for in-canvas descriptions.
-  isActive: true
-  continueOnError: false
-  enableLTM: false
-  enableSTM: false
-  sourcePorts: []
-  configuration:
-    options: {}
-  schemas: {}
-  id: ACTR01kk5b1et45zvmrkpt7qgsey1x
   position:
     x: 0
     'y': -300
@@ -118,19 +47,11 @@ ACTR01kk5b1et45zvmrkpt7qgsey1x:
 
 ## Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `width` | string | CSS width (e.g., `"510px"`, `"300px"`) |
-| `height` | string | CSS height (e.g., `"115px"`, `"200px"`) |
-| `bgColor` | string | Background color (hex or CSS color name) |
-| `textColor` | string | Text color (hex or CSS color name) |
+All optional; `options: {}` gives an unstyled note. Schema: [typescript/actorSchemas/other/comment.md](typescript/actorSchemas/other/comment.md).
 
-## Notes
+| Option | Type | Meaning |
+|---|---|---|
+| `width`, `height` | string | CSS size, e.g. `510px` |
+| `bgColor`, `textColor` | string | Hex or CSS color name |
 
-- The `description` field supports **markdown** that is rendered in the UI
-- For single-line descriptions, use a plain string or quoted string: `description: '# My Title'`
-- For multi-line descriptions, use YAML `|` block scalar: `description: |`
-- `sourcePorts` should be an empty array `[]`
-- `edges` should be an empty object `{}`
-- CommentActors are not connected to other actors
-- When editing workflows, update the CommentActor if setup instructions or spec changed
+For a one-line note, `description` can be a quoted string (`'# My Title'`); use a `|` block for several lines.

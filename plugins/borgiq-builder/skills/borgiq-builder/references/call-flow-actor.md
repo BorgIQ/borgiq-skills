@@ -1,365 +1,68 @@
 # Call Flow Actor Reference
 
-The CallFlowActor invokes a sub-flow by calling a CallableTriggerActor in another workflow. It enables parent flows to execute reusable sub-flows and optionally wait for their response.
+The CallFlowActor starts a sub-flow by sending `payload` to a [CallableTriggerActor](callable-trigger-actor.md) in the same canvas, another canvas or another workspace, and, when it waits, emits what the sub-flow's [CallableResponseActor](callable-response-actor.md) returns. Read this for its options, what it emits, and its errors and timeouts.
 
-## Table of Contents
+## Options
 
-- [Overview](#overview)
-- [Configuration Structure](#configuration-structure)
-- [Options Reference](#options-reference)
-- [TypeScript Schema Definition](#typescript-schema-definition)
-- [Emitted Message](#emitted-message)
-- [Identifying the Target Sub-Flow](#identifying-the-target-sub-flow)
-- [Examples](#examples)
-- [Workflow Diagram](#workflow-diagram)
-- [Use Cases](#use-cases)
-- [Error Handling](#error-handling)
-- [Best Practices](#best-practices)
-- [Related Actors](#related-actors)
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `callableTriggerActorId` | string | — (required) | Id of the CallableTriggerActor to start: `ACTR` + 26 lowercase ULID characters (digits and letters except `i`, `l`, `o`, `u`). Copy it from the sub-flow's trigger. |
+| `payload` | any | — (required) | The sub-flow's input. Its keys must match the trigger's `schemas.inputs`; send only what the sub-flow reads. |
+| `workspaceSlug` | string, 5–10 chars, lowercase kebab-case | current workspace | Workspace of the sub-flow; it must be in the same organization |
+| `canvasSlug` | string, 2–255 chars, lowercase kebab-case | current canvas | Canvas of the sub-flow |
+| `waitForResponse` | boolean | `true` when omitted | Wait for the sub-flow's CallableResponseActor. Always set it: the editor form pre-fills `false`. Use `false` only when you do not need the result. |
+| `timeoutInSeconds` | number > 0 | no timeout | Longest wait for the response (waiting calls only). The editor pre-fills `900`. |
 
-## Overview
+- Put expressions straight into `payload`. The CallFlowActor ignores `configuration.inputs`; when an AI agent calls it as a tool, the tool's arguments become the payload.
+- Always set `timeoutInSeconds` on a waiting call; without it the call can wait forever.
 
-CallFlowActor is the counterpart to CallableTriggerActor. While CallableTriggerActor starts a sub-flow when invoked, CallFlowActor is the actor that performs the invocation from the parent flow. This enables:
+Exact schema: [typescript/actorSchemas/task/callFlow.md](typescript/actorSchemas/task/callFlow.md).
 
-- Invoking reusable sub-flows from parent workflows
-- Passing payload data to sub-flows
-- Waiting for sub-flow completion and receiving results
-- Fire-and-forget execution for asynchronous processing
-- Cross-workspace and cross-canvas sub-flow invocation
-
-## Configuration Structure
+## Example
 
 ```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01xxxxx:
-    type: CallFlowActor
-    version: 1
-    name: Call Flow
-    msgVar: call_flow
-    description: Call a sub-flow and wait for response
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      options:
-        workspaceSlug: target-workspace
-        canvasSlug: target-canvas
-        callableTriggerActorId: ACTR01kd6tesvky0mh8x1css3sv5yg
-        payload: ${{ msg.trigger.body }}
-        waitForResponse: true
-        timeoutInSeconds: 60
-    schemas: {}
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
-
-## Options Reference
-
-| Option | Type | Required | Default | Description |
-|--------|------|----------|---------|-------------|
-| `callableTriggerActorId` | string | Yes | - | The actor ID of the CallableTriggerActor to invoke: `ACTR` + 26 lowercase ULID characters (digits and letters except `i`, `l`, `o`, `u`). Copy it from the sub-flow's trigger |
-| `payload` | any | Yes | - | The data to send to the sub-flow's CallableTriggerActor |
-| `workspaceSlug` | string | No | Current workspace | The workspace slug where the target CallableTriggerActor resides |
-| `canvasSlug` | string | No | Current canvas | The canvas slug where the target CallableTriggerActor resides |
-| `waitForResponse` | boolean | No | false | Whether to wait for the sub-flow to complete and return a response |
-| `timeoutInSeconds` | number | No | No timeout | Maximum time to wait for sub-flow response (only applies when `waitForResponse: true`) |
-
-## TypeScript Schema Definition
-
-The complete TypeScript schema for CallFlowActor options:
-
-```typescript
-import { z } from 'zod';
-
-import { BIQJsonSchema, BIQJsonSchemaType } from '../../schemas/index.js';
-
-/** The options schema for the CallFlowActor */
-export const CallFlowActorOptionsSchema = z.object({
-  workspaceSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'need a valid borgIQ workspace slug')
-    .min(5, 'must be 5 or more characters long').max(10, 'must be 10 or fewer characters long').nullish()
-    .describe('The workspace the Callable Trigger Actor is in, defaults to the current workspace'),
-  canvasSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'need a valid borgIQ canvas slug')
-    .min(2, 'must be 2 or more characters long').max(255, 'must be 255 or fewer characters long').nullish()
-    .describe('The canvas the Callable Trigger Actor is in, defaults to the current canvas'),
-  callableTriggerActorId: z.string().regex(new RegExp('ACTR[0123456789abcdefghjkmnpqrstvwxyz]{26}$'), 'need a valid borgIQ callable trigger actor id')
-    .describe('The actor id of the Callable Trigger Actor that wants to be triggered'),
-  waitForResponse: z.boolean().nullish()
-    .describe('If this actor should wait for a response from the Callable Response Actor from the called flow or emit a message immediately'),
-  timeoutInSeconds: z.number().positive().nullish()
-    .describe('The timeout in seconds for the sub-flow to return a response, defaults to no timeout'),
-  payload: z.any()
-    .describe('The payload to send to the Callable Trigger Actor, the parameters of the callable trigger flow'),
-});
-
-export type CallFlowActorOptions = z.infer<typeof CallFlowActorOptionsSchema>;
-
-export const CallFlowActorOptionsJsonSchema: BIQJsonSchema = {
-  properties: {
-    workspaceSlug: {
-      type: BIQJsonSchemaType.String,
-      title: 'Workspace Slug',
-      description: 'The workspace the Callable Trigger Actor is in, defaults to the current workspace',
-    },
-    canvasSlug: {
-      type: BIQJsonSchemaType.String,
-      title: 'Canvas Slug',
-      description: 'The canvas the Callable Trigger Actor is in, defaults to the current canvas',
-    },
-    callableTriggerActorId: {
-      type: BIQJsonSchemaType.String,
-      title: 'Callable Trigger Actor ID',
-      description: 'The actor id of the Callable Trigger Actor that wants to be triggered',
-      pattern: 'ACTR[0123456789abcdefghjkmnpqrstvwxyz]{26}$',
-    },
-    waitForResponse: {
-      type: BIQJsonSchemaType.Boolean,
-      title: 'Wait for Response',
-      description: 'If this actor should wait for a response from the Callable Response Actor from the called flow or emit a message immediately',
-      default: false,
-      ui: {
-        component: 'switch',
-      },
-    },
-    timeoutInSeconds: {
-      type: BIQJsonSchemaType.Number,
-      title: 'Timeout in Seconds',
-      description: 'The timeout in seconds for the sub-flow to return a response, defaults to no timeout',
-      default: 900, // editor default (15 minutes); omitted in YAML means no timeout
-    },
-    payload: {
-      type: BIQJsonSchemaType.Any,
-      title: 'Payload',
-      description: 'The payload to send to the Callable Trigger Actor, the parameters of the callable trigger flow',
-      ui: {
-        options: {
-          editInModal: true,
-        }
-      }
-    },
-  },
-  required: ['callableTriggerActorId', 'payload'],
-};
-
-export const CallFlowActorReceiveResultSchema = z.any();
-
-export type CallFlowActorResult = z.infer<typeof CallFlowActorReceiveResultSchema>;
-```
-
-## Emitted Message
-
-The CallFlowActor emits different messages depending on `waitForResponse`:
-
-**When `waitForResponse: true`:**
-The actor emits the response from the sub-flow's CallableResponseActor:
-
-```json
-{
-  "result": "processed data",
-  "status": "success"
-}
-```
-
-**When `waitForResponse: false`:**
-The actor emits immediately with the invoked flowrun identifiers:
-
-```json
-{
-  "flowrunId": "FLRN01kd6w17z2vqckyrp4a02yshdz",
-  "flowrunJobId": "FJOB01kd6w17z2vqckyrp4a02yshe1"
-}
-```
-
-These IDs can be used for tracking or debugging the spawned sub-flow execution.
-
-## Identifying the Target Sub-Flow
-
-CallFlowActor uses three attributes to identify the target CallableTriggerActor:
-
-| Attribute | Description | Default |
-|-----------|-------------|---------|
-| `workspaceSlug` | The workspace containing the target sub-flow | Current workspace (CallFlowActor's workspace) |
-| `canvasSlug` | The canvas (workflow) containing the target sub-flow | Current canvas (CallFlowActor's canvas) |
-| `callableTriggerActorId` | The actor ID of the CallableTriggerActor | Required, no default |
-
-### Slug Resolution
-
-```yaml
-# Call sub-flow in the SAME workspace and canvas
+type: CallFlowActor
+version: 1
+name: Look Up User
+msgVar: lookup_result
+continueOnError: true
+sourcePorts:
+  - id: SPRTdefault
 configuration:
   options:
-    # workspaceSlug: omitted - uses current workspace
-    # canvasSlug: omitted - uses current canvas
-    callableTriggerActorId: ACTR01kd6tesvky0mh8x1css3sv5yg
-    payload: ${{ msg.data }}
-
-# Call sub-flow in a DIFFERENT canvas (same workspace)
-configuration:
-  options:
-    # workspaceSlug: omitted - uses current workspace
-    canvasSlug: data-processing
-    callableTriggerActorId: ACTR01kd6tesvky0mh8x1css3sv5yg
-    payload: ${{ msg.data }}
-
-# Call sub-flow in a DIFFERENT workspace
-configuration:
-  options:
-    workspaceSlug: shared-utils
-    canvasSlug: notification-service
-    callableTriggerActorId: ACTR01kd6tesvky0mh8x1css3sv5yg
-    payload: ${{ msg.data }}
-```
-
-## Examples
-
-### Synchronous Call (Wait for Response)
-
-```yaml
-configuration:
-  options:
-    canvasSlug: process-order
-    callableTriggerActorId: ACTR01kd6tesvky0mh8x1css3sv5yg
-    payload:
-      orderId: ${{ msg.trigger.body.orderId }}
-      items: ${{ msg.trigger.body.items }}
-    waitForResponse: true
-    timeoutInSeconds: 120
-```
-
-### Asynchronous Call (Fire-and-Forget)
-
-```yaml
-configuration:
-  options:
-    canvasSlug: send-notification
-    callableTriggerActorId: ACTR01km9s346q3d25vt4f5v37e3s3
-    payload:
-      channel: email
-      recipient: ${{ msg.user.email }}
-      subject: Order Confirmed
-      message: Your order has been confirmed
-    waitForResponse: false
-```
-
-### Cross-Workspace Call
-
-```yaml
-configuration:
-  options:
-    workspaceSlug: shared-ws
-    canvasSlug: lookup-user
+    workspaceSlug: shared-ws      # omit for the current workspace
+    canvasSlug: lookup-user       # omit for the current canvas
     callableTriggerActorId: ACTR01ke28jt97kb6cq643dzvmxxqk
     payload:
       userId: ${{ msg.trigger.body.userId }}
+      profile: ${{ msg.fetch_user.body }}
     waitForResponse: true
     timeoutInSeconds: 30
+schemas: {}
 ```
 
-### Dynamic Payload from Upstream Actor
+## What it emits
+
+| `waitForResponse` | Emits |
+|---|---|
+| `true` | the `payload` of the sub-flow's CallableResponseActor, when it runs |
+| `false` | at once: `{ flowrunId, flowrunJobId }` of the started sub-flow run, for tracking or debugging |
+
+## Errors and timeouts
+
+With `continueOnError: true` the error lands in `err.<msgVar>`; without it the parent run fails.
+
+| Case | Error `name` |
+|---|---|
+| The sub-flow's CallableResponseActor sets `throwError: true` | `CallableResponseError`, with the response `payload` in `metadata` |
+| No response within `timeoutInSeconds` | `TimeoutError` |
+| The sub-flow cannot be started (unknown workspace, canvas or trigger id, or a trigger missing from a deployed canvas's active build) | `InvocationError` on a fire-and-forget call; a waiting call gets no error and ends only at its timeout |
 
 ```yaml
+# Downstream of the CallFlowActor above
 configuration:
   inputs:
-    userData: ${{ msg.fetch_user.body }}
-  options:
-    canvasSlug: enrich-data
-    callableTriggerActorId: ACTR01kfbf5kznwj47tan9zt24mnpz
-    payload: ${{ inputs.userData }}
-    waitForResponse: true
+    hasError: ${{ !Q.isNil(err.lookup_result) }}
+    timedOut: ${{ err.lookup_result?.name === 'TimeoutError' }}
+    result: ${{ msg.lookup_result ?? err.lookup_result?.metadata }}
 ```
-
-## Workflow Diagram
-
-```
-Parent Flow:
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Trigger   │────>│ CallFlowActor│────>│  Continue   │
-└─────────────┘     └──────┬───────┘     └─────────────┘
-                           │ invokes           ▲
-                           ▼                   │ returns (if waitForResponse)
-Sub-Flow:                                      │
-┌─────────────────┐     ┌─────────┐     ┌──────┴────────────┐
-│CallableTrigger  │────>│ Process │────>│CallableResponse   │
-└─────────────────┘     └─────────┘     └───────────────────┘
-```
-
-## Use Cases
-
-| Scenario | Description |
-|----------|-------------|
-| Reusable Business Logic | Extract common operations (validation, enrichment) into callable sub-flows |
-| Modular Architecture | Break complex workflows into smaller, maintainable sub-flows |
-| Cross-Team Collaboration | Call sub-flows maintained by other teams in shared workspaces |
-| Parallel Processing | Fire multiple async sub-flows for concurrent execution |
-| Service Composition | Compose workflows from multiple specialized sub-flows |
-
-## Error Handling
-
-### Sub-Flow Errors
-
-When the sub-flow's CallableResponseActor sets `throwError: true`, the CallFlowActor fails with a `CallableResponseError` whose `metadata` holds the response `payload`:
-
-```yaml
-# CallFlowActor in parent flow
-ACTR01callFlow:
-  type: CallFlowActor
-  msgVar: sub_flow_result
-  continueOnError: true  # Handle error gracefully
-  configuration:
-    options:
-      canvasSlug: validate-data
-      callableTriggerActorId: ACTR01kx45hy43kwjrp1xpa7z3dj8f
-      payload: ${{ msg.data }}
-      waitForResponse: true
-
-# Downstream actor handling the error
-ACTR01handleResult:
-  configuration:
-    inputs:
-      hasError: ${{ !Q.isNil(err.sub_flow_result) }}
-      result: ${{ msg.sub_flow_result ?? err.sub_flow_result?.metadata }}
-```
-
-### Timeout Handling
-
-When `waitForResponse: true` and the sub-flow doesn't respond within `timeoutInSeconds`:
-
-```yaml
-ACTR01callFlow:
-  type: CallFlowActor
-  msgVar: call_result
-  continueOnError: true
-  configuration:
-    options:
-      callableTriggerActorId: ACTR01kssz5awsh8vhtpre95b9ee0z
-      payload: ${{ msg.data }}
-      waitForResponse: true
-      timeoutInSeconds: 30  # Fail after 30 seconds
-
-# Handle timeout in downstream actor
-configuration:
-  inputs:
-    timedOut: ${{ !Q.isNil(err.call_result) && err.call_result?.message?.includes('timeout') }}
-```
-
-## Best Practices
-
-1. **Set appropriate timeouts** - Always set `timeoutInSeconds` when using `waitForResponse: true` to prevent indefinite waiting
-2. **Use fire-and-forget wisely** - Only use `waitForResponse: false` when you don't need the sub-flow result
-3. **Handle errors gracefully** - Set `continueOnError: true` and check for errors in downstream actors
-4. **Document sub-flow interfaces** - Clearly document what payload structure each CallableTriggerActor expects
-5. **Consider workspace permissions** - Cross-workspace calls require appropriate access permissions
-6. **Keep payloads focused** - Only send the data the sub-flow actually needs
-
-## Related Actors
-
-- [CallableTriggerActor](callable-trigger-actor.md) - Starts sub-flows when invoked by CallFlowActor
-- [CallableResponseActor](callable-response-actor.md) - Returns data from sub-flows back to CallFlowActor

@@ -84,7 +84,7 @@ configuration:
 `headers: { content-type: application/json }` and `body: ${{ msg.<task>.<field> }}`, or return
 `Signal.webhookRespond({...})` from a code actor or the UniversalTriggerActor itself. With `respondImmediately: true`
 the trigger answers at once, from a `response` template that may compute the body from `trigger.request` and `ctx`.
-Both are in [webhook-trigger-actor.md → Response Modes](webhook-trigger-actor.md#response-modes).
+Both are in [webhook-trigger-actor.md → Responding to the caller](webhook-trigger-actor.md#responding-to-the-caller).
 
 **Files.** Send `FormData` and do not set `Content-Type` (the browser adds the boundary). On a POST or PUT, each file
 part reaches the trigger's `body` as a BIQFile under its field name (`msg.<trigger>.body.file`); pass it to a code
