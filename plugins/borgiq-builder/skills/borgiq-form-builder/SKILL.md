@@ -26,7 +26,7 @@ Interface pages are the **form surface** of BorgIQ. Two actors share one page-co
 2. **Form width.** `formWidth` is `full` (data-dense layouts), `half` (default; a centered half-width column) or `adjustable` (a centered column the viewer can resize).
 3. **Single page vs multi-step.** Group within one page using `section` and `collapse`. Reach for a wizard (chained InterfaceActors or `onSubmit: nextInterface`) only when steps depend on prior answers or the form is long enough that users would abandon a single page.
 4. **Validation strategy.** `required: true` for mandatory, `readOnly: true` for display-only context, conditional fields for branching logic. The browser validates, and the server re-validates the submitted body against the page (400 with per-field errors).
-5. **Theme.** Native page chrome takes `themeColor` (primary color: hex `#RRGGBB` or a Mantine color name such as `blue`) and `backgroundColor` (a CSS color or Mantine color name); there is no font setting. `themes.md` palettes (10 pre-built — Modern Minimalist, Ocean Depths, etc.) can supply the colors. Custom HTML inside a `webViewer` is themed differently: use the app theme library (`react-app-themes.md`, default `hearth`) — it's plain CSS, no React required.
+5. **Theme.** Native page chrome takes `themeColor` (primary color: hex `#RRGGBB` or a Mantine color name such as `blue`) and `backgroundColor` (a CSS color or Mantine color name); there is no font setting. `interface-pages.md` page colors (10 palettes — Modern Minimalist, Ocean Depths, etc.) can supply them. Custom HTML inside a `webViewer` is themed differently: use the app theme library (`react-app-themes.md`, default `hearth`) — it's plain CSS, no React required.
 6. **webViewer scope.** Use it to embed external pages or hand-written HTML/CSS *within* the form (e.g., a help panel, a third-party widget). Don't try to rebuild the form itself in webViewer — use the native components.
 
 ## Workhorse components
@@ -46,7 +46,7 @@ Reach for these first; they cover ~80% of forms.
 | `markdown` | Rich instructional content (formatted help, intros) |
 | `formButton` | Submit button (label in `text`) — required to trigger the workflow |
 
-See [`references/interface-pages.md`](../borgiq-builder/references/interface-pages.md) for the full 40+ component catalog, including selection (`multiSelect`, `multiCheckbox`, `buttonGroup`), date/time, arrays, dynamic defaults, and conditional fields.
+See [`references/interface-components.md`](../borgiq-builder/references/interface-components.md) for the full catalog of 51 components, including selection (`multiSelect`, `multiCheckbox`, `buttonGroup`), date/time, arrays, and conditional fields.
 
 ## Anti-patterns
 
@@ -60,7 +60,7 @@ See [`references/interface-pages.md`](../borgiq-builder/references/interface-pag
 
 Two surfaces, two mechanisms:
 
-- **Native page + form components** are themed by the page config (`themeColor`, `backgroundColor`); take the colors from a palette in [`references/themes.md`](../borgiq-builder/references/themes.md). The page follows the viewer's light/dark scheme.
+- **Native page + form components** are themed by the page config (`themeColor`, `backgroundColor`); take the colors from a palette in the [page colors table](../borgiq-builder/references/interface-pages.md#page-colors). The page follows the viewer's light/dark scheme.
 - **Custom HTML inside a `webViewer`** uses the app theme library — [`references/react-app-themes.md`](../borgiq-builder/references/react-app-themes.md). It's framework-agnostic CSS (custom properties + class recipes), so it works in the webViewer's raw HTML+CSS with no React and no CDN: paste the Base Contract + one theme block (default `hearth`, or the theme closest to the page's palette) into the webViewer's styles, build markup on the recipe classes, and use Tabler icons as inline SVG with `stroke="currentColor"`. Never hard-code colors — tokens only, and dark mode comes wired in.
 
 ## Wiring to downstream actors
@@ -80,11 +80,11 @@ The `body` keys come from your `key:` declarations on each component in the page
 
 | File | What's inside |
 |---|---|
-| [`references/interface-pages.md`](../borgiq-builder/references/interface-pages.md) | Full page schema, all 40+ component types, dynamic defaults, conditional fields, onSubmit behavior, design guidelines |
+| [`references/interface-pages.md`](../borgiq-builder/references/interface-pages.md) | Page schema: options, page colors, nesting, prefill, validation, access, onSubmit; links the complete examples |
+| [`references/interface-components.md`](../borgiq-builder/references/interface-components.md) | Every component type and its props |
 | [`references/interface-trigger-actor.md`](../borgiq-builder/references/interface-trigger-actor.md) | InterfaceTriggerActor config, emitted message schema, downstream field access |
 | [`references/interface-actor.md`](../borgiq-builder/references/interface-actor.md) | InterfaceActor config, two-port pattern, async approval workflows |
 | [`references/react-app-themes.md`](../borgiq-builder/references/react-app-themes.md) | The app theme library for custom HTML in webViewer: token contract, base stylesheet, component recipes, five theme skins, Tabler icon rules |
-| [`references/themes.md`](../borgiq-builder/references/themes.md) | 10 pre-built themes with palettes, typography, and best-use contexts |
 | [`references/typescript/index.md`](../borgiq-builder/references/typescript/index.md) | TypeScript/Zod schemas for every form component |
 
 ## When to hand off to other spokes

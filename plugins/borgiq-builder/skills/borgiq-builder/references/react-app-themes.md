@@ -2,7 +2,7 @@
 
 The theming system for React apps built in a **ReactAppTriggerActor**. One shared **token contract**, one **base stylesheet**, and **five theme skins** — all defining the same custom-property names, so every generated app is written against identical tokens and swapping one CSS block reskins the whole app with zero component changes.
 
-Not to be confused with [themes.md](themes.md) (presentation/marketing color palettes) — this document is the app-UI token system.
+Not to be confused with [interface page colors](interface-pages.md#page-colors) — this document is the app-UI token system.
 
 This library mirrors the BorgIQ platform's theme definitions; when token values change there, update this file to match.
 
