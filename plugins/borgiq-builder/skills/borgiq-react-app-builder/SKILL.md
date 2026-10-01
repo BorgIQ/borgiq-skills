@@ -29,10 +29,12 @@ Two edit surfaces, one actor:
 3. **Endpoints + `authorizationLevel: 'apps'`.** Every backend call pairs an endpoint with a webhook-capable trigger — a `WebhookTriggerActor`, or a `UniversalTriggerActor` with its webhook source enabled — set to `authorizationLevel: 'apps'` (only tokened app calls fire it). A WebhookTriggerActor replies via downstream actors → a **WebhookResponseActor**; a UniversalTriggerActor can instead reply from its own `receive` code (`Signal.webhookRespond`) with no downstream chain — choose per route, see [Designing the backend — endpoint-first](#designing-the-backend--endpoint-first). `'public'` webhooks skip token verification entirely — only use them for genuinely public endpoints.
 4. **Endpoints are the authorization grant — per app-actor, frozen at Build.** An app can fire **only** the webhooks it declares as endpoints: the webhook allowlist is baked into the build manifest, so the API returns `401` for any undeclared webhook — even one on the same canvas (and `401` until the app is built at all). Leave an endpoint's workspace/canvas blank to target a webhook on **this** canvas (the common case), or set them (by **slug**) to target another canvas/workspace **in the same org** (org is the hard boundary). Endpoint edits — including a target's `triggerKey` — take effect on the **next Build**, not the next save.
 5. **Every app ships a theme — no exceptions.** Create `src/theme.css` (Base Contract + exactly one theme block from [react-app-themes.md](../borgiq-builder/references/react-app-themes.md)) and import it first in `src/main.tsx`. **Default to the `hearth` theme** unless the customer names one of the five themes (`hearth`, `ledger`, `meridian`, `signal`, `bloom`) or supplies brand colors (then apply the reference's brand-override procedure). Components use only the theme's tokens — never literal colors, fonts, radii, or shadows. An app with hard-coded styling or no `theme.css` is incomplete; fix it before Build.
-6. **Keep `vite.config.ts`'s single-file build settings.** `base: './'`, `cssCodeSplit: false`, `rollupOptions.output.inlineDynamicImports: true`, and the stable hash-free `output` file names are what guarantee the required **one JS, at most one CSS, and `index.html`** dist shape (the builder rejects anything else). Assets are served **same-origin, piped through the API** (no 302-to-S3), so no `renderBuiltUrl`/`__BIQ_ASSET_BASE__` rebasing is needed.
+6. **Keep `vite.config.ts`'s single-file build settings.** `base: './'`, `cssCodeSplit: false`, `rollupOptions.output.inlineDynamicImports: true`, and the stable hash-free `output` file names are what guarantee the required **one JS, at most one CSS, and `index.html`** dist shape (the builder rejects anything else). Keep `rollupOptions.maxParallelFileOps: 20` as well, or icon packages such as `@tabler/icons-react` fail the build with `EMFILE: too many open files`. Assets are served **same-origin, piped through the API** (no 302-to-S3), so no `renderBuiltUrl`/`__BIQ_ASSET_BASE__` rebasing is needed.
 7. **Streams are declared, not inferred.** An app can tail **only** the streams its actor declares under `options.streams` — an exact `slug` or a `slugPrefix`, exactly one per entry — and the list is frozen into the build manifest beside `endpoints`: a stream declared after the last Build answers `403 STREAM_NOT_DECLARED` (the SDK throws `StreamNotDeclaredError` by name) until you rebuild. Declarations resolve in the app's **own workspace only** in v1 — a stream grant carries no workspace/canvas coordinates. A prefix (`chat-`) is how an app follows the per-session streams a flow creates (`chat-<id>`), whose slugs don't exist when the app is authored. **Per-viewer caveat:** every viewer of the app holds a token authorized by the same manifest, so a `chat-` prefix lets viewer A read viewer B's `chat-<id>` if A learns the slug. Mint per-session slugs from an unguessable component (the stream's own ULID, a random suffix) and hand each to the app through an endpoint response — never derive them from something enumerable (a user id, a counter).
 
 ## Anatomy of a ReactAppTriggerActor
+
+The `codeDir` below is abbreviated. The scaffold the editor seeds also has `deno.json` (7-day minimum dependency age) and `tsconfig.json`, `tsconfig.app.json` and `tsconfig.node.json`; the `build` script's `tsc -b` fails without a `tsconfig.json`. Start from that scaffold (create the actor in the editor, then `borgiq bundle pull`) rather than from this sketch, and pin exact versions as it does.
 
 ```yaml
 ACTR01reactapp:
@@ -46,11 +48,11 @@ ACTR01reactapp:
             "name": "my-app", "private": true, "type": "module",
             "scripts": { "build": "tsc -b && vite build" },
             "dependencies": {
-              "react": "^19", "react-dom": "^19",
+              "react": "19.2.7", "react-dom": "19.2.7",
               "@borgiq/actors": "file:./__borgiq_sdk_placeholder__"
             },
             "devDependencies": {
-              "typescript": "^5", "vite": "^7", "@vitejs/plugin-react": "^5"
+              "typescript": "6.0.3", "vite": "7.3.6", "@vitejs/plugin-react": "5.2.0"
             }
           }
       - path: vite.config.ts
@@ -65,6 +67,7 @@ ACTR01reactapp:
               cssCodeSplit: false,            // REQUIRED: merge all CSS into one file
               assetsInlineLimit: 0,           // REQUIRED: emit real asset files, never base64-inline
               rollupOptions: {
+                maxParallelFileOps: 20,       // REQUIRED: icon packages otherwise fail the build with EMFILE
                 output: {
                   inlineDynamicImports: true, // REQUIRED: fold dynamic imports into one JS chunk
                   entryFileNames: 'assets/[name].js',   // stable, hash-free names
@@ -330,7 +333,7 @@ Full token sets, base stylesheet, component recipes, and rules live in
 | Build output size | ≤ 100 MB total; ≤ 50 `dist` files (static assets — a single-JS/single-CSS build leaves plenty) |
 | CSP / permissions options | **interpolatable, evaluated at build time** — `${{ }}` in the seven security options (`allowedScriptDomains`, `allowedStyleDomains`, `allowInlineScripts`, `allowInlineStyling`, `allowedPermissions`, `allowWebAssembly`, `allowBlobWorkers`) is resolved by the build and frozen into the manifest; a `${{ vars.* }}` change takes effect on the **next Build**, not the next page load |
 | Endpoint options | **interpolatable** — `${{ }}` is allowed in `endpoints` string fields (`actorId`/`workspaceSlug`/`canvasSlug`), resolved at Build; an unresolvable target bakes an `{ error }` that makes `useEndpoint` throw `EndpointResolutionError` by name |
-| `vite.config.ts` | must keep `base: './'`, `cssCodeSplit: false`, `inlineDynamicImports: true`, and the stable hash-free `output` names |
+| `vite.config.ts` | must keep `base: './'`, `cssCodeSplit: false`, `inlineDynamicImports: true`, `maxParallelFileOps: 20`, and the stable hash-free `output` names |
 | Serving | dist assets are **piped same-origin through the API** (no 302-to-S3, no S3 origin in the CSP) |
 | npm packages | installed, but **postinstall scripts do not run** (unsupported) |
 | Token TTL / late asset fetch | the content token is short-lived (~2 minutes) and scopes the served assets; assets are cacheable but not immutable. Prefer eager imports; a `React.lazy` chunk isn't possible anyway (dynamic imports fold into the single JS) |
