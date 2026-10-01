@@ -4,7 +4,7 @@
   "groupings": [
     {
       "title": "Build BorgIQ workflows",
-      "description": "Hub skill plus four specialist spokes for composing BorgIQ canvases. The hub loads first; specialists auto-load when their domain (forms, React apps, AI agents, JSON schemas) shows up in the request.",
+      "description": "Hub skill plus four specialist spokes for composing BorgIQ canvases. Start with the hub; use the matching specialist skill (or read its SKILL.md) when the request involves forms, React apps, AI agents or JSON schemas.",
       "skills": [
         "borgiq-builder",
         "borgiq-form-builder",

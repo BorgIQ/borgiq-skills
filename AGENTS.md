@@ -129,15 +129,17 @@ When a generated file changes (a renamed option, a new model, a new status field
 **`install_skills.py` transforms SKILL.md for non-Claude targets.** Other agents don't honor Claude's `disable-model-invocation: true`, `allowed-tools`, or `argument-hint` frontmatter, and they don't have an equivalent of `${CLAUDE_SKILL_DIR}`. On non-Claude installs the script:
 
 1. Strips Claude-only frontmatter fields
-2. Rewrites `${CLAUDE_SKILL_DIR}` to the absolute install path (so bash blocks work)
+2. Rewrites `${CLAUDE_SKILL_DIR}` to the absolute install path, in a SKILL.md that uses it (the shipped skills link with relative paths instead)
 3. Strips Claude's `!`<cmd>`` / ```!`` execution markers (other agents read these as code spans / bash fences instead of auto-executing them)
 4. Injects a defensive prologue into the 5 lifecycle workflows — strong tier for `deploy`, `test`, and `debug-flow` (have platform side effects; debug-flow can `bundle push` fixes), light tier for `validate` / `new-actor`
 
 **`install_skills.py` only replaces skill directories it installed.** It writes a `.borgiq-skills-install` marker into each skill directory, and skips (and reports) any same-named directory without one, such as a user's own `test` or `deploy` skill; `--force` replaces it anyway. Installs from before the marker are recognized by a SKILL.md that mentions BorgIQ.
 
+**The lifecycle commands are written to read correctly untransformed.** They link the hub's references with relative paths (`../borgiq-builder/references/…`), word each `!` line as a result the reader runs itself when the harness has not filled it in, name their arguments in prose (Claude Code appends them as `ARGUMENTS:`), call each other "the `deploy` skill (`/borgiq-builder:deploy` in Claude Code)", and declare the `borgiq-builder` dependency in the `compatibility` field. Keep `!` lines to commands `allowed-tools` permits or Claude Code treats as read-only: one it would ask about fails the whole command.
+
 **The Pi-via-npm channel and the skills.sh CLI both ship the source SKILL.md byte-for-byte** (no transforms — they copy/clone what's in the repo). Claude-specific frontmatter fields (`disable-model-invocation`, `allowed-tools`, `argument-hint`) are ignored by other agents — so `disable-model-invocation: true` doesn't actually block model invocation outside of Claude Code. The 5 lifecycle commands could become auto-invocable on Cursor / Copilot / Cline / Gemini / Pi-via-npm. Mitigations:
 
-- **For deploy, test, and debug-flow** — the `borgiq` CLI itself prompts for confirmation on destructive operations (workspace selection, auth scope), so a runaway agent still has a hard checkpoint.
+- **For deploy, test, and debug-flow** — their descriptions limit them to an explicit request from the user. The `borgiq` CLI is no checkpoint: it asks for confirmation only before a delete, a flowrun interrupt or a token revoke (`-y` skips it), never before `bundle push`, `triggers run` or a build.
 - **For full safety** — Pi users can fall back to `pi install git:github.com/BorgIQ/borgiq-skills` or `install_skills.py --target pi`, both of which run the transform pipeline and inject defensive prologues. Cursor / Copilot / Cline / Gemini users who want the same defenses can clone the repo and run `install_skills.py --all` instead of `npx skills add`.
 
 The skills.sh manifest at [skills.sh.json](skills.sh.json) groups the 10 skills into two categories ("Build BorgIQ workflows", "Lifecycle workflows") for display on the [skills.sh](https://www.skills.sh/) leaderboard.

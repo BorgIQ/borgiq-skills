@@ -1,38 +1,37 @@
 ---
 name: deploy
-description: Deploy a BorgIQ canvas bundle directory or workflow YAML via the borgiq CLI. Confirms auth status first, validates the selected artifact, surfaces server-side errors verbatim, and reports the deployed canvas.
+description: Deploy a BorgIQ canvas bundle or workflow YAML with the borgiq CLI. Checks auth and resources, validates, pushes, builds, and reports the canvas and any server errors verbatim. Run only when the user asks.
+compatibility: Requires the borgiq-builder skill, a shell, and a logged-in borgiq CLI (npm install -g @borgiq/cli).
 disable-model-invocation: true
 argument-hint: "[path/to/bundle-or-workflow.yaml] [--workspace <slug>]"
 allowed-tools: Bash(borgiq auth*) Bash(borgiq bundle*) Bash(borgiq canvases*) Bash(borgiq canvas-actors*) Bash(borgiq workspaces*) Bash(borgiq connections*) Bash(borgiq secrets*) Bash(borgiq assets*) Bash(borgiq triggers*) Bash(borgiq flowruns*) Bash(ls*) Bash(test*)
 ---
 
-# /deploy — deploy a BorgIQ workflow
+# Deploy a BorgIQ canvas
 
-Push the current canvas bundle or workflow YAML to BorgIQ and report the deployed canvas. This is a real action with side effects — invoked by you, never auto-triggered.
+Requires the `borgiq-builder` skill: the links below go into its `references/` folder. Deploy only when the user asks.
 
 ## Confirm authentication
 
-!`borgiq auth status 2>&1 || echo "AUTH_MISSING"`
+Auth status (Claude Code fills this in; otherwise run it yourself): !`borgiq auth status 2>&1 || echo "AUTH_MISSING"`
 
-If the output above shows `AUTH_MISSING` or an error about credentials, stop and tell the user to run `borgiq auth login` first. Don't proceed.
+If it printed `AUTH_MISSING` or a credentials error, stop: the user must run `borgiq auth login`. If the user named
+a workspace (`--workspace <slug>`), check that it is the active one and warn if not.
 
-If `$ARGUMENTS` includes `--workspace <slug>`, verify the active workspace matches the slug; warn if mismatched.
+## Pick the artifact
 
-## Pick the deployment artifact
+Use the path the user gave, if any: a directory containing `canvas.yaml` is a bundle; a `.yaml`/`.yml` file is a
+direct document. Otherwise look for candidates (Claude Code fills this in; otherwise run it yourself):
 
-Classify `$ARGUMENTS[0]` in this order:
+!`find . -maxdepth 2 \( -name canvas.yaml -o -name '*.borgiq-canvas' -o -name '*.yaml' -o -name '*.yml' \) -not -path '*/.*' | head -20`
 
-1. A directory containing `canvas.yaml` is a canvas bundle.
-2. A path ending in `.yaml` or `.yml` is a direct workflow document.
-3. Otherwise inspect the current directory for a bare `canvas.yaml`, `*.borgiq-canvas/` directories, and workflow YAML files in `./` or `./outputs/`:
+If there are several, ask which. Prefer a canvas's local bundle over any other document: git stays the source of
+truth.
 
-!`test -f canvas.yaml && echo "BUNDLE:."; ls -d *.borgiq-canvas 2>/dev/null; ls outputs/*.yaml outputs/*.yml *.yaml *.yml 2>/dev/null | head -20`
+## Check workspace resources
 
-If multiple candidates exist and the user did not specify one, ask which to deploy. Once a local bundle exists for a canvas, prefer it over an out-of-band document so the git copy remains the source of truth.
-
-## Pre-deploy: discover workspace resources
-
-The artifact may reference connections, credentials, and assets by key. For a bundle, inspect `canvas.yaml` `dependencies` and the relevant `actor.yaml` files; for a document, inspect the actor configurations. Verify the keys exist in the target workspace before deploying — a missing resource is the most common deploy failure.
+A missing connection, secret or asset is the most common deploy failure. Check that each key the artifact uses (in a
+bundle's `canvas.yaml` `dependencies` and `actor.yaml` files, or a document's actor configurations) exists:
 
 ```bash
 borgiq connections list --json
@@ -40,96 +39,62 @@ borgiq secrets list --json
 borgiq assets list --json
 ```
 
-Cross-reference these against `connection.key`, credentials, and asset references. If anything is missing, stop and ask the user to create the resource (give them the exact key name to use), then re-run `/deploy`.
+If one is missing, stop: give the user the exact key to create, then deploy again.
 
-## Choose the right command
+## Push
 
-### Canvas bundle directory
-
-First confirm the installed CLI supports bundles, then validate the directory:
+**Bundle.** `borgiq help bundle` must succeed (otherwise stop: the user upgrades the CLI). Then:
 
 ```bash
-borgiq help bundle >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"
-borgiq bundle validate <dir> --strict
+borgiq bundle validate <dir> --strict      # fix the file each finding names; rerun
+borgiq canvases get <canvas.slug> --json   # exists? (slug from canvas.yaml)
+borgiq bundle push <dir> --create --auto-layout --json   # new canvas
+borgiq bundle push <dir> --json            # existing; --auto-layout if actors were added, removed or rewired
 ```
 
-If bundle support is missing, stop and ask the user to upgrade. Bundle validation errors are file-path-scoped: fix the named bundle file and rerun validation.
+Add `--mode` (legacy whole-document import) only if the user asks. If the push aborts, run a bare
+`borgiq bundle pull <canvas> <dir>` (it applies server-only changes and keeps local edits), then push again. If the pull
+aborts too, report the conflicted actors and let the user choose `pull --replace` (server wins) or `push --force-local`
+(local wins); never pick one yourself
+([conflicts](../borgiq-builder/references/cli/canvas-bundles.md#incremental-sync-and-conflicts)).
 
-Read `canvas.slug` from `canvas.yaml` and check whether it exists with `borgiq canvases get <slug> --json`:
+**Direct document, new canvas:** `borgiq canvases create-with-data --file <file> --json`. The file must be an
+ExportedCanvasData envelope (`name`, `slug`, `messageTTLInDays`, `data: { schemaVersion, actors }`); wrap a
+`metadata` + `actors` document first
+([create-with-data body](../borgiq-builder/references/cli/cli-data-formats.md#create-with-data-body)).
 
-```bash
-# Canvas does not exist yet:
-borgiq bundle push <dir> --create --auto-layout --json
+**Direct document, existing canvas:** `borgiq canvas-actors batch <canvas> --file <changes.json> --json`. Its actors are
+CanvasActor-shaped: `options`, `inputs`, `vars`, `outputs` as YAML strings, `codeDir` an array
+([batch body](../borgiq-builder/references/cli/cli-data-formats.md#canvas-actors-bodies)). Never `create-with-data`
+against an existing canvas: its slug conflicts.
 
-# Canvas already exists (add --auto-layout when actors were added, removed, or rewired):
-borgiq bundle push <dir> --json
-```
+## After the push
 
-Existing-canvas push is incremental and conflict-aware by default (three-way, per-actor). Do not add `--mode` unless the user explicitly wants the legacy whole-document path. If the push aborts, first run `borgiq bundle pull <canvas> <dir>` with no flags — it safely applies server-only changes and keeps local edits — then re-push. If the pull also aborts (actors with both local and server changes), never choose `--force-local` or `pull --replace` automatically; report the conflicted actors and let the user choose `bundle pull --replace` (server wins) or `push --force-local` (local wins).
+1. Report the canvas slug; the CLI returns no URL, so do not invent one.
+2. Validate on the server: `borgiq canvases validate <canvas> --json`.
+3. **Deployed workspace?** If `borgiq workspaces deployment --json` shows `isDeployed: true`, the push changes nothing
+   that runs until you build: run `borgiq canvases runtime-build <canvas> --json` and report each actor's result. Only
+   a `ready` build serves runs; on `partially_ready` or `failed`, name the actors that did not build and why, and report
+   the deploy as incomplete ([build results](../borgiq-builder/references/deployment.md#reading-a-build-result)).
+   `bundle push --runtime-build` and `bundle build` push and build in one step.
+4. **Run the migration trigger**, if the canvas has one (the manually run UniversalTriggerActor that creates its
+   collections and streams), after the first deploy to a workspace and after adding migrations; on a deployed
+   workspace, after the build
+   ([running migrations](../borgiq-builder/references/collection-migrations.md#wiring-and-running-migrations)):
 
-### Direct YAML/YML document
-
-**New canvas** — deploy the full workflow at once:
-
-```bash
-borgiq canvases create-with-data --file <file> --json
-```
-
-The YAML must be in **ExportedCanvasData** envelope format (`name`, `slug`, `messageTTLInDays`, `data: { schemaVersion, actors }`). If the YAML is in the raw generation format (just `metadata` + `actors` at the top), wrap it first — see `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/cli-data-formats.md`.
-
-**Existing canvas** — apply changes with batch operations:
-```bash
-borgiq canvas-actors batch <canvasSlugOrId> --file <changes.json> --json
-```
-
-`--file` takes JSON, or YAML when the file ends in `.yaml`/`.yml`. Actors in it use the CanvasActor shape, where `configuration.options`, `inputs`, `vars` and `outputs` are YAML strings and `codeDir` stays an array (see the same reference doc). Don't use `create-with-data` against an existing canvas — you'll get a slug conflict.
-
-## After deploy
-
-1. Report the canvas slug. The CLI returns no canvas URL; do not invent one.
-2. Run a server-side validation to catch issues local validation can't:
    ```bash
-   borgiq canvases validate <canvasSlugOrId> --json
-   ```
-3. **Check whether the workspace is deployed** — if it is, the push you just made does NOT change
-   what any run executes until the canvas is built:
-   ```bash
-   borgiq workspaces deployment --json
-   ```
-   If `isDeployed` is `true`, build the canvas and report the per-actor result:
-   ```bash
-   borgiq canvases runtime-build <canvasSlugOrId> --json
-   ```
-   A `ready` build means every code actor built and the canvas now serves it. A `partially_ready`
-   or `failed` build does NOT serve: the canvas keeps running its previous full build — and if it
-   never had one, every run fails with "No built runtime available" until one succeeds. Name the
-   actors that did not build and why, and report the deploy as incomplete rather than claiming it
-   succeeded.
-
-   (`borgiq bundle push <dir> --runtime-build` does the push and the build in one step; use it when
-   you already know the workspace is deployed. `borgiq bundle build <dir>` also pushes and builds,
-   and checks the deployment status itself — canvas build when deployed, react-app build when not.)
-4. **Run the migration trigger** if the canvas has one (the manually invoked UniversalTriggerActor that creates its collections and streams; they must exist before any actor uses them). Run it after the first deploy to a workspace and after adding migrations; on a deployed workspace, after the build:
-   ```bash
-   borgiq triggers run --canvas <canvasId> --actor-id <migrationTriggerActorId> --json
+   borgiq triggers run --canvas <canvasId> --actor-id <migrationTriggerActorId> --json   # canvas ULID: metadata.id in canvases get
    borgiq flowruns summary <flowrun.id> --json   # poll until completed; errors must be empty
    ```
-   `--canvas` takes the canvas ID (`metadata.id` from `borgiq canvases get <slug> --json`), not the slug. See [Wiring and running migrations](../borgiq-builder/references/collection-migrations.md#wiring-and-running-migrations).
-5. If the user wants to verify the flow actually runs, suggest `/borgiq-builder:test` next.
+5. Suggest the `test` skill (`/borgiq-builder:test` in Claude Code) to check the flow runs.
 
 ## Failure modes
 
 | Symptom | Fix |
 |---|---|
-| `401 Unauthorized` | `borgiq auth login` then retry |
-| `Connection 'X' not found` | Create the connection in the workspace UI with key `X`, retry |
-| `Schema validation failed` server-side | Run `/borgiq-builder:validate` locally first — local errors are easier to read |
-| `Slug conflict` | For a bundle, rerun push without `--create`; for a direct document, switch to `canvas-actors batch` against the existing canvasId |
-| Bundle validation reports `path` + `message` | Fix the named `canvas.yaml`, `actor.yaml`, or `code/*` file, then rerun `bundle validate` |
-| `Push aborted: ... actor conflict(s)` | Run `borgiq bundle pull <canvas> <dir>` with no flags (safe: applies server-only changes, keeps local edits), then re-push; if the pull also aborts, ask the user to choose `pull --replace` (server wins) or `push --force-local` (local wins) |
-| `Unknown actor type 'X'` | Upgrade `@borgiq/cli`; do not guess an actor folder path |
-| Deployed workspace, but a trigger still runs the old code | The push was not followed by a build: run `borgiq canvases runtime-build <canvas>` |
-| Build reports `runtime-too-small` | The canvas's runtime is configured below what a build needs: raise the runtime's timeout, memory and ephemeral storage in the workspace's Runtimes settings, then build again |
-| Build reports `build-in-progress` (409) | A build of this canvas is already running: wait for it — builds of one canvas are serialised |
-| An actor's build result has `guard: rejected` | The actor imports a file outside its own files: move the file into the actor's own `code/`, or use an `npm:`/`jsr:` package |
-| An actor's build result has `warm: failed` | Dependencies installed, but the actor's code threw at start-up: test-run the actor and fix the error; it will throw at run time too |
+| `401 Unauthorized` | The user runs `borgiq auth login`; retry |
+| `Connection 'X' not found` | The user creates a connection with key `X` in the workspace; retry |
+| `Schema validation failed` on the server | Run the `validate` skill (`/borgiq-builder:validate` in Claude Code): local errors are clearer |
+| `Slug conflict` | Bundle: push without `--create`. Document: `canvas-actors batch` against the existing canvas |
+| `Unknown actor type 'X'` | Upgrade `@borgiq/cli`; never guess an actor folder |
+| A build error, or runs still execute old code | [deployment.md → Troubleshooting](../borgiq-builder/references/deployment.md#troubleshooting) |

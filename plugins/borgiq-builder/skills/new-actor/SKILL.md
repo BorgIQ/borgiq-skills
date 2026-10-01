@@ -1,88 +1,85 @@
 ---
 name: new-actor
 description: Scaffold a starter BorgIQ actor inside a canvas bundle or as standalone workflow YAML, with a generated ULID, msgVar, and minimum required schema fields.
+compatibility: Requires the borgiq-builder skill, a shell and the borgiq CLI (@borgiq/cli), logged in to read a type's defaults.
 disable-model-invocation: true
 argument-hint: "<ActorType> [Name] [bundle-dir]"
 allowed-tools: Bash(borgiq*) Bash(mkdir*) Bash(ls*) Bash(test*)
 ---
 
-# /new-actor — scaffold a BorgIQ actor
+# Scaffold a BorgIQ actor
 
-Generate a minimal valid actor in the current canvas bundle when one is present; otherwise generate standalone workflow YAML. Use it as a starting point and fill in actor-specific options from the relevant reference.
+Requires the `borgiq-builder` skill: the links below go into its `references/` folder.
 
-## Inputs
+The user names the actor type (`HttpRequestActor`, `DenoActor`, `WebhookTriggerActor`, …), and optionally an actor
+name (else derive one from the type) and a bundle directory. For a missing or unknown type, list the types
+(`borgiq actors list`, or the hub's [Task](../borgiq-builder/SKILL.md#task-actor-types) and
+[Trigger Actor Types](../borgiq-builder/SKILL.md#trigger-actor-types)) and ask.
 
-`$ARGUMENTS[0]` — actor type (e.g. `HttpRequestActor`, `DenoActor`, `PythonActor`, `AiActor`, `AiAgentActor`, `AgentHarnessActor`, `CollectionActor`, `StreamActor`, `RouterActor`, `MessageProcessorActor`, `WebhookTriggerActor`, `InterfaceTriggerActor`, `AppTriggerActor`, etc.).
+CLI version (Claude Code fills this in; otherwise run it yourself): !`borgiq --version 2>&1 || echo "CLI_MISSING"`
 
-`$ARGUMENTS[1]` (optional) — human-readable actor name. If omitted, derive one from the type.
+If it printed `CLI_MISSING` or no version, ask the user to install it: `npm install -g @borgiq/cli`.
 
-If the actor type is missing or unrecognized, list the supported types from `${CLAUDE_SKILL_DIR}/../borgiq-builder/SKILL.md` (Task Actor Types and Trigger Actor Types tables) and ask which to use.
-
-## Prerequisite
-
-ID and msgVar generation ship as the `borgiq generate` command in the `@borgiq/cli` (no dependency install needed):
-
-!`if command -v borgiq >/dev/null 2>&1; then echo "borgiq CLI found: $(borgiq --version)"; else echo "borgiq CLI not found. Install it with: npm install -g @borgiq/cli"; fi`
-
-## Generate IDs
+## IDs and the type's schema
 
 ```bash
-ACTOR_ID=$(borgiq generate id actor)
-MSG_VAR=$(borgiq generate msgvar "$ARGUMENTS[1]")
+borgiq generate id actor
+borgiq generate msgvar "<actor name>"
+borgiq actors schema <ActorType> --json   # needs a login; an unknown type is a 404
 ```
 
-## Actor type schema
+In the schema, `defaultOptions` is the starting `configuration.options`; `sourcePorts.fixedPorts`, `code.entrypoint`,
+`supportsConnection` and `optionsSchema` give the ports, entrypoint, connection support and every option.
+The actor's reference is `../borgiq-builder/references/<kebab-case-actor-type>.md` (`HttpRequestActor` →
+[http-request-actor.md](../borgiq-builder/references/http-request-actor.md)).
 
-Ask the platform for the type's defaults instead of guessing them. This calls the API, so it needs a logged-in CLI (`borgiq auth login`); an unknown type returns 404:
+## Bundle or standalone
 
-```bash
-borgiq actors schema <ActorType> --json
-```
+Use the bundle branch when the target or current directory contains `canvas.yaml`; if several, ask.
+Candidates (Claude Code fills this in; otherwise run it yourself):
 
-`defaultOptions` is the starting `configuration.options`, `sourcePorts.fixedPorts` lists the port IDs, `code.entrypoint` names the required entrypoint file, `supportsConnection` says whether it takes a `connection`, and `optionsSchema` describes every option.
+!`find . -maxdepth 2 \( -name canvas.yaml -o -name '*.borgiq-canvas' \) -not -path '*/.*' | head -20`
 
-## Detect bundle context
-
-If an explicit target directory contains `canvas.yaml`, or the current directory contains `canvas.yaml`, use the bundle branch below. Otherwise use the standalone YAML branch.
-
-!`test -f canvas.yaml && echo "BUNDLE:."; ls -d *.borgiq-canvas 2>/dev/null`
-
-If multiple bundles are present and no target was specified, ask which one. For a bundle, confirm `borgiq help bundle` succeeds (`borgiq bundle --help` exits 0 even on a CLI without bundles); if not, tell the user to upgrade `@borgiq/cli`.
+A bundle needs `borgiq help bundle` to succeed; otherwise the user upgrades `@borgiq/cli`.
 
 ## Inside a canvas bundle
 
-1. Read the bundle's `README.md` first if it exists — it is the canvas's own documentation and may set conventions the new actor must follow — then the generated `AGENTS.md` for the installed CLI's layout contract, then `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/cli/canvas-bundles.md` and the actor-specific reference. If the README documents the actors, add the new one to it.
-2. Resolve the actor's exact category and kebab-case type folder from the bundle path registry in the bundle reference. Do not guess an unknown type.
-3. Create `actors/<category>/<type-folder>/<ACTOR_ID>/actor.yaml` in **ExportedCanvasActor object shape**. Do not wrap it in `metadata`/`actors`, and do not include `edges`, `position`, or inline code when using `codeDir`.
-4. For `DenoActor`, `DenoTestActor`, or `UniversalTriggerActor`, set `configuration.codeDir: code` and create `code/main.ts`. For `PythonActor`, create `code/main.py`. The entrypoint is required and must sit at the root of `code/`; add helper files and folders beside it as the actor grows, importing them relatively (`./lib/format.ts` in Deno, `from lib.format import format` in Python, where a package folder needs `__init__.py`). Do not create a file whose name the runtime reserves — see the reserved table in the bundle reference. For `AppTriggerActor`, create only its canonical `code/index.html`, `styles.css`, and `script.js` files that are needed.
-5. Complete the three-edit rule in `canvas.yaml`: add the actor's `actors[]` index entry and exactly one `graph.nodes` entry. Add `graph.edges` wiring when requested; each `sourcePortId` must exist in the source actor's `sourcePorts`. Mint every new edge ID with `borgiq generate id edge`.
-6. Search the whole bundle for any expressions or tool lists that must reference the new actor, then run:
+1. Read the bundle's `README.md` (its conventions; add the new actor if it lists them), its `AGENTS.md`
+   (the CLI's layout contract), [canvas-bundles.md](../borgiq-builder/references/cli/canvas-bundles.md) and the
+   actor's reference.
+2. Create `actors/<category>/<type-folder>/<ACTOR_ID>/actor.yaml`, folders from the
+   [registry](../borgiq-builder/references/cli/canvas-bundles.md#folder-layout-and-ownership) (never guess one), in the
+   object shape: no `metadata`/`actors` wrapper, no `edges`, `position` or inline code.
+3. DenoActor, DenoTestActor, UniversalTriggerActor: `configuration.codeDir: code` and `code/main.ts`; PythonActor:
+   `code/main.py`; AppTriggerActor: only the `code/index.html`, `styles.css`, `script.js` it needs. Helpers sit beside
+   the entrypoint, imported relatively, never under a
+   [reserved name](../borgiq-builder/references/cli/canvas-bundles.md#code-actor-project-trees).
+4. In `canvas.yaml`, apply the
+   [three-edit rule](../borgiq-builder/references/cli/canvas-bundles.md#add-and-remove-actors-the-three-edit-rule): an
+   `actors[]` entry, exactly one `graph.nodes` entry, and `graph.edges` if requested (each `sourcePortId` declared by
+   its source actor, each ID from `borgiq generate id edge`).
+5. Update any expression or tool list that must name the new actor; run `borgiq bundle validate <bundle-dir> --strict`.
+6. Fill in `configuration.options` from the reference and schema (an empty actor fails on the server or at its first
+   run), apply [After scaffolding](#after-scaffolding), and validate again.
 
-```bash
-borgiq bundle validate <bundle-dir> --strict
-```
-
-7. Fill in the actor-specific `configuration.options` using the reference read in step 1 and the type's schema (see [Actor type schema](#actor-type-schema)) — a structurally valid but empty actor only fails at server validation or first flowrun. Then apply the spoke handoff from [After scaffolding](#after-scaffolding) and re-run `bundle validate` after the options are complete.
-
-Do not write `outputs/<msgVar>.yaml` in bundle context. Do not add a separate CommentActor as part of a single-actor scaffold unless the user requests documentation; that would be another actor requiring its own folder, index entry, and graph node.
+No `outputs/` file in a bundle, and no CommentActor unless the user asks.
 
 ## Standalone YAML (no bundle)
 
-### Build the starter YAML
-
-1. Read the type's schema (see [Actor type schema](#actor-type-schema)) and the actor-specific reference at `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/<kebab-case-actor-type>.md` (e.g. `http-request-actor.md` for `HttpRequestActor`) to find:
-   - The `version` field value
-   - The minimum `configuration.options` required for the actor to be valid
-   - Whether the actor needs `connection` or `credentials`
-2. Build a YAML following the structure in the hub SKILL.md's **Common Actor Structure** section. Required top-level keys: `metadata`, `actors`. Inside the actor entry: `type`, `version`, `name`, `msgVar`, `description`, `isActive: true`, `continueOnError: false`, `sourcePorts: [{id: SPRTdefault}]`, `configuration` (with `inputs`, `options`, and `outputs` as relevant), `schemas.inputs` (start with `type: any` per generation rule #12), `id`, `position: {x: 0, y: 0}`, `edges: {}`.
-
-   For `DenoActor`, `DenoTestActor`, `UniversalTriggerActor`, and `PythonActor`, the source goes in `configuration.codeDir` — a list of `{path, content}` files, sibling of `options`, containing the required entrypoint `main.ts` (`main.py` for Python):
+1. From the schema and the reference, take the `version`, the required options, and whether it needs a `connection`
+   or `credentials`.
+2. Write one `metadata` + `actors` document shaped like the hub's
+   [Common Actor Structure](../borgiq-builder/SKILL.md#common-actor-structure), with `isActive: true`,
+   `continueOnError: false`, `sourcePorts: [{id: SPRTdefault}]`, `schemas.inputs` starting as `type: any` (the
+   object-schema rule in [Generation Instructions](../borgiq-builder/SKILL.md#generation-instructions)),
+   `position: {x: 0, y: 0}` and `edges: {}`. Deno-family and Python actors carry their source in
+   `configuration.codeDir`, beside `options`, a list of `{path, content}` files including the entrypoint:
 
    ```yaml
    configuration:
      options: {}
      codeDir:
-       - path: main.ts
+       - path: main.ts   # main.py for Python
          content: |
            import type { Request, Response } from "@borgiq/actors";
 
@@ -90,25 +87,12 @@ Do not write `outputs/<msgVar>.yaml` in bundle context. Do not add a separate Co
              return { results: req.inputs };
            }
    ```
-3. Do not add a CommentActor to a single-actor scaffold unless the user asks for documentation; a CommentActor belongs above a new multi-actor workflow. When one is requested, position it with negative `y` (`y: -300`) so it renders above the actor in the canvas.
+3. Add a CommentActor only if the user asks; it belongs above a new multi-actor workflow (`y: -300`).
+4. Save it as `outputs/<msgVar>.yaml` (`mkdir -p outputs`).
 
-### Write the file
+## After scaffolding
 
-Place the YAML under `outputs/` in the working directory:
-
-```bash
-mkdir -p outputs
-# Write the YAML to outputs/<msg-var>.yaml
-```
-
-Filename = `outputs/<msgVar>.yaml` (the generator already gives you a unique, sluggable name).
-
-### After scaffolding
-
-Run `/borgiq-builder:validate` against the new YAML to confirm the scaffold is well-formed. Then fill in the actor-specific `configuration.options` using the reference file you read above.
-
-If the actor type is part of a domain a spoke covers, also point the user at the spoke (applies to both the bundle and standalone branches):
-- Interface / form actors → `borgiq-form-builder`
-- ReactAppTriggerActor (and legacy raw-HTML AppTriggerActor) → `borgiq-react-app-builder`
-- AiActor / AiAgentActor / AgentHarnessActor / McpServerActor → `borgiq-agent-builder`
-- Anything with an output schema → `borgiq-json-schema-builder`
+Validate with the `validate` skill (`/borgiq-builder:validate` in Claude Code) and fill in the options. Point the
+user at the domain's skill: `borgiq-form-builder` (interface and form actors), `borgiq-react-app-builder`
+(ReactAppTriggerActor, legacy AppTriggerActor), `borgiq-agent-builder` (AI actors, McpServerActor),
+`borgiq-json-schema-builder` (any output schema).

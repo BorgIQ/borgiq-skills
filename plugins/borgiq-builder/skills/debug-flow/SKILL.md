@@ -1,105 +1,84 @@
 ---
 name: debug-flow
-description: Diagnose a failed or stuck BorgIQ flowrun. Fetches the flowrun summary, identifies failed actors, pulls runtime msg/ctx data and error details, and suggests fixes based on the actor type and error pattern.
+description: Diagnose a failed or stuck BorgIQ flowrun with the borgiq CLI. Reads the summary and the failed jobs' errors and input, finds the cause and proposes a fix. Use when the user asks to debug a run.
+compatibility: Requires the borgiq-builder skill, a shell, and a logged-in borgiq CLI (npm install -g @borgiq/cli).
 disable-model-invocation: true
 argument-hint: "[flowrunId]"
 allowed-tools: Bash(borgiq flowruns*) Bash(borgiq flowrun-jobs*) Bash(borgiq flowrun-results*) Bash(borgiq flowrun-messages*) Bash(borgiq canvas-actors*) Bash(borgiq canvases*) Bash(borgiq workspaces*) Bash(borgiq bundle*) Bash(test*) Bash(ls*)
 ---
 
-# /debug-flow — diagnose a failed flowrun
+# Debug a BorgIQ flowrun
 
-Pull the actual runtime state of a flowrun and figure out why it failed. Surfaces enough detail that the fix is obvious; suggests next steps when it isn't.
+Requires the `borgiq-builder` skill: the links below go into its `references/` folder. Commands, states and
+fields: [flowrun-job-states.md](../borgiq-builder/references/flowrun-job-states.md).
 
 ## Pick the flowrun
 
-If `$ARGUMENTS` is a flowrunId, use it. Otherwise list the canvas's recent flowruns and ask which one:
+Use the flowrun ID the user gave, or list the canvas's 10 newest flowruns (no outcome filter) and ask:
 
 ```bash
-borgiq flowruns list --canvas <canvasSlugOrId> --json
+borgiq flowruns list --canvas <canvas> --json
 ```
 
-It returns the 10 newest flowruns (`id`, `createdAt`) and has no outcome filter; a failed flowrun has a non-empty `errors` in its summary.
-
-## Get the summary
+## Read the summary
 
 ```bash
 borgiq flowruns summary <flowrunId> --json
 ```
 
-The summary holds `state`, `actors[].jobs[]` (`jobId`, `state`, `status`, `error`) and `errors[]` (`actorId`, `actorName`, `jobId`, `error`). States are lowercase; `completed` does not mean success. Identify:
+States are lowercase, and `completed` does not mean success. Look for:
 
-- Jobs in `errors` (the primary suspects); job state `error` means retries are exhausted or the error is not retryable
-- Actors missing from `actors[]` (never reached, often downstream of a failure)
-- Actors that ran but produced unexpected output
+- the jobs in `errors[]` (job state `error`: retries exhausted, or not retryable);
+- actors missing from `actors[]`: never reached, often downstream of a failure;
+- actors that emitted the wrong thing.
 
-For the flowrun state machine, see `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/flowrun-job-states.md`.
-
-## Inspect the failed actor(s)
-
-For each failed job:
+## Inspect each failed job
 
 ```bash
-# Error details, one entry per attempt
-borgiq flowrun-results summaries --job-id <jobId> --json
-
-# The message the job received (msg.<msgVar> of each upstream actor)
-borgiq flowrun-jobs source-message <jobId> --json
-borgiq flowrun-messages data <sourceFlowrunMessage.id> --json
-
-# Run context (ids, trigger, this actor's name and msgVar) - not its configuration
-borgiq flowrun-jobs runtime-data <jobId> --root-path ctx --json
-
-# The actor's current configuration
-borgiq canvas-actors get <canvasSlugOrId> <actorId> --json
+borgiq flowrun-results summaries --job-id <jobId> --json       # every attempt's error
+borgiq flowrun-jobs source-message <jobId> --json              # the message it received...
+borgiq flowrun-messages data <sourceFlowrunMessage.id> --json  # ...msg.<msgVar> of each upstream actor
+borgiq flowrun-jobs runtime-data <jobId> --root-path ctx --json   # run context (ids, trigger, name, msgVar), not config
+borgiq canvas-actors get <canvas> <actorId> --json            # the actor's current configuration
 ```
 
-`--root-path trigger` works only on trigger actors' jobs; `--root-path inputs` only on agent or MCP tool-call jobs. The API rejects `request` and `user`, which the CLI's help lists.
+Other `--root-path` values work only on some jobs
+([runtime-data](../borgiq-builder/references/flowrun-job-states.md#what-an-actor-received-and-emitted)).
 
-Read the error message literally. The most common patterns and their fixes:
+Read the error literally, then match it:
 
-| Error pattern | Likely cause | Fix |
-|---|---|---|
-| `401` / `403` from HttpRequestActor | Connection has expired creds or wrong scope | Refresh the connection in the workspace; re-deploy or re-run |
-| The flow runs code you already changed | The workspace is deployed, so every run (the play button included) executes the canvas's last full runtime build; the edit has not been built | `borgiq workspaces deployment --json` to confirm, then `borgiq canvases runtime-build <canvas>` |
-| `No built runtime available for canvas …` | The workspace is deployed and the canvas has no fully successful build — nothing can run until one finishes | `borgiq canvases runtime-build <canvas>` and fix any actors that fail to build |
-| `imports a module outside its own code directory` at actor start | A code actor imports a file outside its own `code/` tree | Move the file into the actor's own files, or use an `npm:`/`jsr:` package. On a deployed workspace the build names the offending specifier |
-| `could not be started from its workspace's runtime build` | Transient — the prebuilt environment could not be fetched; the run was automatically retried without it | Nothing to do. If it is persistent, rebuild the canvas |
-| `Timeout waiting for response` | Slow upstream API or no response | Check the API's status page; consider `retryIf` on the actor's `error` block |
-| `${{ inputs.X }}` evaluates to `undefined` | Upstream actor didn't emit `X`, or msgVar was renamed | Read the message the job received (`flowrun-jobs source-message`, then `flowrun-messages data`) and check `msg.<msgVar>` |
-| `Schema validation failed` on an AI output | `outputSchema` too strict, model produced extra/missing fields | See `borgiq-json-schema-builder`: tighten enums, mark non-essential as optional |
-| `Tool 'X' not found` in AiAgentActor | The tool actor's ID is not in `aiAgentToolActorIds` (it lists actor IDs, not msgVars), or wrong reference | See `borgiq-agent-builder`: confirm tool wiring through agent boundary |
-| Tool actor name(s) `collide with reserved built-in tools` | A wired tool actor's msgVar is `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, or `code_execution` with `enableCodeExecution: true` | Rename the tool actor's msgVar — built-in tool names are reserved. If it is `code_execution`, turning `enableCodeExecution` off also resolves it |
-| AiAgentActor ends with `endReason: 'error'` mentioning workspace size | Session workspace exceeded 20% of the runtime's ephemeral storage | Re-invoke the session with a cleanup prompt (grace mode allows deletions), or provision a runtime with more ephemeral storage |
-| AiAgentActor session starts fresh unexpectedly | `sessionId` past its 7-day sliding TTL, or the actor was repointed to a different runtime | Expected behavior — persist and reuse the `sessionId` within the TTL; keep the actor on one runtime |
-| Form validation failed in Interface | Required field missing or wrong shape | See `borgiq-form-builder` for component schema docs |
-| `COLLECTION_NOT_FOUND` (`Collection "<slug>" does not exist`) | The collection was never created in this workspace, or is being deleted; a write does not create it | Run the canvas's migration trigger, or add one — see [Wiring and running migrations](../borgiq-builder/references/collection-migrations.md#wiring-and-running-migrations) |
-| `STREAM_NOT_FOUND` (`Stream "<slug>" does not exist`) | The stream was never created, or it expired (without `persistent: true` it is deleted after its idle TTL); an append does not create it | `createStream` in the canvas's migration trigger, then run it; set `persistent: true` on a stream the app depends on — see [StreamActor](../borgiq-builder/references/stream-actor.md) |
+| Error | Cause and fix |
+|---|---|
+| `401` / `403` from an HttpRequestActor | Its connection's credentials expired or lack a scope: refresh the connection, re-run |
+| Old code still runs; `No built runtime available`; `imports a module outside its own code directory`; `could not be started from its workspace's runtime build` | A deployed workspace runs the last full build: [deployment.md → Troubleshooting](../borgiq-builder/references/deployment.md#troubleshooting) |
+| `Timeout waiting for response` | Slow or silent upstream API: check its status; add `retryIf` to the actor's `error` block ([error-handling.md](../borgiq-builder/references/error-handling.md#the-error-block)) |
+| `${{ inputs.X }}` is `undefined` | The upstream actor emitted no `X`, or its msgVar was renamed: check `msg.<msgVar>` in the message the job received |
+| `Schema validation failed` on an AI output | `outputSchema` too strict for what the model produced: tighten enums, make non-essential fields optional (`borgiq-json-schema-builder` skill) |
+| AiAgentActor: `Tool 'X' not found`, `collide with reserved built-in tools`, a workspace-size `endReason: 'error'`, an unexpected fresh session | `aiAgentToolActorIds` lists actor IDs, not msgVars; tool, workspace and session limits: [ai-agent-actor.md](../borgiq-builder/references/ai-agent-actor.md), `borgiq-agent-builder` skill |
+| Form validation failed in an interface | A required field is missing or has the wrong shape (`borgiq-form-builder` skill) |
+| `COLLECTION_NOT_FOUND` / `STREAM_NOT_FOUND` (`… "<slug>" does not exist`) | Never created (writes and appends create nothing), being deleted, or an expired stream (`persistent: true` prevents that): run or add the migration trigger ([migrations](../borgiq-builder/references/collection-migrations.md#wiring-and-running-migrations)) |
 
-For full error-handling patterns (continueOnError, retry semantics, fork/forkJoin error propagation), see `${CLAUDE_SKILL_DIR}/../borgiq-builder/references/error-handling.md`.
+More on `continueOnError`, retries and joins: [error-handling.md](../borgiq-builder/references/error-handling.md).
 
-## Suggest the fix
+## Fix it
 
-After diagnosis, propose a concrete fix:
+1. Configuration or code, with a canvas bundle (`canvas.yaml` at its root) in the working directory: read its
+   `README.md`, edit the responsible `actor.yaml`, `code/*` or `canvas.yaml`, then `borgiq bundle validate <dir>` and
+   `borgiq bundle push <dir>` (`--dry-run` first when unsure); on a deployed workspace, build the canvas too. On a push
+   conflict, run a bare `borgiq bundle pull <canvas> <dir>` and push again; never choose `--replace` or `--force-local`
+   for the user ([conflicts](../borgiq-builder/references/cli/canvas-bundles.md#incremental-sync-and-conflicts)).
+   Without a bundle, describe the exact change and offer to apply it with `borgiq canvas-actors batch`.
+2. A workspace resource (connection, secret, asset): give the exact key to update.
+3. An intermittent failure (timeout, rate limit): suggest a retry policy.
 
-1. If the fix is in actor configuration/code, first detect whether the current/target working directory is a canvas bundle (`canvas.yaml` at its root):
-   - **Bundle exists:** read the bundle's `README.md` for the canvas's own conventions and known gotchas, then edit the responsible `actor.yaml`, `code/*`, or `canvas.yaml` file, then run `borgiq bundle validate <dir>` and `borgiq bundle push <dir>`. This keeps the git copy as the source of truth. Preview with `--dry-run` when the change or target is uncertain. On a push conflict, first run `borgiq bundle pull <canvas> <dir>` with no flags (safe: applies server-only changes, keeps local edits) and re-push; if the pull also aborts, report the conflicted actors and let the user choose `pull --replace` (server wins) or `push --force-local` (local wins) — never force or replace automatically.
-   - **No local bundle:** describe the exact mutation and offer to apply it via `borgiq canvas-actors batch`.
-2. If the fix is in a workspace resource (connection, credentials, asset), give the exact key to update.
-3. If the failure is intermittent (timeout, rate limit), suggest the appropriate retry policy.
-
-## Re-run after fixing
-
-Once the fix is applied:
+## Re-run
 
 ```bash
-# Re-run the failed job in the same flowrun on the same input, with the current configuration
-# (on a deployed workspace, the active build); --no-publish keeps its output from connected actors
-borgiq flowrun-jobs re-run --job-id <jobId> --json
-
-# Or trigger a fresh flowrun
-# (see /borgiq-builder:test)
+borgiq flowrun-jobs re-run --job-id <jobId> --json   # same flowrun, same input, current configuration
 ```
 
-To judge the re-run, check the actor's newest job in `flowruns summary <flowrunId>`; the original job stays in `errors`.
+On a deployed workspace it runs the active build; `--no-publish` keeps its output from connected actors. Judge it by
+the actor's newest job in `flowruns summary`: the original job stays in `errors`. For a fresh flowrun, use the `test`
+skill (`/borgiq-builder:test` in Claude Code).
 
-End with a brief summary: what failed, what you fixed, and whether the re-run succeeded.
+End with what failed, what you fixed and whether the re-run succeeded.
