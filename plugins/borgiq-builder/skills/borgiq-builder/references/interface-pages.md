@@ -2,6 +2,8 @@
 
 This reference documents the `page` configuration used by both InterfaceTriggerActor and InterfaceActor to render web forms and interfaces.
 
+Every page requires a signed-in workspace member; there is no anonymous access (see [Interface URL](interface-trigger-actor.md#interface-url)). Props not in a component's schema are ignored without an error (for example `defaultValue` instead of `default`); exact props are in [typescript/form-components.md](typescript/form-components.md).
+
 ## Table of Contents
 
 - [Page Structure](#page-structure)
@@ -59,7 +61,7 @@ configuration:
           required: true
         - key: submit
           type: formButton
-          value: Submit
+          text: Submit
 ```
 
 ## Page Options
@@ -68,9 +70,9 @@ configuration:
 |--------|------|----------|-------------|
 | `children` | array | Yes | Array of UI components to render |
 | `pageTitle` | string | No | Browser tab title |
-| `formWidth` | string | No | Form width: `full`, `half`, `third` |
-| `themeColor` | string | No | Theme color for the form |
-| `backgroundColor` | string | No | Background color for the page |
+| `formWidth` | string | No | `full`, `half` (default; centered half-width column) or `adjustable` (centered column the viewer can resize) |
+| `themeColor` | string | No | Primary color of buttons and inputs: hex `#RRGGBB` or a Mantine color name (`blue`, `teal`, …); other values are ignored |
+| `backgroundColor` | string | No | Page background: a CSS color or a Mantine color name |
 
 ## Design Guidelines
 
@@ -85,8 +87,7 @@ Before configuring components, consider:
 
 ### Typography Best Practices
 
-- Choose fonts that match the interface's purpose and tone
-- Avoid defaulting to generic system fonts without intention
+- Native pages have no font setting; the platform's fonts apply
 - Use header hierarchy (`order` property) to create visual rhythm
 - Pair distinctive display headers with readable body text
 
@@ -100,7 +101,7 @@ Before configuring components, consider:
 
 ### Spatial Composition
 
-- Use `formWidth` intentionally: `full` for data-dense layouts, `half` for focused forms, `third` for simple inputs
+- Use `formWidth` intentionally: `full` for data-dense layouts, `half` for focused forms, `adjustable` to let the viewer set the width
 - Group related fields with `section` and `collapse` components
 - Use `divider` components with custom styling to create visual rhythm
 - Balance density with generous spacing using layout components
@@ -121,11 +122,14 @@ Each child element in `page.children` represents a UI component:
 | `type` | string | **Required.** Component type (see Component Types below) |
 | `label` | string | Display label for form inputs |
 | `description` | string | Help text displayed below the field |
+| `infoText` | string | Help text shown in an info tooltip |
 | `placeholder` | string | Placeholder text for inputs |
 | `required` | boolean | Whether field is required for submission |
 | `readOnly` | boolean | Display value without allowing edits |
-| `defaultValue` | any | Default/initial value (supports BorgIQ expressions) |
-| `value` | any | Static value (for display components like header) |
+| `disabled` | boolean | Render the input disabled |
+| `hidden` | boolean | Hide the input |
+| `default` | varies | Initial value, typed like the component's value. Supports BorgIQ expressions |
+| `value` | string / number | Content of `header`, `markdown`, `codeViewer`, `textDisplay` and `progress` (0–100). Buttons take `text`; `image`, `pdfViewer`, `webViewer` take `src` |
 | `options` | array | Options for select, radio, buttonGroup components |
 
 ## Component Types
@@ -211,7 +215,7 @@ Numeric input field.
 - key: quantity
   type: number
   label: Quantity
-  defaultValue: 1
+  default: 1
 ```
 
 #### Currency (`currency`)
@@ -222,7 +226,7 @@ Currency input with formatting.
 - key: amount
   type: currency
   label: Amount
-  defaultValue: 0
+  default: 0
 ```
 
 #### Phone Number (`phoneNumber`)
@@ -244,7 +248,7 @@ Percentage input.
 - key: discount
   type: percentage
   label: Discount
-  defaultValue: 0
+  default: 0
 ```
 
 #### Rating (`rating`)
@@ -265,7 +269,7 @@ Numeric slider input.
 - key: volume
   type: slider
   label: Volume
-  defaultValue: 50
+  default: 50
 ```
 
 ### Selection Components
@@ -289,19 +293,16 @@ Dropdown selection.
 
 #### Suggest (`suggest`)
 
-Autocomplete/typeahead selection.
+Autocomplete text input (any typed value is accepted). Options are plain strings, not `{label, value}` objects.
 
 ```yaml
 - key: city
   type: suggest
   label: City
   options:
-    - label: New York
-      value: nyc
-    - label: Los Angeles
-      value: la
-    - label: Chicago
-      value: chi
+    - New York
+    - Los Angeles
+    - Chicago
 ```
 
 #### Radio (`radio`)
@@ -319,7 +320,7 @@ Radio button group.
       value: medium
     - label: High
       value: high
-  defaultValue: medium
+  default: medium
 ```
 
 #### Button Group (`buttonGroup`)
@@ -383,7 +384,7 @@ Boolean checkbox.
 - key: subscribe
   type: checkbox
   label: Subscribe to newsletter
-  defaultValue: false
+  default: false
 ```
 
 #### Switch (`switch`)
@@ -394,7 +395,7 @@ Toggle switch.
 - key: enabled
   type: switch
   label: Enable notifications
-  defaultValue: true
+  default: true
 ```
 
 ### Date/Time Components
@@ -555,14 +556,14 @@ Header/title text.
   value: Contact Form
 ```
 
-With variables:
+With a heading level (`order`, 1–6, default 1) and a subtitle:
 
 ```yaml
 - key: pageTitle
   type: header
-  variables:
-    title: Contact Form
-    order: 1
+  value: Contact Form
+  order: 2
+  subtitle: We reply within one business day
 ```
 
 #### Divider (`divider`)
@@ -642,17 +643,17 @@ Display an image.
 ```yaml
 - key: logo
   type: image
-  value: https://example.com/logo.png
+  src: https://example.com/logo.png
 ```
 
 #### PDF Viewer (`pdfViewer`)
 
-Display a PDF document.
+Display a PDF document. `src` must be a URL.
 
 ```yaml
 - key: document
   type: pdfViewer
-  value: ${{ msg.document.url }}
+  src: ${{ msg.document.url }}
 ```
 
 #### Web Viewer (`webViewer`)
@@ -723,13 +724,13 @@ Embed a web page or custom HTML content in an iframe.
 
 #### File Download (`fileDownload`)
 
-File download link.
+File download button. `file` is a BIQFile, a `{name, mimeType, base64content}` object, or a URL.
 
 ```yaml
 - key: report
   type: fileDownload
-  value: ${{ msg.report.downloadUrl }}
-  label: Download Report
+  file: ${{ msg.report.downloadUrl }}
+  buttonText: Download Report
 ```
 
 #### Progress (`progress`)
@@ -747,12 +748,12 @@ Progress bar.
 
 #### Form Button (`formButton`)
 
-Submit button for the form.
+Submit button (label in `text`); `actionType: reset` makes it a reset button.
 
 ```yaml
 - key: submit
   type: formButton
-  value: Submit Form
+  text: Submit Form
 ```
 
 #### URL Button (`urlButton`)
@@ -762,7 +763,7 @@ Button that links to a URL.
 ```yaml
 - key: learnMore
   type: urlButton
-  value: Learn More
+  text: Learn More
   url: https://example.com/docs
 ```
 
@@ -770,82 +771,103 @@ Button that links to a URL.
 
 #### Union (`union`)
 
-Conditional fields based on selection.
+One of several components, chosen with a select. `children` maps each choice to one component; optional `unionTypeOptions` labels the choices and must list exactly the `children` keys.
 
 ```yaml
 - key: contactMethod
   type: union
   label: Contact Method
+  unionTypeOptions:
+    - label: Email
+      value: email
+    - label: Phone
+      value: phone
   children:
-    - key: email
+    email:
+      key: email
       type: text
       label: Email Address
-    - key: phone
+    phone:
+      key: phone
       type: phoneNumber
       label: Phone Number
 ```
 
 #### Conditional (`conditional`)
 
-Show/hide fields based on conditions.
+Fields that depend on a select's value (no expression-based condition). `conditionalField` is a `select`; `children` maps every option value to an array of components. See [Conditional Fields](#conditional-fields).
 
 ```yaml
-- key: conditionalField
+- key: contact
   type: conditional
-  condition: ${{ inputs.showAdvanced === true }}
+  conditionalField:
+    key: method
+    type: select
+    label: Contact Method
+    options:
+      - email
+      - phone
   children:
-    - key: advancedSetting
-      type: text
-      label: Advanced Setting
+    email:
+      - key: email
+        type: text
+        label: Email Address
+    phone:
+      - key: phone
+        type: phoneNumber
+        label: Phone Number
 ```
 
 #### Array Parent (`arrayParent`)
 
-Repeatable field group.
+Repeatable field group: `item` is the component repeated per entry (a `section` for several fields). Submits an array.
 
 ```yaml
 - key: items
   type: arrayParent
   label: Items
-  children:
-    - key: name
-      type: text
-      label: Item Name
-    - key: quantity
-      type: number
-      label: Quantity
+  item:
+    key: item
+    type: section
+    children:
+      - key: name
+        type: text
+        label: Item Name
+      - key: quantity
+        type: number
+        label: Quantity
 ```
 
 #### Table (`table`)
 
-Editable table.
+Table of rows. `data` is required; columns take `header` and `key`. See [Editable Table](#editable-table).
 
 ```yaml
 - key: lineItems
   type: table
   label: Line Items
+  enableEditing: true
+  enableCreate: true
   columns:
-    - key: product
-      label: Product
-      type: text
-    - key: qty
-      label: Qty
-      type: number
-    - key: price
-      label: Price
-      type: currency
+    - header: Product
+      key: product
+    - header: Qty
+      key: qty
+    - header: Price
+      key: price
+  data: []
 ```
 
 ## Dynamic Default Values
 
-Use BorgIQ expressions to populate form fields with data from upstream actors:
+Use BorgIQ expressions in `default` to populate form fields with data from upstream actors (InterfaceActor only: an InterfaceTriggerActor has no upstream `msg`). Any page can also be prefilled by the actor's `defaultValues` option (keyed by component `key`) or by URL query params (`?customerName=Ada`), which win.
 
 ```yaml
 - key: customerName
   type: text
   label: Customer Name
   readOnly: true
-  defaultValue: ${{ msg.fetch_customer.body.name }}
+  default: ${{ msg.fetch_customer.body.name }}
 ```
 
 ```yaml
@@ -853,7 +875,7 @@ Use BorgIQ expressions to populate form fields with data from upstream actors:
   type: number
   label: Order Total
   readOnly: true
-  defaultValue: ${{ msg.calculate_total.total }}
+  default: ${{ msg.calculate_total.total }}
 ```
 
 ```yaml
@@ -861,7 +883,7 @@ Use BorgIQ expressions to populate form fields with data from upstream actors:
   type: dateTime
   label: Last Updated
   readOnly: true
-  defaultValue: ${{ msg.data?.lastUpdated || new Date().toISOString() }}
+  default: ${{ msg.data?.lastUpdated || new Date().toISOString() }}
 ```
 
 ## Read-Only Fields
@@ -873,7 +895,7 @@ Set `readOnly: true` to display data without allowing edits. Useful for review i
   type: text
   label: Order ID
   readOnly: true
-  defaultValue: ${{ msg.order.id }}
+  default: ${{ msg.order.id }}
 ```
 
 ## onSubmit Configuration
@@ -941,7 +963,7 @@ page:
       required: true
     - key: submit
       type: formButton
-      value: Send Message
+      text: Send Message
 ```
 
 ### Approval Form with Read-Only Data
@@ -962,17 +984,17 @@ page:
           type: text
           label: Request ID
           readOnly: true
-          defaultValue: ${{ msg.request.id }}
+          default: ${{ msg.request.id }}
         - key: requestedBy
           type: text
           label: Requested By
           readOnly: true
-          defaultValue: ${{ msg.request.submittedBy }}
+          default: ${{ msg.request.submittedBy }}
         - key: amount
           type: currency
           label: Amount
           readOnly: true
-          defaultValue: ${{ msg.request.amount }}
+          default: ${{ msg.request.amount }}
     - key: divider
       type: divider
     - key: decision
@@ -990,7 +1012,7 @@ page:
       placeholder: Add any comments...
     - key: submit
       type: formButton
-      value: Submit Decision
+      text: Submit Decision
 ```
 
 ### Multi-Step Form Section
@@ -1028,7 +1050,7 @@ page:
           label: Phone Number
     - key: submit
       type: formButton
-      value: Continue to Step 2
+      text: Continue to Step 2
 ```
 
 ### Date Input Showcase
@@ -1937,7 +1959,7 @@ onSubmit:
 page:
   formWidth: full
   pageTitle: Gmail Labels
-  themeColor: '#ffffff'
+  themeColor: '#1c7ed6'
   backgroundColor: '#f0f0f0'
   children:
     - type: table

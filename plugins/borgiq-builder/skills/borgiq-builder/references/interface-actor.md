@@ -23,6 +23,8 @@ Unlike InterfaceTriggerActor which starts a workflow, InterfaceActor is a **Task
 - **Meta port** (`SPRTdefault`): Emits when the actor executes, providing the interface URL
 - **Event port** (`SPRTevent00`): Emits when a user submits the form
 
+Whoever opens `interfaceUrl` must be signed in to BorgIQ as a Viewer, Member or Admin of the canvas's workspace (the workspace settings offer App user grants only for App, React App and InterfaceTrigger actors); there is no anonymous access. Send the URL only to workspace members. The actor waits for a submission without limit unless `timeoutInMinutes` is set.
+
 Use InterfaceActor for:
 
 - Displaying forms mid-workflow without requiring an interface trigger
@@ -83,7 +85,7 @@ actors:
               placeholder: Add any comments...
             - key: submit
               type: formButton
-              value: Submit Decision
+              text: Submit Decision
         onSubmit:
           type: successMessage
           successMessage: Thank you for your response!
@@ -118,7 +120,8 @@ The Meta port emits immediately when the actor executes:
 | Field | Type | Description |
 |-------|------|-------------|
 | `interfaceId` | string | Unique identifier for this interface instance |
-| `interfaceUrl` | string | Full URL to access the form page |
+| `interfaceUrl` | string | Full URL to access the form page; `defaultValues` are appended as query params |
+| `page` | object | The rendered page config; present only when `emitPage: true` |
 
 ### Event Port Output
 
@@ -127,12 +130,14 @@ The Event port emits when a user submits the form:
 ```json
 {
   "meta": {
-    "submissionInterfaceId": "b1ec816b2e25b5a7b57600dda21e0bc8",
+    "interfaceId": "b1ec816b2e25b5a7b57600dda21e0bc8",
+    "submissionInterfaceId": "5f0c2e9a7d4b41c8a3e6b2d19f7c0a54",
     "user": {
       "id": "USER01abc123def456ghi789jkl0mn",
       "name": "John Smith",
       "email": "john@example.com"
-    }
+    },
+    "ipAddress": "203.0.113.7"
   },
   "body": {
     "decision": "approved",
@@ -143,8 +148,10 @@ The Event port emits when a user submits the form:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `meta.submissionInterfaceId` | string | Matches the `interfaceId` from Meta port |
-| `meta.user` | object | Information about the user who submitted |
+| `meta.interfaceId` | string | Matches the `interfaceId` from the Meta port; use it to match a submission to the URL you sent |
+| `meta.submissionInterfaceId` | string | A new id for the page shown after submission (used by `onSubmit: nextInterface`) |
+| `meta.user` | object | The signed-in user who submitted: `id`, `name`, `email` |
+| `meta.ipAddress` | string | IP address of the submitter |
 | `body` | object | Form field values (keyed by component `key`) |
 
 ## Options Reference
@@ -154,9 +161,15 @@ The Event port emits when a user submits the form:
 | `page` | object | Yes | Page layout configuration. See [interface-pages.md](interface-pages.md) for complete reference. |
 | `page.children` | array | Yes | Array of UI components to render |
 | `page.pageTitle` | string | No | Browser tab title |
-| `page.formWidth` | string | No | Form width: `full`, `half`, `third` |
-| `page.themeColor` | string | No | Theme color for the form |
+| `page.formWidth` | string | No | `full`, `half` (default) or `adjustable` |
+| `page.themeColor` | string | No | Primary color: hex `#RRGGBB` or a Mantine color name |
+| `page.backgroundColor` | string | No | Page background: a CSS color or a Mantine color name |
 | `onSubmit` | object | Yes | Action to perform after form submission |
+| `timeoutInMinutes` | number | No | Minutes to wait for a submission. Default: no timeout. On timeout the actor fails with a `TimeoutError`; downstream actors receive it as `err` only when `continueOnError: true` |
+| `defaultValues` | object | No | Prefill values keyed by component `key`, appended to `interfaceUrl` as query params (visible in the URL) |
+| `autoSubmitAfterSeconds` | integer | No | Submit the form automatically this many seconds after it opens |
+| `showProgressStatus` | boolean | No | Show the flow's progress on the waiting page after submission. Requires `onSubmit.type: nextInterface` |
+| `emitPage` | boolean | No | Include the page config in the Meta port message |
 
 ### onSubmit Types
 
@@ -224,12 +237,12 @@ page:
           key: orderId
           label: Order ID
           readOnly: true
-          defaultValue: ${{ msg.order.id }}
+          default: ${{ msg.order.id }}
         - type: number
           key: total
           label: Total Amount
           readOnly: true
-          defaultValue: ${{ msg.order.total }}
+          default: ${{ msg.order.total }}
     - type: divider
       key: actionDivider
     - type: buttonGroup
@@ -248,7 +261,7 @@ page:
       placeholder: Add any notes...
     - type: formButton
       key: submit
-      value: Submit
+      text: Submit
 ```
 
 ## Complete Example: Approval Form
@@ -286,7 +299,7 @@ actors:
               key: requestId
               label: Request ID
               readOnly: true
-              defaultValue: ${{ msg.request.id }}
+              default: ${{ msg.request.id }}
             - type: divider
               key: separator
             - type: buttonGroup
@@ -304,10 +317,11 @@ actors:
               placeholder: Add any comments...
             - type: formButton
               key: submit
-              value: Submit Decision
+              text: Submit Decision
         onSubmit:
           type: successMessage
           successMessage: Thank you for your response!
+        timeoutInMinutes: 4320   # stop waiting after 3 days
     schemas: {}
     id: ACTR01k7hkjx0te3zgybq95rwbcbjz
     position:
@@ -323,23 +337,19 @@ For more page configuration examples, see **[interface-pages.md](interface-pages
 ### From Meta Port (interface URL)
 
 ```yaml
-# Send interface URL via email
+# SendEmailActor on the Meta port edge: email the interface URL to the approver
 configuration:
   inputs:
     interfaceUrl: ${{ msg.approval_form.interfaceUrl }}
+    approverEmail: ${{ msg.request.approverEmail }}   # the approver must be a workspace member
   options:
-    url: https://api.sendgrid.com/v3/mail/send
-    method: POST
-    body:
-      personalizations:
-        - to:
-            - email: ${{ inputs.approverEmail }}
-      subject: Approval Required
-      content:
-        - type: text/html
-          value: |
-            Please review and approve: ${{ inputs.interfaceUrl }}
+    to: ${{ inputs.approverEmail }}
+    subject: Approval Required
+    textBody: |
+      Please review and approve: ${{ inputs.interfaceUrl }}
 ```
+
+See [send-email-actor.md](send-email-actor.md) for the full SendEmailActor configuration.
 
 ### From Event Port (form submission)
 
@@ -372,4 +382,4 @@ Collect user input at any point in a workflow without requiring the workflow to 
 
 ## TypeScript Schema Hint
 
-The InterfaceActor shares the same page configuration schema as InterfaceTriggerActor. See [typescript/actor-schemas-triggers.md](typescript/actor-schemas-triggers.md) for the complete TypeScript definitions of page components and options.
+The InterfaceActor shares the same page configuration schema as InterfaceTriggerActor. Exact definitions: InterfaceActor options in [typescript/actor-schemas-task-core.md](typescript/actor-schemas-task-core.md#actorschemastaskinterface), the page schema in [typescript/schemas.md](typescript/schemas.md#schemasinterface), and the components in [typescript/form-components.md](typescript/form-components.md).

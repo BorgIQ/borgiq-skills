@@ -25,7 +25,9 @@ Interface triggers provide a hosted web page with customizable form elements. Wh
 - Collecting structured input from users
 - Internal tools requiring form-based data entry
 
-**Note:** For web applications (SPAs, dashboards, interactive tools), use [AppTriggerActor](app-trigger-actor.md) instead. InterfaceTriggerActor is designed for form-based workflows where user submission triggers downstream processing.
+The page is open only to people signed in to BorgIQ as members of the workspace; there is no anonymous or public access (see [Interface URL](#interface-url)).
+
+**Note:** For web applications (SPAs, dashboards, interactive tools), use a ReactAppTriggerActor (the `borgiq-react-app-builder` skill) instead. InterfaceTriggerActor is designed for form-based workflows where user submission triggers downstream processing.
 
 ## Configuration Structure
 
@@ -72,8 +74,9 @@ actors:
 | `page` | object | Yes | Page layout configuration. See [interface-pages.md](interface-pages.md) for complete reference. |
 | `page.children` | array | Yes | Array of UI components to render |
 | `onSubmit` | object | Yes | Action to perform after form submission |
-| `defaultValues` | object | No | Default values to inject into the form via URL query params |
+| `defaultValues` | object | No | Initial form values keyed by component `key`. Query params in the page URL (`?<key>=<value>`) also prefill fields and take precedence |
 | `autoSubmitAfterSeconds` | integer | No | Auto-submit the form after specified seconds |
+| `showProgressStatus` | boolean | No | Show the flow's progress on the waiting page after submission. Requires `onSubmit.type: nextInterface` |
 
 ## Page Configuration
 
@@ -186,7 +189,8 @@ The interface trigger emits a message containing the form submission data:
       "id": "USER01abc123def456ghi789jkl0mn",
       "name": "John Smith",
       "email": "john@example.com"
-    }
+    },
+    "ipAddress": "203.0.113.7"
   },
   "body": {
     "fieldKey1": "user input value",
@@ -202,6 +206,7 @@ The interface trigger emits a message containing the form submission data:
 | `meta.user.id` | string | The user ID of the submitter |
 | `meta.user.name` | string | The display name of the submitter |
 | `meta.user.email` | string | The email address of the submitter |
+| `meta.ipAddress` | string | IP address of the submitter |
 | `body` | object | Object containing all form field values (keyed by component `key`) |
 
 ## UI Component Examples
@@ -282,42 +287,40 @@ export default async function receive(req: Request): Promise<Response> {
 
 ## Dynamic Interface Response
 
-Use DenoActor with `InterfaceRender` signal to dynamically render interface content:
+Code actors cannot render a page: the Deno and Python SDKs build only the `webhookRespond`, `callableResponse` and `delayUntil` signals. To show a result page computed by the flow, set `onSubmit.type: nextInterface` on the trigger and place an InterfaceActor downstream. After submitting, the user sees a waiting page (with the flow's progress when `showProgressStatus: true`), and the first InterfaceActor that renders downstream in the same flow run replaces it:
 
-```typescript
-import type { Request, Response } from "@borgiq/actors";
-import { Signal } from "@borgiq/actors";
+```yaml
+# InterfaceTriggerActor options
+onSubmit:
+  type: nextInterface
+  loadingMessage: Processing your request...
+showProgressStatus: true
+```
 
-export default async function receive(req: Request): Promise<Response> {
-  const formData = req.inputs.body;
-
-  // Process data
-  const result = await processSubmission(formData);
-
-  // Render custom response via the returned signal
-  return {
-    results: result,
-    signal: Signal.interfaceRender({
-      page: {
-        children: [
-          { key: 'header', type: 'header', value: 'Submission Received!' },
-          { key: 'result', type: 'text', value: `Your reference number: ${result.id}` },
-        ],
-      },
-    }),
-  };
-}
+```yaml
+# Downstream InterfaceActor options (the result page)
+page:
+  children:
+    - key: header
+      type: header
+      value: Submission Received!
+    - key: reference
+      type: textDisplay
+      value: Your reference number is ${{ msg.process_submission.id }}
+      copyable: true
+onSubmit:
+  type: successMessage
 ```
 
 ## Interface URL
 
-Each InterfaceTriggerActor is assigned a unique URL:
+Each InterfaceTriggerActor is served at:
 
 ```
-https://<borgiq-domain>/interface/<actor-id>
+https://<borgiq-app-host>/org/<org-slug>/w/<workspace-slug>/c/<canvas-slug-or-id>/interfaces/<actor-id>
 ```
 
-Share this URL with users to access the form.
+Share this URL only with people who can open it: the viewer must be signed in to BorgIQ and be a member of the workspace, with the Viewer, Member or Admin role, or the App user role with a grant for this actor. Anyone else is refused; there is no anonymous or public access. For public sign-ups or anonymous intake, post from a page hosted outside BorgIQ to a WebhookTriggerActor with `authorizationLevel: public` ([webhook-trigger-actor.md](webhook-trigger-actor.md)).
 
 ## Use Cases
 
@@ -368,25 +371,25 @@ actors:
               label: How would you rate your experience?
               options:
                 - label: Excellent
-                  value: 5
+                  value: '5'
                 - label: Good
-                  value: 4
+                  value: '4'
                 - label: Average
-                  value: 3
+                  value: '3'
                 - label: Poor
-                  value: 2
+                  value: '2'
                 - label: Very Poor
-                  value: 1
+                  value: '1'
             - key: comments
-              type: textArea
+              type: textarea
               label: Additional Comments
               placeholder: Tell us more...
             - key: submit
               type: formButton
-              value: Submit Feedback
+              text: Submit Feedback
         onSubmit:
           type: successMessage
-          message: Thank you for your feedback!
+          successMessage: Thank you for your feedback!
     schemas: {}
     id: ACTR01kd298z8kq4yd67m5pddd9cyp
     position:
