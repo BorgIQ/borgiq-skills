@@ -128,10 +128,11 @@ setTitle('Saving…')   // non-hook: anywhere; setTitle(null) withdraws it
   `options.title` is a static title that needs no code; it accepts `${{ }}` and is frozen at Build
   ([react-app-build.md](react-app-build.md#build-time-options)).
 - The tab shows the text as written, with nothing appended. BorgIQ strips control and invisible characters, collapses
-  whitespace and cuts it at 150 characters.
+  whitespace and cuts it at 150 characters. A title that is nothing but such characters clears the runtime title.
 - When several mounted components call `useTitle`, the most deeply nested, most recently mounted one wins: set a
   general title in a layout and a specific one in each route. `null`, `undefined` or a blank string claims nothing, so
-  pass `null` while data loads. The latest `setTitle` outranks every mounted hook until `setTitle(null)`.
+  pass `null` while data loads. `setTitle` outranks the hooks mounted when it is called, until `setTitle(null)`; a
+  hook that mounts afterwards takes over, so clear a transient `setTitle` rather than leaving it.
 - Only the app's own page (`/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`) honours it. A page that embeds the app
   some other way, such as an interface page's web viewer, keeps its own tab title.
 - The `<title>` in `index.html`, and `document.title` written by the app, never reach the tab.
