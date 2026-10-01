@@ -49,7 +49,7 @@ If `borgiq` commands fail with `401`, run `borgiq auth login` again. The five li
 
 **AI providers.** `borgiq ai-providers list/models/create/edit/delete` (workspace AI providers, including custom OpenAI-compatible providers referenced as `<slug>/<model-id>`) require **`@borgiq/cli` >= 0.12.0**; see `references/custom-ai-providers.md`.
 
-**App thumbnails.** `borgiq canvas-actors app-url` and `borgiq canvas-actors thumbnail set/get/rm`, and the bundle's `thumbnail.<ext>` file, require **`@borgiq/cli` >= 0.12.0**; see the `borgiq-react-app-builder` skill's *App thumbnail* section.
+**App thumbnails.** `borgiq canvas-actors app-url` and `borgiq canvas-actors thumbnail set/get/rm`, and the bundle's `thumbnail.<ext>` file, require **`@borgiq/cli` >= 0.12.0**; see `references/app-thumbnail.md`.
 
 **Recipes.** `borgiq recipes list/get/apps/add` (saved, unversioned multi-actor starting points the API adds to a canvas) require **`@borgiq/cli` >= 0.13.0** (0.12.0 shipped without them; `borgiq recipes --help >/dev/null 2>&1 || echo "upgrade: npm install -g @borgiq/cli"`); see `references/borgiq-cli.md` *Start from a recipe*.
 
