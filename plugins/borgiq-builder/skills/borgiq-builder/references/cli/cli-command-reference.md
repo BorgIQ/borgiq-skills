@@ -702,7 +702,7 @@ borgiq canvas-actors delete CANV01kd6gr3vjxm2rs0k8s3fjq4nl \
 
 Execute multiple actor operations (add, update, remove) in a single request.
 
-**Input format:** JSON with `operations` array in **CanvasActor** format (YAML strings). See [cli-data-formats.md](cli-data-formats.md#batch-operations-format).
+**Input format:** JSON with `operations` array in **CanvasActor** format (YAML strings). See [cli-data-formats.md](cli-data-formats.md#canvas-actors-batch-body).
 
 ```bash
 # From file

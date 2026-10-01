@@ -6,7 +6,7 @@ The ScheduledTriggerActor starts a workflow at specified times based on a cron s
 
 - [Overview](#overview)
 - [Configuration Structure](#configuration-structure)
-- [Options Reference](#options-reference)
+- [Config shape](#config-shape)
 - [TypeScript Schema Definition](#typescript-schema-definition)
 - [Emitted Message](#emitted-message)
 - [Common Patterns](#common-patterns)

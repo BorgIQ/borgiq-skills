@@ -33,27 +33,95 @@ def find_plugin_root(skill_path):
     return None
 
 
+FENCE_OPEN = re.compile(r'^ {0,3}(`{3,}|~{3,})')
+
+
+def strip_fenced_blocks(content):
+    """Return content with fenced code blocks blanked out, line by line.
+
+    A fence opens with 3+ backticks or tildes (up to 3 spaces of indent) and
+    closes with a line of the same character, at least as long. Blanking the
+    lines keeps line numbers stable for callers that report them.
+    """
+    out = []
+    fence = None
+    for line in content.split('\n'):
+        m = FENCE_OPEN.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+                out.append('')
+                continue
+            out.append(line)
+        else:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                    and not line.strip()[len(m.group(1)):].strip():
+                fence = None
+            out.append('')
+    return '\n'.join(out)
+
+
+def strip_inline_code(text):
+    """Remove inline code spans (`x`, ``x``) so links shown as code are ignored."""
+    return re.sub(r'(`+)(?:(?!\1).)+?\1', '', text)
+
+
 def find_markdown_links(content):
     """Extract all markdown links from content.
 
     Returns list of (link_text, link_path) tuples.
     Handles both [text](path) and [text](path#anchor) formats.
-    Skips links inside fenced code blocks (``` ... ```).
+    Skips links inside fenced code blocks and inline code spans.
     """
-    # Remove fenced code blocks before searching for links
-    content_no_code = re.sub(r'```[\s\S]*?```', '', content)
+    content_no_code = strip_inline_code(strip_fenced_blocks(content))
     # Match markdown links: [text](path) or [text](path#anchor)
     # Excludes image links which start with !
-    pattern = r'(?<!!)\[([^\]]*)\]\(([^)]+)\)'
+    pattern = r'(?<!!)\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)'
     matches = re.findall(pattern, content_no_code)
     return matches
+
+
+def github_slug(heading):
+    """Anchor GitHub generates for a heading (github-slugger rules).
+
+    Lowercase; drop everything but letters, digits, underscores, hyphens and
+    spaces; each space becomes a hyphen. "A — B" therefore slugs to "a--b".
+    """
+    text = heading.strip().lower()
+    text = re.sub(r'!?\[([^\]]*)\]\([^)]*\)', r'\1', text)   # links/images -> text
+    text = re.sub(r'<[^>]+>', '', text)                        # inline HTML
+    text = re.sub(r'[^\w\- ]', '', text)
+    return text.replace(' ', '-')
+
+
+def heading_anchors(content):
+    """Return the set of anchors a markdown file defines.
+
+    Covers ATX headings outside fenced blocks (with GitHub's -1, -2 suffixes
+    for repeats) and explicit HTML anchors (<a id="x"> / <a name="x">).
+    """
+    anchors = set()
+    seen = {}
+    for line in strip_fenced_blocks(content).split('\n'):
+        m = re.match(r'^ {0,3}#{1,6}\s+(.*?)\s*#*\s*$', line)
+        if m:
+            slug = github_slug(m.group(1))
+            if slug in seen:
+                seen[slug] += 1
+                anchors.add(f"{slug}-{seen[slug]}")
+            else:
+                seen[slug] = 0
+                anchors.add(slug)
+    for m in re.finditer(r'<a\s+(?:id|name)="([^"]+)"', content):
+        anchors.add(m.group(1))
+    return anchors
 
 
 def is_external_link(path):
     """Check if a link is external (URL, mailto, etc.)."""
     external_prefixes = (
         'http://', 'https://', 'mailto:', 'tel:', 'ftp://',
-        'javascript:', 'data:', '#'  # anchor-only links
+        'javascript:', 'data:',
     )
     return path.lower().startswith(external_prefixes)
 
@@ -73,7 +141,10 @@ def check_dangling_references(skill_path, checked_files=None):
     spoke skills reach the hub's `references/` directory. A reference that
     escapes the plugin root entirely is reported as out-of-root.
 
-    Returns (dangling, out_of_root) where each entry is
+    Anchors (`file.md#section`, `#section`) must match a heading in the
+    target file, slugged the way GitHub renders it.
+
+    Returns (dangling, out_of_root, bad_anchors) where each entry is
     (source_file, link_path, link_text).
     """
     if checked_files is None:
@@ -83,6 +154,8 @@ def check_dangling_references(skill_path, checked_files=None):
     plugin_root = find_plugin_root(skill_path) or skill_path
     dangling = []
     out_of_root = []
+    bad_anchors = []
+    anchor_cache = {}
 
     # Find all markdown files in the skill directory, excluding ignored dirs
     md_files = [f for f in skill_path.rglob('*.md') if not should_skip_path(f.relative_to(skill_path))]
@@ -104,15 +177,12 @@ def check_dangling_references(skill_path, checked_files=None):
             if is_external_link(link_path):
                 continue
 
-            # Remove anchor from path for file existence check
-            file_path = link_path.split('#')[0]
+            # Split the anchor off for the file existence check
+            file_path, _, anchor = link_path.partition('#')
 
-            # Skip empty paths (anchor-only links within same file)
-            if not file_path:
-                continue
-
-            # Resolve relative to the markdown file's directory
-            resolved_path = (md_file.parent / file_path).resolve()
+            # Resolve relative to the markdown file's directory; an
+            # anchor-only link points into the file itself
+            resolved_path = (md_file.parent / file_path).resolve() if file_path else md_file
 
             # Get relative path from skill root for cleaner output
             try:
@@ -131,8 +201,16 @@ def check_dangling_references(skill_path, checked_files=None):
             # Check if file or directory exists
             if not resolved_path.exists():
                 dangling.append((str(source_rel), link_path, link_text))
+                continue
 
-    return dangling, out_of_root
+            # Check the anchor against the target's headings
+            if anchor and resolved_path.suffix == '.md' and resolved_path.is_file():
+                if resolved_path not in anchor_cache:
+                    anchor_cache[resolved_path] = heading_anchors(resolved_path.read_text())
+                if anchor not in anchor_cache[resolved_path]:
+                    bad_anchors.append((str(source_rel), link_path, link_text))
+
+    return dangling, out_of_root, bad_anchors
 
 
 def validate_skill(skill_path):
@@ -166,12 +244,13 @@ def validate_skill(skill_path):
 
     # Allowed Claude Code skill frontmatter fields. See
     # https://code.claude.com/docs/en/skills for the canonical list. Includes
-    # legacy `license` and `metadata` which the BorgIQ team has used historically.
+    # legacy `license` and `metadata` which the BorgIQ team has used historically,
+    # and the Agent Skills spec's `compatibility` (environment requirements).
     ALLOWED_PROPERTIES = {
         'name', 'description', 'when_to_use', 'argument-hint', 'arguments',
         'disable-model-invocation', 'user-invocable', 'allowed-tools', 'model',
         'effort', 'context', 'agent', 'hooks', 'paths', 'shell',
-        'license', 'metadata',
+        'license', 'metadata', 'compatibility',
     }
 
     # Check for unexpected properties (excluding nested keys under metadata)
@@ -216,8 +295,16 @@ def validate_skill(skill_path):
         if len(description) > 1024:
             return False, f"Description is too long ({len(description)} characters). Maximum is 1024 characters."
 
+    # compatibility is optional; the spec caps it at 500 characters
+    compatibility = frontmatter.get('compatibility')
+    if compatibility is not None:
+        if not isinstance(compatibility, str):
+            return False, f"compatibility must be a string, got {type(compatibility).__name__}"
+        if len(compatibility.strip()) > 500:
+            return False, f"compatibility is too long ({len(compatibility.strip())} characters). Maximum is 500 characters."
+
     # Check for dangling / out-of-root references in all markdown files
-    dangling, out_of_root = check_dangling_references(skill_path)
+    dangling, out_of_root, bad_anchors = check_dangling_references(skill_path)
     error_lines = []
     if out_of_root:
         error_lines.append("References outside skill root found:")
@@ -228,6 +315,12 @@ def validate_skill(skill_path):
             error_lines.append("")
         error_lines.append("Dangling references found:")
         for source_file, link_path, link_text in dangling:
+            error_lines.append(f"  {source_file}: [{link_text}]({link_path})")
+    if bad_anchors:
+        if error_lines:
+            error_lines.append("")
+        error_lines.append("Anchors with no matching heading:")
+        for source_file, link_path, link_text in bad_anchors:
             error_lines.append(f"  {source_file}: [{link_text}]({link_path})")
     if error_lines:
         return False, "\n".join(error_lines)

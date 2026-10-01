@@ -2212,7 +2212,7 @@ allowedScriptDomains:
 
 When building custom HTML interfaces with `webViewer`, aim for distinctive, production-grade designs that avoid generic "AI slop" aesthetics. The webViewer component gives you full creative control—use it to create memorable, context-appropriate interfaces.
 
-**CRITICAL CSP REMINDER**: All styles must be in `<style>` tags (no `style="..."` attributes). All event handlers must use `addEventListener()` (no `onclick`, `onload`, etc.). See [CSP Restrictions](#csp-restrictions-blocked) above.
+**CRITICAL CSP REMINDER**: All styles must be in `<style>` tags (no `style="..."` attributes). All event handlers must use `addEventListener()` (no `onclick`, `onload`, etc.). See [Content Security Policy (CSP) Configuration](#content-security-policy-csp-configuration) above.
 
 ### Design Philosophy
 

@@ -23,7 +23,7 @@ The AgentHarnessActor is **Claude in a Box** — it packages Claude Code into a 
 - [Building Context with a DenoActor](#building-context-with-a-denoactor)
 - [Extracting Output Files](#extracting-output-files)
 - [Results Object](#results-object)
-- [Credentials and Environment Variables](#secrets-and-environment-variables)
+- [Credentials and Environment Variables](#credentials-and-environment-variables)
 - [Common Patterns](#common-patterns)
 - [Complete Example: Deep Research Agent with Context Building](#complete-example-deep-research-agent-with-context-building)
 - [Accessing Agent Harness Data in Downstream Actors](#accessing-agent-harness-data-in-downstream-actors)

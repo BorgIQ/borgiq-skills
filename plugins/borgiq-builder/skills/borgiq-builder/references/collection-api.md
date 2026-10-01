@@ -166,7 +166,7 @@ A collection has at most **15 label slots** (`MAX_LABEL_SLOTS`), shared by every
 - **Provisioning collapses to one `createCollection`.** The migration runner creates one collection instead of N, and there is no "which of the six collections is missing in this workspace" drift (see [collection-migrations.md](collection-migrations.md)). The `$meta` manifest it writes is the single place that says what the collection contains.
 - **Collection budget.** The API reference lists a per-workspace collection limit (100, plan-configurable). Even where it is not binding, an app that burns six slots for one logical database is waste.
 
-### Capacity model — what one collection carries
+### Capacity model: what one collection carries
 
 A collection is one DynamoDB partition key, so it inherits DynamoDB's per-partition physics. Design against these numbers, not against user counts:
 
