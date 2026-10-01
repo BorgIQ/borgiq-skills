@@ -1,416 +1,305 @@
 # StreamActor Reference
 
-StreamActor is a **Task Actor** that provides YAML-based access to the [Stream API](stream-api.md): append-only, ordered, cursor-addressed record logs scoped to the workspace. It is the sibling of [CollectionActor](collection-actor.md) — a Collection holds the *current value* of things, a stream holds *what happened, in order*.
+Streams are append-only, ordered, cursor-addressed record logs scoped to a workspace: a collection holds the current
+value of things, a stream holds what happened, in order. This file holds the stream rules (provisioning, expiry,
+paging, cursors, no arrival trigger), every StreamActor action and its result, and worked canvases. Read it before
+creating, appending to or consuming a stream. Code, REST, SSE tails and the React app surface are in
+[stream-api.md](stream-api.md).
 
-For full API documentation including every action's parameters, cursor semantics, lifecycle, the SDK helpers (Deno/Python), the REST routes, tailing over SSE, error codes and limits, see [stream-api.md](stream-api.md).
+## Contents
 
-> **Streams must be created before use** — an `appendData` or `readStream` against a slug that was never created (or that has expired) fails with `STREAM_NOT_FOUND`. Nothing auto-creates a stream. Provision streams the same way you provision collections, in an idempotent migration step (see [collection-migrations.md](collection-migrations.md#provisioning-streams)).
+- [Rules](#rules)
+- [Collections vs streams](#collections-vs-streams)
+- [Configuration](#configuration)
+- [Actions](#actions)
+- [Examples](#examples)
+- [Patterns](#patterns)
 
-> **A stream expires unless you say otherwise** — with neither `idleTtlSeconds` nor `persistent: true`, a stream is hard-deleted **one hour** after its last append, records and all. Set `persistent: true` for anything an app or a scheduled consumer depends on; use a TTL (60 s – 30 days) for scratch logs. The two are mutually exclusive. See [Lifecycle](stream-api.md#lifecycle-ttl-and-persistence).
+## Rules
 
-> **Reads return one page, never the stream** — `readStream` emits a bounded page budgeted by the workspace message-size limit, plus a `nextCursor` to continue from. Loop the cursor on a canvas edge, or persist it in a Collection to resume across flowruns. See [Reading a Stream](stream-api.md#reading-a-stream-one-page-at-a-time).
+1. **Create streams before use.** `appendData` or `readStream` on a slug that was never created, or that expired, fails
+   with `STREAM_NOT_FOUND` (404); nothing auto-creates a stream. Create every stream an app or a scheduled consumer
+   depends on with `persistent: true` in the app's migration runner
+   ([collection-migrations.md → Provisioning streams](collection-migrations.md#provisioning-streams)).
+2. **A stream expires unless you say otherwise.** Each stream is in one lifecycle mode, set by `createStream` and
+   changed by `editMetadata`:
 
-## Table of Contents
+   | Mode | How | Behaviour |
+   |---|---|---|
+   | Idle TTL (default) | `idleTtlSeconds` 60–2,592,000 (30 days); neither field gives **3,600** (1 hour) | The stream and every record in it are hard-deleted once it goes `idleTtlSeconds` without an append. Each append resets the clock |
+   | Persistent | `persistent: true` | Lives until `deleteStream` (or a REST `DELETE`) |
 
-- [Configuration Structure](#configuration-structure)
-- [Actions Summary](#actions-summary)
-- [Collections vs Streams](#collections-vs-streams)
-- [Complete Examples](#complete-examples)
-- [Use Cases](#use-cases)
-- [Workflow Patterns](#workflow-patterns)
-- [TypeScript Schema Hint](#typescript-schema-hint)
+   - `idleTtlSeconds` and `persistent: true` are mutually exclusive (rejected at validation, `path: ["persistent"]`).
+     `persistent: false` on `createStream` is the same as omitting it; on `editMetadata` it converts a persistent
+     stream back, applying `idleTtlSeconds` if sent and the 1-hour default otherwise. Switching to `persistent: true`
+     cancels the pending expiry; switching back starts the clock from the last append.
+   - The clock counts appends, not reads: reading or tailing does not keep a stream alive.
+   - Before its first record a stream gets a 15-minute grace (`createdAt + max(idleTtlSeconds, 15 min)`), so a flow
+     that creates it in one actor and appends later, behind an AI call or a retry, does not lose it.
+   - Deletion is hard: no tombstone, no undo, no confirmation. An expired stream returns `STREAM_NOT_FOUND` from every
+     surface; an open tail on it closes and the 404 arrives on the reconnect.
+   - Use `persistent: true` for anything an app or consumer depends on, a TTL for scratch logs.
+3. **A read returns one page, never the stream.** From actor code (StreamActor, DenoActor and PythonActor all use the
+   same runtime endpoint) a `readStream` page is budgeted by the workspace's message soft maximum size
+   (`softMaxMessagePayloadSizeInKiloBytes`, 64 KB by default); `maxBytes` can lower that budget, never raise it. A
+   record larger than the budget fails the read with `RECORD_EXCEEDS_MESSAGE_BUDGET` rather than being truncated: raise
+   the workspace limit, or read over REST (`GET …/records`, bounded only by `maxBytes` up to 1 MiB). A read is a
+   snapshot and never waits; an empty stream returns an empty page with a usable cursor. Consume in a loop:
+   1. Load the last `nextCursor` you persisted, or use `"start"` (everything) or `"tail"` (only new records).
+   2. `readStream` with `from` set to it.
+   3. Process `records`, then persist `nextCursor` (at-least-once), or persist first (at-most-once); say which in the
+      actor description.
+   4. If `hasMore`, repeat from 2 with the new `nextCursor`; otherwise you are caught up until the next run.
 
-## Configuration Structure
+   On a canvas, step 4 is an edge back into the reader through a RouterActor on `hasMore`. Across flowruns, steps 1 and
+   3 are a Collection `getItem` and a `putItem` with `options.overwrite: true` in the app's collection.
+4. **Cursors are opaque tokens.** Compare them for equality, pass them back and persist them; never parse, construct
+   or do arithmetic on one.
+   - A cursor is bound to the stream that issued it; another stream rejects it with `INVALID_CURSOR`.
+   - Every record carries its own `cursor`. Reads return `nextCursor` (where to resume) and `tailCursor` (the current
+     end); appends return `firstCursor`, `lastCursor` and `tailCursor`.
+   - Reads are inclusive: reading from a record's `cursor` returns that record again. Every resume cursor the platform
+     hands out (a page's `nextCursor`, an SSE `id:` line, an `end` frame's `nextCursor`) points past the last record
+     it delivered: pass it back unchanged and you neither skip nor repeat.
+   - `from` is `"start"` (the oldest retained record), `"tail"` (only records appended after now) or a cursor. A
+     cursor stays valid for the stream's life; there is no server-side consumer offset.
+5. **Nothing triggers when a record arrives.** Poll instead: a ScheduledTriggerActor calls `getStreamInfo`, compares
+   `tailCursor` with the persisted cursor (equal means nothing new) and reads only when it moved, which is cheap enough
+   for a one-minute schedule. For records as they land, tail the stream
+   ([stream-api.md → Tailing](stream-api.md#tailing-over-server-sent-events)): React apps with `useStreamTail`,
+   external dashboards over the REST API.
+6. **Payloads are strings.** Stringify on the way in (`Q.toJSON(...)`) and parse on the way out. Records are
+   immutable, ordered by arrival at the platform and encrypted at rest; nothing can backdate, edit or delete one. A
+   stream reports `storedBytes`, never a record count: keep counters in a collection.
 
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01xxxxx:
-    type: StreamActor
-    version: 1
-    name: Append Event
-    msgVar: append_event
-    description: Append the incoming event to the order-events stream
-    isActive: true
-    continueOnError: false
-    enableLTM: false
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      options:
-        action: appendData
-        stream: order-events
-        records:
-          - payload: ${{ Q.toJSON(msg.trigger.body) }}
-    schemas: {}
-    id: ACTR01xxxxx
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
+## Collections vs streams
 
-StreamActor always has exactly one source port, `SPRTdefault`. Record payloads are **strings** — stringify structured data on the way in (`Q.toJSON(...)`) and parse it on the way out.
-
----
-
-## Actions Summary
-
-All actions are configured via the `action` field in `configuration.options`. For full parameter documentation, see [stream-api.md](stream-api.md).
-
-| Action | Description | API Reference |
-|--------|-------------|---------------|
-| `createStream` | Create a stream — `slug`, optional `name`/`description`, and **either** `idleTtlSeconds` **or** `persistent: true` | [Details](stream-api.md#createstream) |
-| `editMetadata` | Change name, description, record-size ceiling, or lifecycle mode | [Details](stream-api.md#editmetadata) |
-| `listStreams` | List every stream in the workspace (max 100) | [Details](stream-api.md#liststreams) |
-| `deleteStream` | Hard-delete the stream and every record in it | [Details](stream-api.md#deletestream) |
-| `appendData` | Append 1–500 records; all stored or the call fails | [Details](stream-api.md#appenddata) |
-| `readStream` | Read one bounded page from `start`, `tail`, or a cursor | [Details](stream-api.md#readstream) |
-| `getStreamInfo` | The live tail cursor, last record time, stored bytes — the cheap "anything new?" probe | [Details](stream-api.md#getstreaminfo) |
-
-**Key concepts** (see [stream-api.md](stream-api.md)):
-- [Cursors](stream-api.md#cursors) — opaque tokens: compare, pass back, persist; never parse
-- [Lifecycle: TTL and persistence](stream-api.md#lifecycle-ttl-and-persistence) — the 1-hour default, the 15-minute first-append grace, hard deletion
-- [Reading a Stream](stream-api.md#reading-a-stream-one-page-at-a-time) — the paging loop and the message budget
-- [Tailing over Server-Sent Events](stream-api.md#tailing-over-server-sent-events) — live consumers, for apps and external systems
-- [Error Codes](stream-api.md#error-codes) — API error codes and meanings
-
----
-
-## Collections vs Streams
-
-| Need | Actor |
+| Need | Use |
 |---|---|
-| Store or look up the current value of a key; update it in place | [CollectionActor](collection-actor.md) |
-| Model an app's entities, query by prefix or label, counters, transactions | [CollectionActor](collection-actor.md) |
-| Record events in order and never lose the order | **StreamActor** |
-| Consume records incrementally and resume where you left off | **StreamActor** (`readStream` + a persisted cursor) |
-| Know whether anything new arrived without reading it | **StreamActor** (`getStreamInfo`) |
-| Queue with claim/complete/retry | [CollectionActor](collection-actor.md) queue pattern — a stream cannot mark a record consumed |
+| The current value of a key, changed in place | [CollectionActor](collection-actor.md) |
+| An app's entities queried by key prefix or label; counters, conditional writes, transactions | [CollectionActor](collection-actor.md) ([design](collection-design.md)) |
+| A queue with claim, complete and retry | CollectionActor [queue pattern](collection-actor.md#queue-pattern): nothing marks a stream record consumed, and two readers of one cursor both get it |
+| Record what happened, in order, and never lose the order (webhook events, audit trails, activity feeds, agent progress) | **StreamActor** |
+| Process events incrementally and resume where the last run stopped | **StreamActor**: `readStream` from a cursor persisted in a collection |
+| Know whether anything new arrived without reading it | **StreamActor**: `getStreamInfo` |
+| Show records live as they arrive | **StreamActor**: tail over SSE |
 
-A stream is not a queue (nothing marks a record consumed) and not a place for current state (that is a `getItem`). Full comparison: [stream-api.md → Collections vs Streams](stream-api.md#collections-vs-streams).
+Event data kept as `event:<timestamp>` collection items forces client-side ordering and paging a stream gives for free;
+current state kept in a stream forces a replay to find the latest value.
 
+## Configuration
+
+Options live under `configuration.options`; `action` selects the action. The actor always has exactly one source port,
+`SPRTdefault`, and emits the action's result as `msg.<msgVar>`. Exact schemas:
+[typescript/actorSchemas/task/stream/index.md](typescript/actorSchemas/task/stream/index.md) (one module per action
+alongside it, plus `limits.md` and `summary.md`).
+
+```yaml
+type: StreamActor
+version: 1
+name: Append Event
+msgVar: append_event
+sourcePorts:
+  - id: SPRTdefault
+configuration:
+  options:
+    action: appendData
+    stream: order-events
+    records:
+      - payload: ${{ Q.toJSON(msg.trigger.body) }}
+```
+
+## Actions
+
+`stream` takes the stream's slug or id. Error codes and limits: [stream-api.md → Errors](stream-api.md#error-codes).
+
+| Action | Options | Emits |
+|---|---|---|
+| `createStream` | `slug` (required; `^[a-z0-9][a-z0-9_-]{0,63}$`, unique in the workspace); `name` (≤ 120 characters, defaults to the slug); `description` (≤ 500); `idleTtlSeconds` or `persistent`; `maxRecordSizeInKiloBytes` (largest payload, default 256) | The stream summary. A taken slug fails `STREAM_ALREADY_EXISTS` (409); the 101st stream `STREAM_LIMIT_EXCEEDED` (409) |
+| `editMetadata` | `stream`; `name`; `description` (`null` clears it); `idleTtlSeconds` or `persistent`; `maxRecordSizeInKiloBytes` (future appends only) | The stream summary |
+| `listStreams` | — | An array of every stream summary in the workspace (at most 100; no paging or filter) |
+| `deleteStream` | `stream` | `{ streamId, slug }`. Deletes every record, with no undo |
+| `appendData` | `stream`; `records`: 1–500 `{ payload: string, kind?: "text" }` (`text` is the only kind) | `{ streamId, recordsAccepted, firstCursor, lastCursor, tailCursor }`; `tailCursor` is the end after this append, for a reader that wants only what comes next |
+| `readStream` | `stream`; `from` (`"start"` by default, `"tail"`, or a cursor); `maxRecords` (1–1000; a page may stop earlier on bytes); `maxBytes` (≤ 1 MiB, only narrows the budget) | One page, below |
+| `getStreamInfo` | `stream` | `{ streamId, slug, name, description, tailCursor, lastRecordAt, storedBytes, persistent, idleTtlSeconds, expiresAt, createdAt }`; the tail is read live, never stale. `lastRecordAt` is `null` before the first append |
+
+- An append stores every record or fails: there is no partial success. Each payload must fit the stream's
+  `maxRecordSizeInKiloBytes`, the batch 1 MiB, and appends are limited to 50/s per stream and 200/s per workspace
+  (`APPEND_RATE_EXCEEDED`, 429: retry after a short delay).
+- The **stream summary** is `{ streamId, slug, name, description, persistent, idleTtlSeconds, maxRecordSizeInKiloBytes,
+  storedBytes, lastActivityAt, expiresAt, createdAt, updatedAt }`. `storedBytes`, `lastActivityAt` and `expiresAt` are
+  hints refreshed asynchronously; `updatedAt` moves only on `editMetadata`, never on an append.
+
+A `readStream` page is `{ streamId, records, count, hasMore, cursor, nextCursor, tailCursor, skippedRecords,
+truncatedByByteBudget? }`; each record is `{ cursor, timestamp, payload }`, with the platform's arrival time in ISO 8601.
+
+| Field | Meaning |
+|---|---|
+| `cursor` | Where this page started |
+| `nextCursor` | Where to resume; usable even when the page is empty, so persist it |
+| `tailCursor` | The current end; `nextCursor === tailCursor` means caught up |
+| `hasMore` | More records exist after this page right now |
+| `skippedRecords` | Records of a newer kind this version could not read, skipped |
+| `truncatedByByteBudget` | `true` when the byte budget ran out before `maxRecords` |
+
+## Examples
+
+Each example lists its actors in flow order with only `type`, `msgVar` and `configuration`. Wire them in the bundle's
+`canvas.yaml` under `graph.edges`, one edge object per connection: `{ id, sourceActorId, sourcePortId, targetActorId,
+targetPortId: TPRTdefault, type: borgiqEdge }` ([edges-and-positioning.md](edges-and-positioning.md)). Ids come from
+`borgiq generate`.
+
+### Ingest webhook events
+
+`order_webhook` (WebhookTriggerActor with `options.webhook.respondImmediately: false`) → `append_order_event` → `ack`
+(WebhookResponseActor). `order-events` is persistent, created by the migration runner. When the body is an array,
+append up to 500 records in one call.
+
+```yaml
+# StreamActor, msgVar append_order_event
+configuration:
+  options:
+    action: appendData
+    stream: order-events
+    records:
+      - payload: ${{ Q.toJSON(msg.order_webhook.body) }}
 ---
-
-## Complete Examples
-
-### Event ingestion from a webhook
-
-A WebhookTriggerActor receives order events; the StreamActor appends each one; a WebhookResponseActor acknowledges. The stream is persistent because downstream consumers depend on it.
-
-```yaml
-actors:
-  ACTR01trigger:
-    type: WebhookTriggerActor
-    name: Order Webhook
-    msgVar: order_webhook
-    # ... webhook configuration
-    edges:
-      ACTR01append: SPRTdefault
-
-  ACTR01append:
-    type: StreamActor
-    name: Append Order Event
-    msgVar: append_order_event
-    configuration:
-      options:
-        action: appendData
-        stream: order-events
-        records:
-          - payload: ${{ Q.toJSON(msg.order_webhook.body) }}
-    sourcePorts:
-      - id: SPRTdefault
-    edges:
-      ACTR01respond: SPRTdefault
-
-  ACTR01respond:
-    type: WebhookResponseActor
-    name: Ack
-    msgVar: ack
-    configuration:
-      options:
-        statusCode: 202
-        body:
-          accepted: ${{ msg.append_order_event.recordsAccepted }}
-          cursor: ${{ msg.append_order_event.lastCursor }}
+# WebhookResponseActor, msgVar ack
+configuration:
+  options:
+    statusCode: 202
+    body:
+      accepted: ${{ msg.append_order_event.recordsAccepted }}
+      cursor: ${{ msg.append_order_event.lastCursor }}
 ```
 
-Batch several events in one append when the webhook body is an array — up to 500 records per call, stored in full or not at all.
+### Page through a backlog
 
-### Chunked processing with a cursor loop
-
-Read a large stream a page at a time on one canvas: the StreamActor reads from the cursor it last emitted, a RouterActor checks `hasMore`, and the "more" route loops back into the reader. The first pass reads from `start`.
+`read_page` → `process_page` (a DenoActor that parses `msg.read_page.records[i].payload`) → `more` (RouterActor), whose
+`More` port loops back into `read_page`. On the loop pass `msg.read_page` is the previous page, because a message
+carries every upstream result and an actor's new result replaces its old one.
 
 ```yaml
-actors:
-  ACTR01read:
-    type: StreamActor
-    name: Read Page
-    msgVar: read_page
-    configuration:
-      options:
-        action: readStream
-        stream: order-events
-        # Self-loop: on the loop pass the actor's own previous emission arrives as msg.read_page
-        from: ${{ msg.read_page ? msg.read_page.nextCursor : 'start' }}
-        maxRecords: 200
-    sourcePorts:
-      - id: SPRTdefault
-    edges:
-      ACTR01process: SPRTdefault
-
-  ACTR01process:
-    type: DenoActor
-    name: Process Page
-    msgVar: process_page
-    # ... iterate msg.read_page.records, JSON.parse(record.payload)
-    edges:
-      ACTR01more: SPRTdefault
-
-  ACTR01more:
-    type: RouterActor
-    name: More?
-    msgVar: more
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          More: ${{ msg.read_page.hasMore === true }}
-    sourcePorts:
-      - id: SPRTmore000
-        name: More
-        description: Another page remains
-      - id: SPRTdefault
-        name: Default
-        description: Caught up
-    edges:
-      ACTR01read: SPRTmore000
+# StreamActor, msgVar read_page
+configuration:
+  options:
+    action: readStream
+    stream: order-events
+    from: "${{ msg.read_page ? msg.read_page.nextCursor : 'start' }}"
+    maxRecords: 200
+---
+# RouterActor, msgVar more
+sourcePorts:
+  - id: SPRTmore000
+    name: More
+  - id: SPRTdefault
+    name: Default
+configuration:
+  options:
+    emitType: singleRoute
+    conditions:
+      More: ${{ msg.read_page.hasMore === true }}
 ```
 
-Every page is bounded by the workspace message budget, so a 10,000-record stream becomes fifty 200-record messages rather than one enormous one. A single record larger than the budget fails with `RECORD_EXCEEDS_MESSAGE_BUDGET` instead of being truncated.
+The loop-back edge, in `canvas.yaml`:
+
+```yaml
+- id: EDGE01...                  # borgiq generate
+  sourceActorId: <more actor id>
+  sourcePortId: SPRTmore000
+  targetActorId: <read_page actor id>
+  targetPortId: TPRTdefault
+  type: borgiqEdge
+```
+
+A 10,000-record stream becomes fifty 200-record messages, never one enormous one.
 
 ### Scheduled consumer that resumes across flowruns
 
-The v1 substitute for a "record arrived" trigger: a ScheduledTriggerActor fires every minute, the flow loads the cursor it persisted last time, asks `getStreamInfo` whether the tail moved, and only then reads. The cursor lives in the app's collection.
+`every_minute` (ScheduledTriggerActor) → `load_cursor` → `tail_moved` → `changed` (RouterActor; its `Changed` port →
+`read_new_records`) → `handle_records` (a DenoActor that processes records idempotently) → `save_cursor`. Most ticks
+end after the cheap `getStreamInfo` probe.
 
 ```yaml
-actors:
-  ACTR01schedule:
-    type: ScheduledTriggerActor
-    name: Every Minute
-    msgVar: every_minute
-    # ... schedule configuration
-    edges:
-      ACTR01loadcursor: SPRTdefault
-
-  ACTR01loadcursor:
-    type: CollectionActor
-    name: Load Cursor
-    msgVar: load_cursor
-    configuration:
-      options:
-        action: getItem
-        collection: orders-app
-        key: cursor:order-events
-    sourcePorts:
-      - id: SPRTdefault
-    edges:
-      ACTR01info: SPRTdefault
-
-  ACTR01info:
-    type: StreamActor
-    name: Tail Moved?
-    msgVar: tail_moved
-    configuration:
-      options:
-        action: getStreamInfo
-        stream: order-events
-    sourcePorts:
-      - id: SPRTdefault
-    edges:
-      ACTR01changed: SPRTdefault
-
-  ACTR01changed:
-    type: RouterActor
-    name: Changed?
-    msgVar: changed
-    configuration:
-      options:
-        emitType: singleRoute
-        conditions:
-          Changed: ${{ !msg.load_cursor || msg.load_cursor.value.cursor !== msg.tail_moved.tailCursor }}
-    sourcePorts:
-      - id: SPRTchange0
-        name: Changed
-        description: The tail moved since the persisted cursor
-      - id: SPRTdefault
-        name: Default
-        description: Nothing new
-    edges:
-      ACTR01readnew: SPRTchange0
-
-  ACTR01readnew:
-    type: StreamActor
-    name: Read New Records
-    msgVar: read_new_records
-    configuration:
-      options:
-        action: readStream
-        stream: order-events
-        from: ${{ msg.load_cursor ? msg.load_cursor.value.cursor : 'start' }}
-        maxRecords: 500
-    sourcePorts:
-      - id: SPRTdefault
-    edges:
-      ACTR01handle: SPRTdefault
-
-  ACTR01handle:
-    type: DenoActor
-    name: Handle Records
-    msgVar: handle_records
-    # ... process msg.read_new_records.records idempotently
-    edges:
-      ACTR01savecursor: SPRTdefault
-
-  ACTR01savecursor:
-    type: CollectionActor
-    name: Save Cursor
-    msgVar: save_cursor
-    configuration:
-      options:
-        action: putItem
-        collection: orders-app
-        key: cursor:order-events
-        value:
-          cursor: ${{ msg.read_new_records.nextCursor }}
-        options:
-          overwrite: true
+# CollectionActor, msgVar load_cursor (emits null the first time)
+configuration:
+  options:
+    action: getItem
+    collection: orders-app
+    key: cursor:order-events
+---
+# StreamActor, msgVar tail_moved
+configuration:
+  options:
+    action: getStreamInfo
+    stream: order-events
+---
+# RouterActor, msgVar changed (sourcePorts: SPRTchange0 named Changed, SPRTdefault named Default)
+configuration:
+  options:
+    emitType: singleRoute
+    conditions:
+      Changed: ${{ !msg.load_cursor || msg.load_cursor.value.cursor !== msg.tail_moved.tailCursor }}
+---
+# StreamActor, msgVar read_new_records
+configuration:
+  options:
+    action: readStream
+    stream: order-events
+    from: "${{ msg.load_cursor ? msg.load_cursor.value.cursor : 'start' }}"
+    maxRecords: 500
+---
+# CollectionActor, msgVar save_cursor: overwrite, since the cursor row exists after the first save
+configuration:
+  options:
+    action: putItem
+    collection: orders-app
+    key: cursor:order-events
+    value:
+      cursor: ${{ msg.read_new_records.nextCursor }}
+    options:
+      overwrite: true
 ```
 
-Saving `nextCursor` *after* handling gives at-least-once delivery; make the handler idempotent. If a page reports `hasMore`, either loop as in the previous example or let the next tick pick it up — the cursor is already saved.
+Saving `nextCursor` after handling gives at-least-once delivery, so make the handler idempotent: a create-only
+`putItem` keyed by something in the payload fails a replay with `ITEM_ALREADY_EXISTS`, which means done. If a page
+reports `hasMore`, loop as in the previous example or let the next tick continue from the saved cursor.
 
-### Short-lived activity log for an AI agent run
+### Per-run log that expires
 
-Create a stream per run with a two-hour TTL, append progress from the agent's Status port, and let it expire on its own. Nothing to clean up.
+`create_run_log` → `agent` (AiAgentActor; its Status port, `SPRTdefault`) → `log_progress`. The stream expires two hours
+after the last append, so there is nothing to clean up; a web app can tail `run-<id>` live while the run is in progress.
 
 ```yaml
-actors:
-  ACTR01create:
-    type: StreamActor
-    name: Create Run Log
-    msgVar: create_run_log
-    configuration:
-      options:
-        action: createStream
-        slug: run-${{ ctx.flowrun.id.toLowerCase() }}
-        name: Agent run log
-        idleTtlSeconds: 7200
-    sourcePorts:
-      - id: SPRTdefault
-    edges:
-      ACTR01agent: SPRTdefault
-
-  ACTR01agent:
-    type: AiAgentActor
-    name: Agent
-    msgVar: agent
-    # ... agent configuration; Status port feeds the append below
-    sourcePorts:
-      - id: SPRTdone000
-      - id: SPRTdefault
-    edges:
-      ACTR01log: SPRTdefault
-
-  ACTR01log:
-    type: StreamActor
-    name: Log Progress
-    msgVar: log_progress
-    configuration:
-      options:
-        action: appendData
-        stream: ${{ msg.create_run_log.slug }}
-        records:
-          - payload: ${{ Q.toJSON(msg.agent) }}
-```
-
-A web app can tail `run-<id>` live over SSE while the run is in progress — see [stream-api.md → Tailing](stream-api.md#tailing-over-server-sent-events).
-
+# StreamActor, msgVar create_run_log. Flowrun ids have an upper-case prefix; slugs are lower-case only.
+configuration:
+  options:
+    action: createStream
+    slug: run-${{ ctx.flowrun.id.toLowerCase() }}
+    name: Agent run log
+    idleTtlSeconds: 7200
 ---
-
-## Use Cases
-
-| Scenario | Action |
-|----------|--------|
-| Record every event a webhook delivers, in order | `appendData` |
-| Ingest a batch of events in one call | `appendData` with up to 500 `records` |
-| Process a backlog a page at a time | `readStream` looping `nextCursor` while `hasMore` |
-| Resume consumption where the last flowrun stopped | `readStream` from a cursor persisted in a Collection |
-| Only react when something new arrived | `getStreamInfo` — compare `tailCursor` with the persisted cursor |
-| Read only records appended from now on | `readStream` with `from: tail` |
-| Provision an app's stream at deploy time | `createStream` with `persistent: true` (idempotent — catch `STREAM_ALREADY_EXISTS`) |
-| Per-run scratch log that cleans itself up | `createStream` with a short `idleTtlSeconds` |
-| Keep a stream that turned out to matter | `editMetadata` with `persistent: true` |
-| Free the space when done | `deleteStream` |
-| Audit which streams exist | `listStreams` |
-| Live progress in a UI | tail over SSE from the app or a dashboard ([stream-api.md](stream-api.md#tailing-over-server-sent-events)) |
-
----
-
-## Workflow Patterns
-
-### Pattern 1: Event log
-
-```
-WebhookTrigger → StreamActor (appendData) → WebhookResponse
+# StreamActor, msgVar log_progress
+configuration:
+  options:
+    action: appendData
+    stream: ${{ msg.create_run_log.slug }}
+    records:
+      - payload: ${{ Q.toJSON(msg.agent) }}
 ```
 
-Producers only append. Consumers are separate flows that read from a cursor. Because ordering happens at the platform, several producers can share one stream with no coordination.
+## Patterns
 
-### Pattern 2: Resumable consumer
+| Pattern | Shape | Notes |
+|---|---|---|
+| Event log | `WebhookTrigger → StreamActor appendData → WebhookResponse` | Producers only append; consumers are separate flows reading from a cursor |
+| Fan-in log | Several canvases append to one persistent stream (`audit-log`) | Appends are ordered at the platform, so producers need no coordination |
+| Resumable consumer | `ScheduledTrigger → getItem cursor → getStreamInfo → Router → readStream → process → putItem cursor (overwrite)` | The `getStreamInfo` gate keeps a one-minute schedule cheap |
+| Chunked backlog | `readStream → process → Router (hasMore) → readStream` | The stream never enters a flowrun message whole |
+| Per-run log | `createStream (idleTtlSeconds) → long-running work → appendData` | Expiry cleans up; a UI tails it while the run is active |
+| Live view | An app or dashboard tails from `start` (replay, then follow) or `tail` (follow only) | Reconnect from `nextCursor` on every `end` ([stream-api.md](stream-api.md#tailing-over-server-sent-events)) |
+| Provisioning | `createStream` (`persistent: true`) in the migration runner beside `createCollection` | Swallow `STREAM_ALREADY_EXISTS` ([collection-migrations.md](collection-migrations.md#provisioning-streams)) |
 
-```
-ScheduledTrigger → Collection getItem (cursor) → StreamActor getStreamInfo → Router (moved?)
-  → StreamActor readStream → process → Collection putItem (nextCursor, overwrite: true)
-```
-
-The `getStreamInfo` gate is what makes a one-minute schedule affordable: most ticks end after one cheap probe. Persist the cursor after processing for at-least-once, before for at-most-once — and say which in the actor description.
-
-### Pattern 3: Chunked backlog
-
-```
-StreamActor readStream → process → Router (hasMore?) ─┐
-        ▲                                             │
-        └─────────────────────────────────────────────┘
-```
-
-Bounded pages looped on a canvas edge. The stream never enters a flowrun message whole.
-
-### Pattern 4: Per-run log with TTL
-
-```
-StreamActor createStream (idleTtlSeconds) → long-running work → StreamActor appendData (Status port)
-```
-
-Slug from the lower-cased flow-run id (`ctx.flowrun.id.toLowerCase()`) — ids carry an upper-case prefix, slugs are lower-case only. Expiry does the cleanup, a UI tails it live while the run is active.
-
-### Pattern 5: Provisioning
-
-Add a `createStream` (`persistent: true`) step to the app's migration runner, alongside its `createCollection`, and swallow `STREAM_ALREADY_EXISTS` on re-runs — see [collection-migrations.md](collection-migrations.md#provisioning-streams). A stream-backed app without a provisioning step works in the dev workspace where the stream was hand-created and then 404s in production.
-
----
-
-## TypeScript Schema Hint
-
-The Zod schemas for every action live in [typescript/actorSchemas/task/stream/index.md](typescript/actorSchemas/task/stream/index.md):
-
-- `StreamActorCreateStreamOptionsSchema` / `StreamActorCreateStreamResultSchema`
-- `StreamActorEditMetadataOptionsSchema` / `StreamActorEditMetadataResultSchema`
-- `StreamActorAppendDataOptionsSchema` / `StreamActorAppendDataResultSchema`
-- `StreamActorReadStreamOptionsSchema` / `StreamActorReadStreamResultSchema`
-- `StreamActorDeleteStreamOptionsSchema` / `StreamActorDeleteStreamResultSchema`
-- `StreamActorListStreamsOptionsSchema` / `StreamActorListStreamsResultSchema`
-- `StreamActorGetStreamInfoOptionsSchema` / `StreamActorGetStreamInfoResultSchema`
-- `StreamActorOptionsSchema` — the discriminated union on `action`
+Other uses: `readStream` with `from: tail` reads only records appended from now on; `editMetadata` with
+`persistent: true` keeps a scratch stream that turned out to matter; `deleteStream` frees the space; `listStreams`
+audits what exists.

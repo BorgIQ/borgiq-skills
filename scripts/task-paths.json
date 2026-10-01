@@ -66,8 +66,8 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/universal-trigger-actor.md",
-        "borgiq-builder/references/collection-actor.md",
-        "borgiq-builder/references/collection-api.md",
+        "borgiq-builder/references/collection-design.md",
+        "borgiq-builder/references/collection-sdk.md",
         "borgiq-builder/references/collection-migrations.md"
       ]
     },
@@ -76,11 +76,9 @@
       "files": [
         "borgiq-builder/SKILL.md",
         "borgiq-builder/references/stream-actor.md",
-        "borgiq-builder/references/stream-api.md",
+        "borgiq-builder/references/collection-migrations.md",
         "borgiq-builder/references/webhook-trigger-actor.md",
-        "borgiq-builder/references/scheduled-trigger-actor.md",
-        "borgiq-builder/references/collection-actor.md",
-        "borgiq-builder/references/collection-migrations.md"
+        "borgiq-builder/references/scheduled-trigger-actor.md"
       ]
     },
     {
@@ -111,7 +109,7 @@
         "borgiq-builder/references/react-app-sdk.md",
         "borgiq-builder/references/react-app-themes.md",
         "borgiq-builder/references/universal-trigger-actor.md",
-        "borgiq-builder/references/collection-api.md",
+        "borgiq-builder/references/collection-design.md",
         "borgiq-builder/references/collection-migrations.md"
       ]
     },

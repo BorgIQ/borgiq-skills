@@ -905,9 +905,9 @@ const result = await response.json();
 
 The Collection API provides structured, persistent storage organized into named collections, backed by DynamoDB. All operations use a single `POST /collections` endpoint with the `action` field in the request body.
 
-**For full documentation** of all 13 actions, parameters, conditions, concurrent update patterns, DynamoDB behavior, batch operations, transactions, and error codes, see [collection-api.md](collection-api.md).
+**For full documentation** of all 13 actions, parameters, conditions, concurrent update patterns, semantics, batch operations, transactions, and error codes, see [collection-actor.md](collection-actor.md) and [collection-sdk.md](collection-sdk.md).
 
-**Response format:** All Collection API calls return `{ ok: boolean, value: T, error?: { code, message } }`, where `T` varies by action (e.g. `getItem` → `{ key, value } | null`, `query` → `{ items[], count, lastKey? }`, `listCollections` → `{ items[], count, lastKey? }`, `deleteItem` → `{ deleted: [{ collection, key }] }`). See [collection-api.md](collection-api.md) for the complete return type table.
+**Response format:** All Collection API calls return `{ ok: boolean, value: T, error?: { code, message } }`, where `T` varies by action (e.g. `getItem` → `{ key, value } | null`, `query` → `{ items[], count, lastKey? }`, `listCollections` → `{ items[], count, lastKey? }`, `deleteItem` → `{ deleted: [{ collection, key }] }`). See [collection-sdk.md](collection-sdk.md) for the complete result types.
 
 #### Helper Pattern
 
@@ -958,13 +958,13 @@ const results = await collectionsApi({ action: "query", collection: "my-col", ex
 await collectionsApi({ action: "deleteItem", collection: "my-col", keys: "k1" });
 ```
 
-See [collection-api.md](collection-api.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and DynamoDB mapping details.
+See [collection-actor.md](collection-actor.md) for `batchGetItem`, `batchWriteItem`, `transactWrite`, `transactGet`, conditions, concurrent update patterns, and semantics.
 
 ### Stream API
 
 The Stream API provides append-only, ordered, cursor-addressed record logs — for events, activity feeds, and incremental processing with a resumable cursor. All operations use a single `POST /streams` endpoint with the `action` field in the request body, and share the `{ ok, value, error? }` envelope, so the same helper pattern applies.
 
-**For full documentation** of all 7 actions, cursors, TTL/persistence, the paging loop, tailing, error codes, and limits, see [stream-api.md](stream-api.md).
+**For full documentation** of all 7 actions, cursors, TTL/persistence, the paging loop, tailing, error codes, and limits, see [stream-actor.md](stream-actor.md) and [stream-api.md](stream-api.md).
 
 ```typescript
 import { biqApi } from "@borgiq/actors";
@@ -996,7 +996,7 @@ const page = await streamsApi<{ records: { cursor: string; payload: string }[]; 
 const info = await streamsApi<{ tailCursor: string }>({ action: "getStreamInfo", stream: "order-events" });
 ```
 
-Streams must be created before use (`createStream`; nothing auto-creates) and expire one hour after their last append unless created with `persistent: true` or an explicit `idleTtlSeconds` — see [stream-api.md → Lifecycle](stream-api.md#lifecycle-ttl-and-persistence). For "what happened, in order" use a stream; for "the current value of X" use a Collection ([Collections vs Streams](stream-api.md#collections-vs-streams)).
+Streams must be created before use (`createStream`; nothing auto-creates) and expire one hour after their last append unless created with `persistent: true` or an explicit `idleTtlSeconds` — see [stream-actor.md → Rules](stream-actor.md#rules). For "what happened, in order" use a stream; for "the current value of X" use a Collection ([Collections vs Streams](stream-actor.md#collections-vs-streams)).
 
 ### Callback Token API
 
