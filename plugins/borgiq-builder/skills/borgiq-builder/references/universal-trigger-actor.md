@@ -1,15 +1,16 @@
 # UniversalTriggerActor Reference
 
-The UniversalTriggerActor is a programmable trigger: user-supplied TypeScript runs on every fire — webhook request, cron schedule, canvas or actor lifecycle event, or manual canvas Invoke — and branches on the delivered trigger event.
+A programmable trigger: your TypeScript runs on every fire (webhook request, cron schedule, lifecycle event or manual
+Invoke) and branches on the delivered event. It runs on the DenoActor's runtime and contract: read
+[code-actor-runtime.md](code-actor-runtime.md) for the contract, `codeDir`, memory and signals, and
+[deno-actor.md](deno-actor.md) for options and imports. This file covers the trigger sources, the entry point and the
+lifecycle events.
 
-> **API model:** the code runs on the same Deno runtime and value-in/value-out contract as the [DenoActor](deno-actor.md). The only difference is the entry point — `receive(req: TriggerRequest): Promise<Response>`, where `TriggerRequest` extends `Request` with `req.trigger` (the firing event, discriminated by `type`). Everything else — `req.inputs` / `req.ctx` / `req.connection` / `req.credentials` / `req.memory`, `biqApi`, `mountFile`, `stashFile`, `RetryableError`, `Signal`, the single `@borgiq/actors` import, network/fs permissions, dependency pinning — is identical to DenoActor.
-
-## Table of Contents
+## Contents
 
 - [Overview](#overview)
 - [Configuration Structure](#configuration-structure)
 - [Options Reference](#options-reference)
-- [TypeScript Schema Definition](#typescript-schema-definition)
 - [Code Files](#code-files)
 - [Code Template](#code-template)
 - [Emitted Message](#emitted-message)
@@ -17,76 +18,72 @@ The UniversalTriggerActor is a programmable trigger: user-supplied TypeScript ru
 - [Cleaning Up on Delete](#cleaning-up-on-delete)
 - [Memory](#memory)
 - [Common Mistakes](#common-mistakes)
-- [Quick Example](#quick-example)
 
 ## Overview
 
-A single UniversalTriggerActor can fire four ways:
+The entry point is `receive(req: TriggerRequest): Promise<Response>`: `TriggerRequest` is the DenoActor's `Request`
+plus `req.trigger`, the firing event, discriminated by `type`. One actor can fire four ways:
 
 | Firing mode | Enabled by | `req.trigger` |
 |---|---|---|
-| **Webhook** | `configuration.webhook.enabled: true` | `{ type: 'webhook', user?, request }` — `request` is the parsed inbound HTTP request (`meta`, `method`, `headers`, `body`, `queryParams`, `rawBody?`); `user` is the authenticated caller (`{ id, name?, email }`) when the call carried an app token (e.g. a React app calling one of its declared endpoints) or an API key (the key's owner; `request.meta.auth = { type: 'apiToken', keyId, keyName }` names the key). The same user is on `request.meta.user` |
-| **Schedule** | `configuration.schedule.enabled: true` | `{ type: 'schedule', triggeredAt, lastTriggeredAt? }` |
-| **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }` — `event` is the lifecycle transition: `'on-delete'` (today fired only by hand — see [Cleaning Up on Delete](#cleaning-up-on-delete)), or `'canvas-enabled'` / `'canvas-disabled'` (reserved, not delivered yet). An `'on-delete'` always also carries `scope` and `subject`, plus `manual: true` on a hand-run test fire |
+| **Webhook** | `configuration.webhook.enabled: true` | `{ type: 'webhook', user?, request }`. `request` is the parsed inbound HTTP request (`meta`, `method`, `headers`, `body`, `queryParams`, `rawBody?`). `user` (`{ id, name?, email }`, also on `request.meta.user`) is the authenticated caller when the call carried an app token (a React app calling one of its declared endpoints) or an API key (the key's owner; `request.meta.auth = { type: 'apiToken', keyId, keyName }` names the key) |
+| **Schedule** | `configuration.schedule.enabled: true` | `{ type: 'schedule', triggeredAt }`. The type also declares `lastTriggeredAt?`, but a universal trigger never receives it: keep the previous fire in LTM yourself ([Memory](#memory)) |
+| **Lifecycle** | `configuration.lifecycle.events` lists the event | `{ type: 'lifecycle', event }`: `'on-delete'` (fired only by hand today; also carries `scope`, `subject` and, on a test fire, `manual: true`; see [Cleaning Up on Delete](#cleaning-up-on-delete)), or `'canvas-enabled'` / `'canvas-disabled'` (reserved, not delivered yet) |
 | **Manual** | Always available (canvas Invoke) | `{ type: 'manual' }` |
 
-When `webhook.enabled` is false the webhook URL returns 404 and no flowruns are created; when `schedule.enabled` is false no cron job is registered; an actor receives a lifecycle event only when that event is listed in `lifecycle.events` — an absent section, an absent `events`, and an empty `events` all mean unsubscribed.
+With `webhook.enabled: false` the webhook URL returns 404 and no flowruns are created; with `schedule.enabled: false`
+no cron job is registered. The actor receives a lifecycle event only when that event is listed in `lifecycle.events`:
+an absent section, an absent `events` and an empty `events` all mean unsubscribed.
 
-**Use a UniversalTriggerActor instead of a standalone WebhookTriggerActor / ScheduledTriggerActor when:**
-
-- One workflow must fire via webhook **and** schedule (and manual testing) through a single code path
-- Code must run at trigger time — normalize, filter, dedupe, enrich, or respond before emitting downstream
-- You want full control over what the trigger emits (a plain WebhookTriggerActor always emits the request shape)
-
-If the trigger just needs to pass the payload through with static response config, the standalone [WebhookTriggerActor](webhook-trigger-actor.md) or [ScheduledTriggerActor](scheduled-trigger-actor.md) is simpler.
+Choose it over a standalone trigger when one workflow must fire via webhook **and** schedule (and manual testing)
+through one code path, when code must run at trigger time (normalize, filter, dedupe, enrich, or respond before
+emitting), or when you need full control of what is emitted (a WebhookTriggerActor always emits the request shape). A
+payload passed through with a static response is simpler with the standalone
+[WebhookTriggerActor](webhook-trigger-actor.md) or [ScheduledTriggerActor](scheduled-trigger-actor.md).
 
 ## Configuration Structure
+
+A trigger that accepts GitHub webhooks and also runs hourly to catch missed events:
 
 ```yaml
 metadata:
   schemaVersion: v1.0
   source: BIQCanvas
 actors:
-  ACTR01xxxxx:
+  ACTR01kd298e3vrbdazn9x5etv4r7a:
     type: UniversalTriggerActor
     version: 1
-    name: Universal Trigger
-    msgVar: universal_trigger
-    description: Programmable trigger for webhook, schedule, lifecycle, and manual fires
+    name: GitHub Events
+    msgVar: github_events
+    description: Receive GitHub push webhooks and poll hourly as a fallback
     isActive: true
     continueOnError: false
-    enableLTM: false
+    enableLTM: true            # the schedule branch keeps a cursor in LTM
     enableSTM: false
     sourcePorts:
       - id: SPRTdefault
     configuration:
-      # STATIC webhook source config — admission-consumed, never interpolated
+      # STATIC source config — admission-consumed, never interpolated
       webhook:
         enabled: true
-        triggerKey: 01KDXXXXXXXXXXXXXXXXXX
+        triggerKey: 01KD298E3VRBDAZN9X5ETV4R7B
         authorizationLevel: public
         allowedMethods:
-          - get
           - post
         responseTimeout: 30
-      # STATIC schedule source config — admission-consumed, never interpolated
       schedule:
-        enabled: false
+        enabled: true
         cron: '0 * * * *'
         timezone: America/New_York
-      # STATIC lifecycle source config — admission-consumed, never interpolated
       lifecycle:
-        events:
-          - canvas-enabled    # reserved, not delivered yet
-          - canvas-disabled   # reserved, not delivered yet
-          - on-delete         # fired by hand only, for now (see Cleaning Up on Delete)
+        events: []             # e.g. [on-delete]; canvas-enabled / canvas-disabled are reserved, not delivered yet
       options:
-        # --- Deno runtime options (root) — identical to DenoActor ---
+        # Deno runtime options (root) — identical to DenoActor
         allowNet: true
         allowFs: false
         emitArrayAsSingleMessage: true
         env: []
-        # --- INTERPOLATABLE webhook response behavior (resolved at runtime) ---
+        # INTERPOLATABLE webhook response behavior (resolved at runtime)
         webhook:
           respondImmediately: true
           emitRawBody: false
@@ -103,10 +100,20 @@ actors:
             import type { TriggerRequest, Response } from "@borgiq/actors";
 
             export default async function receive(req: TriggerRequest): Promise<Response> {
-              return { results: { firedBy: req.trigger.type }, memory: req.memory };
+              if (req.trigger.type === "webhook") {
+                return { results: { event: req.trigger.request.headers["x-github-event"], payload: req.trigger.request.body } };
+              }
+              if (req.trigger.type === "schedule") {
+                const since = (req.memory.ltm.lastPolledAt as string) ?? null;
+                return {
+                  results: { event: "poll", since },
+                  memory: { stm: req.memory.stm, ltm: { ...req.memory.ltm, lastPolledAt: req.trigger.triggeredAt } },
+                };
+              }
+              return { results: undefined };  // manual fire: emit nothing
             }
     schemas: {}
-    id: ACTR01xxxxx
+    id: ACTR01kd298e3vrbdazn9x5etv4r7a
     position:
       x: 0
       'y': 0
@@ -121,73 +128,37 @@ borgiq generate id webhooktriggerkey
 
 ## Options Reference
 
-### Static source config (never interpolated — literals only, DB-queryable)
+The source configs are static: literals only, never interpolated, and queryable by the platform.
 
-**`configuration.webhook`** (see [webhook-trigger-actor.md](webhook-trigger-actor.md#options-reference) for field semantics):
+| Config | Fields (default) | Semantics |
+|---|---|---|
+| `configuration.webhook` | `enabled`; `triggerKey`, required when enabled; `authorizationLevel` (`public`), also `apps`, `apiKey` (a personal access token in `Authorization: Bearer` / `X-Api-Key`) or `appsAndApiKey` (either); `allowedMethods` (`["post"]`; get, post, put, delete); `responseTimeout` (`30` s, 1–60, used when `respondImmediately` is false) | [webhook-trigger-actor.md](webhook-trigger-actor.md#options-reference) |
+| `configuration.schedule` | `enabled`; `cron`, a literal expression; `timezone`, the IANA zone it is evaluated in (no default: always set it, or the job runs on the scheduler's server clock) | [scheduled-trigger-actor.md](scheduled-trigger-actor.md) |
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | boolean | - | When false the webhook URL returns 404 and no flowruns are created |
-| `triggerKey` | string | - | Unique key forming the webhook URL — required when `enabled: true` |
-| `authorizationLevel` | `public` \| `apps` \| `apiKey` \| `appsAndApiKey` | `public` | Who may call the webhook — `apiKey` accepts a personal access token in `Authorization: Bearer` / `X-Api-Key`; `appsAndApiKey` accepts either an app token or an API key |
-| `allowedMethods` | string[] | `["post"]` | HTTP methods accepted (get, post, put, delete) |
-| `responseTimeout` | number | `30` | Timeout in seconds when `respondImmediately` is false (1-60) |
+**`configuration.lifecycle`**: `events` (string[], default `[]`), the lifecycle events the actor receives: any of
+`'on-delete'` ([Cleaning Up on Delete](#cleaning-up-on-delete)), `'canvas-enabled'` and `'canvas-disabled'` (reserved:
+accepted in the list, not delivered yet). List only the events your code handles: the vocabulary grows, and an event
+reaches the actor only once listed.
 
-**`configuration.schedule`** (see [scheduled-trigger-actor.md](scheduled-trigger-actor.md)):
+**`configuration.options`** is interpolated. The Deno runtime fields sit at its root, identical to DenoActor
+([deno-actor.md → Options](deno-actor.md#options)): `emitArrayAsSingleMessage`, `allowNet`, `allowNetList`,
+`denyNetList`, `allowFs`, `env`. The webhook response behavior, shared with the standalone WebhookTriggerActor
+([webhook-trigger-actor.md](webhook-trigger-actor.md#options-reference)), is nested under `webhook:`:
+`respondImmediately`, `emitRawBody`, `response.statusCode` / `response.headers` / `response.body`. These may use
+`${{ }}` expressions, with `trigger` in scope ([context.md → trigger](context.md#trigger)).
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | boolean | - | When false no cron job is registered |
-| `cron` | string | - | Cron expression (literal only, never interpolated) |
-| `timezone` | string | `America/New_York` | Timezone used to evaluate the cron expression |
-
-**`configuration.lifecycle`** — subscribes the trigger to individual lifecycle events. Absent ⇒ unsubscribed:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `events` | string[] | `[]` | The lifecycle events this actor is subscribed to — any of `'on-delete'` (unregister what the actor registered externally when it goes away; today fired only by hand — see [Cleaning Up on Delete](#cleaning-up-on-delete)), `'canvas-enabled'`, `'canvas-disabled'` (both reserved: accepted in the list, but not delivered yet). The actor receives `{ type: 'lifecycle', event }` only for events in this list; an empty or absent list means it receives none. |
-
-Subscription is per event rather than a single on/off flag because the event vocabulary grows over time — a flag would silently opt an existing trigger into events its code was never written to handle.
-
-### Interpolatable options (`configuration.options`)
-
-Deno runtime fields live at the root — identical to DenoActor (see [deno-actor.md → Options](deno-actor.md#options)): `emitArrayAsSingleMessage`, `allowNet`, `allowNetList`, `denyNetList`, `allowFs`, `env`.
-
-Webhook response behavior is nested under `webhook:` — shared with the standalone WebhookTriggerActor (see [webhook-trigger-actor.md](webhook-trigger-actor.md#options-reference)): `respondImmediately`, `emitRawBody`, `response.statusCode` / `response.headers` / `response.body`. These may use `${{ }}` expressions; `trigger` is in scope (see [context.md → trigger](context.md#trigger)).
-
-## TypeScript Schema Definition
-
-```typescript
-/** The options for the UniversalTriggerActor (the interpolated `options` blob). */
-export const UniversalTriggerActorOptionsSchema = z.object({
-  // --- deno runtime options (root) — identical to DenoActorOptionsSchema ---
-  emitArrayAsSingleMessage: z.boolean().nullish().default(true),
-  allowNet: z.boolean().nullish().default(false),
-  allowNetList: z.array(z.string()).nullish().default([]),
-  denyNetList: z.array(z.string()).nullish().default([]),
-  allowFs: z.boolean().nullish().default(false),
-  env: z.array(z.object({ name: z.string(), value: z.string().nullish() })).nullish().default([]),
-  // --- interpolatable webhook behavior (shared with WebhookTriggerActor) ---
-  webhook: WebhookBehaviorOptionsSchema.nullish(),
-});
-
-/**
- * The UniversalTriggerActor's `configuration.codeDir`: at most 200 files and 1 MiB of content in
- * total, exactly one of them at `main.ts`, none using a filename the runtime reserves.
- */
-export const UniversalTriggerActorCodeDirSchema = makeCodeDirSchema({
-  requiredEntrypoint: 'main.ts',
-  reservedPaths: DENO_RESERVED_PATHS,
-});
-```
-
-Full definitions: [typescript/actorSchemas/trigger/universalTrigger.md](typescript/actorSchemas/trigger/universalTrigger.md) (options), [typescript/actorSchemas/trigger/triggerConfig.md](typescript/actorSchemas/trigger/triggerConfig.md) (static webhook/schedule/lifecycle config), and [typescript/schemas/trigger.md](typescript/schemas/trigger.md) (the `TriggerEvent` union).
+Exact types: [typescript/actorSchemas/trigger/universalTrigger.md](typescript/actorSchemas/trigger/universalTrigger.md)
+(options), [typescript/actorSchemas/trigger/triggerConfig.md](typescript/actorSchemas/trigger/triggerConfig.md) (static
+webhook/schedule/lifecycle config), and [typescript/schemas/trigger.md](typescript/schemas/trigger.md) (the
+`TriggerEvent` union).
 
 ## Code Files
 
-The trigger's source is a project tree in `configuration.codeDir` — a list of `{path, content}` files with the required entrypoint `main.ts` at its root, plus any helper files you add. The rules are the DenoActor's, which this trigger shares: relative imports between your own files (extension included), no imports leaving the tree, no interpolation of `codeDir`, and the reserved filenames `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, `shared/…`, `node_modules/…`. See [code-actor-runtime.md → Source files](code-actor-runtime.md#source-files-codedir) for the full contract, limits, and editing surfaces.
-
-Splitting per trigger source is the common shape:
+`configuration.codeDir` follows the DenoActor's rules, with the entrypoint `main.ts` at the root: relative imports with
+the extension, no import leaving the tree, never interpolated, and the Deno reserved names
+([code-actor-runtime.md → Source files](code-actor-runtime.md#source-files-codedir)). `main_test.ts` is reserved because
+the runtime owns that name for this trigger's test harness: name your own test helpers something else. Splitting per
+trigger source is the common shape:
 
 ```yaml
 configuration:
@@ -212,8 +183,6 @@ configuration:
         …
 ```
 
-Note the reserved `main_test.ts`: the runtime owns that name for this trigger's variant, so name your own test helpers something else.
-
 ## Code Template
 
 The entrypoint file, `main.ts`:
@@ -224,19 +193,12 @@ import { Signal } from "@borgiq/actors";
 // import { RetryableError, biqApi, mountFile, stashFile } from "@borgiq/actors";
 
 export default async function receive(req: TriggerRequest): Promise<Response> {
-  // req.trigger is the delivered event, discriminated by `type`:
-  // - webhook:  req.trigger.request carries the HTTP request (meta, method, headers, body, queryParams);
-  //             req.trigger.user is the authenticated caller when the call carried an app token or an API key
-  //             (req.trigger.request.meta.auth names the key on API-key calls)
-  // - schedule: req.trigger.triggeredAt is this fire; req.trigger.lastTriggeredAt is the previous fire (if tracked)
-  // - lifecycle: req.trigger.event is the lifecycle transition ('canvas-enabled' | 'canvas-disabled' | 'on-delete');
-  //             an 'on-delete' also carries req.trigger.scope, req.trigger.subject and (on a hand-run test fire) req.trigger.manual
-  // - manual:   no extra fields
+  // req.trigger is the delivered event, discriminated by `type` (fields per type: see Overview).
+  // Return `memory` only when you change it (omit it to leave memory unchanged).
   switch (req.trigger.type) {
     case "webhook":
       return {
         results: { source: "webhook", request: req.trigger.request },
-        memory: req.memory,
         // Respond to the webhook request:
         // signal: Signal.webhookRespond({ statusCode: 200, body: { ok: true } }),
       };
@@ -250,36 +212,34 @@ export default async function receive(req: TriggerRequest): Promise<Response> {
       };
     }
     case "lifecycle":
-      // req.trigger.event is 'canvas-enabled' | 'canvas-disabled' | 'on-delete'. Only 'on-delete' is
-      // delivered today, and only as a hand-run test fire; the other two are reserved. On 'on-delete',
-      // unregister anything this trigger registered externally — idempotently, since delivery will be
-      // at-least-once — and treat a test fire (req.trigger.manual) as a dry run.
-      // See "Cleaning Up on Delete" below.
+      // On 'on-delete', unregister what this trigger registered externally, idempotently; a hand-run test fire
+      // (req.trigger.manual) is a dry run. See "Cleaning Up on Delete" below.
       if (req.trigger.event === "on-delete") {
         const { scope, subject, manual } = req.trigger;
-        return { results: { source: "lifecycle", event: req.trigger.event, scope, subject, dryRun: manual === true }, memory: req.memory };
+        return { results: { source: "lifecycle", event: req.trigger.event, scope, subject, dryRun: manual === true } };
       }
-      return { results: { source: "lifecycle", event: req.trigger.event }, memory: req.memory };
+      return { results: { source: "lifecycle", event: req.trigger.event } };
     case "manual":
-      return { results: { source: "manual" }, memory: req.memory };
+      return { results: { source: "manual" } };
     default:
-      return { results: { source: req.trigger.type }, memory: req.memory };
+      return { results: { source: req.trigger.type } };
   }
 }
 ```
 
 ## Emitted Message
 
-The result schema is `z.any()` — downstream actors see whatever the code returns as `results`, under `msg.<msgVar>`. The DenoActor emit semantics apply (see [code-actor-runtime.md → What gets emitted](code-actor-runtime.md#what-gets-emitted)):
-
-- An array emits **one** message holding the array by default (`emitArrayAsSingleMessage: true`); set `emitArrayAsSingleMessage: false` to emit one message per item
-- `results: undefined` (or omitted) or an empty array emits **nothing** — useful for respond-only webhook handling or filtering out uninteresting fires
+Downstream actors see whatever the code returns as `results`, under `msg.<msgVar>` (the result schema is `z.any()`),
+with the DenoActor's emit rules ([What gets emitted](code-actor-runtime.md#what-gets-emitted)): an array is **one**
+message unless `emitArrayAsSingleMessage: false`. `results: undefined` (or omitted) or an empty array emits
+**nothing**, which suits respond-only webhook handling and filtering out uninteresting fires.
 
 ## Responding to Webhook Firings
 
 Two ways to answer the HTTP caller, mirroring the standalone WebhookTriggerActor's response modes:
 
-**1. Immediate interpolated response** — `options.webhook.respondImmediately: true` with a `response` template. The response is built before the code runs; `trigger.request` is in scope:
+**1. Immediate interpolated response** — `options.webhook.respondImmediately: true` with a `response` template. The
+response is built before the code runs; `trigger.request` is in scope:
 
 ```yaml
 options:
@@ -290,7 +250,8 @@ options:
       body: ${{ trigger.request?.body?.challenge || 'OK' }}
 ```
 
-**2. Respond from the trigger's own code** — `options.webhook.respondImmediately: false`, then return a `Signal.webhookRespond` from `receive`:
+**2. Respond from the trigger's own code** — `options.webhook.respondImmediately: false`, then return a
+`Signal.webhookRespond` from `receive`:
 
 ```typescript
 return {
@@ -407,81 +368,17 @@ switch (req.trigger.scope) {
 
 ## Memory
 
-Memory is **fully opt-in** — no infrastructure code reads or writes LTM/STM on the user's behalf. Notably, `lastTriggeredAt` is **not** tracked automatically: persist it yourself via `req.memory.ltm` → `Response.memory` (as in the [Code Template](#code-template)) after enabling LTM in advanced settings. The value-in/value-out rules are the DenoActor's (see [code-actor-runtime.md → Memory](code-actor-runtime.md#memory)): each half you return is **shallow-merged** into the stored half, so keys you leave out keep their values, and a key is cleared only by returning it as `null`. Returning a non-empty `ltm`/`stm` requires `enableLTM`/`enableSTM`; by default LTM is capped at 1 KB and STM at 4 KB.
+Memory is **fully opt-in**: no infrastructure code reads or writes LTM/STM on your behalf. In particular the previous
+schedule fire is **not** tracked: persist it yourself in `req.memory.ltm` (as in the [Code Template](#code-template))
+after setting `enableLTM: true`. The merge contract, the `null` rule for clearing a key and the 1 KB / 4 KB caps are the
+DenoActor's: [code-actor-runtime.md → Memory](code-actor-runtime.md#memory).
 
 ## Common Mistakes
 
 1. **Static fields under `options`** — `triggerKey`, `authorizationLevel`, `allowedMethods`, `responseTimeout`, `cron`, `timezone`, `enabled`, `events` live in `configuration.webhook` / `configuration.schedule` / `configuration.lifecycle` (literals only), not in `configuration.options`.
 2. **Reading `trigger.request` without a type guard** — on schedule/lifecycle/manual fires `req.trigger.request` does not exist. Branch on `req.trigger.type` (in code) or `${{ trigger.type === 'webhook' }}` / `${{ trigger?.request?.… }}` (in templates).
-3. **Expecting `lastTriggeredAt` automatically** — it's only present if your code persisted it to LTM on a previous fire.
+3. **Expecting the previous schedule fire automatically** — keep it in LTM yourself ([Memory](#memory)); to clear a memory key, return it as `null` (as the on-delete handler does with `hookId: null`), never leave it out.
 4. **Typing the entry point as `Request`** — use `TriggerRequest`, otherwise `req.trigger` is not typed.
 5. **Missing `triggerKey` with `webhook.enabled: true`** — the webhook URL will not work without it.
-6. **Clearing a memory key by leaving it out** — `Response.memory` is shallow-merged into the stored value, so an omitted key keeps its old value. Return the key as `null` to clear it (as the handler in [Cleaning Up on Delete](#cleaning-up-on-delete) does with `hookId: null`).
-7. **A non-idempotent `on-delete` handler** — delivery will be at-least-once, and a hand run can be repeated. Treat "already removed" on the remote side as success and clear the saved id from LTM once released.
-8. **Relying on `on-delete` to clean up today** — nothing fires it automatically yet, in any workspace: deleting a canvas, a workspace or an organization, or deploying a canvas without the actor, does not run it (that comes with a later platform release). Test the handler by hand with **Run onDelete** in a development workspace — the run carries `manual: true` and `scope: 'actor'`, and nothing is deleted — and remove external registrations yourself before deleting until then.
-9. **Treating `scope: 'actor'` as a hand run** — check `manual`. A deploy that removes the actor will also send `scope: 'actor'`, without `manual`, and that removal is real.
-
-## Quick Example
-
-A trigger that accepts GitHub webhooks and also runs hourly to catch missed events:
-
-```yaml
-metadata:
-  schemaVersion: v1.0
-  source: BIQCanvas
-actors:
-  ACTR01kd298e3vrbdazn9x5etv4r7a:
-    type: UniversalTriggerActor
-    version: 1
-    name: GitHub Events
-    msgVar: github_events
-    description: Receive GitHub push webhooks and poll hourly as a fallback
-    isActive: true
-    continueOnError: false
-    enableLTM: true
-    enableSTM: false
-    sourcePorts:
-      - id: SPRTdefault
-    configuration:
-      webhook:
-        enabled: true
-        triggerKey: 01KD298E3VRBDAZN9X5ETV4R7B
-        authorizationLevel: public
-        allowedMethods:
-          - post
-      schedule:
-        enabled: true
-        cron: '0 * * * *'
-        timezone: America/New_York
-      options:
-        allowNet: true
-        webhook:
-          respondImmediately: true
-          response:
-            statusCode: 200
-            body: OK
-      codeDir:
-        - path: main.ts
-          content: |
-            import type { TriggerRequest, Response } from "@borgiq/actors";
-
-            export default async function receive(req: TriggerRequest): Promise<Response> {
-              if (req.trigger.type === "webhook") {
-                return { results: { event: req.trigger.request.headers["x-github-event"], payload: req.trigger.request.body }, memory: req.memory };
-              }
-              if (req.trigger.type === "schedule") {
-                const since = (req.memory.ltm.lastPolledAt as string) ?? null;
-                return {
-                  results: { event: "poll", since },
-                  memory: { stm: req.memory.stm, ltm: { ...req.memory.ltm, lastPolledAt: req.trigger.triggeredAt } },
-                };
-              }
-              return { results: undefined };  // manual fire: emit nothing
-            }
-    schemas: {}
-    id: ACTR01kd298e3vrbdazn9x5etv4r7a
-    position:
-      x: 0
-      'y': 0
-    edges: {}
-```
+6. **A non-idempotent `on-delete` handler, or relying on `on-delete` today** — delivery will be at-least-once and a hand run can be repeated; nothing fires it automatically yet, so remove external registrations yourself before deleting ([Cleaning Up on Delete](#cleaning-up-on-delete)).
+7. **Treating `scope: 'actor'` as a hand run** — check `manual`. A deploy that removes the actor will also send `scope: 'actor'`, without `manual`, and that removal is real.
