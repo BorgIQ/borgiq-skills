@@ -114,31 +114,43 @@ The app runs in a cross-origin iframe and cannot write the tab's title itself, s
 hosts it.
 
 ```tsx
-import { useTitle, setTitle } from '@borgiq/actors'
+import { callEndpoint, useTitle, setTitle } from '@borgiq/actors'
 
-function OrderPage({ order }) {
+function OrderPage({ order }: { order?: { number: string } }) {
   useTitle(order ? `Order ${order.number}` : null)   // held while mounted, given back on unmount
-  …
+  return <h1>{order ? `Order ${order.number}` : 'Loading…'}</h1>
 }
 
-setTitle('Saving…')   // non-hook: anywhere; setTitle(null) withdraws it
+async function saveRecord(body: URLSearchParams) {
+  setTitle('Saving…')   // non-hook: event handlers, effects, plain modules; never during render
+  try {
+    await callEndpoint('saveRecord', undefined, { method: 'POST', body })
+  } finally {
+    setTitle(null)      // always clear a transient title
+  }
+}
 ```
 
 - **Precedence:** a title set in code, then the actor's `options.title`, then BorgIQ's default (`App | BorgIQ`).
   `options.title` is a static title that needs no code; it accepts `${{ }}` and is frozen at Build
   ([react-app-build.md](react-app-build.md#build-time-options)).
-- The tab shows the text as written, with nothing appended. BorgIQ strips control and invisible characters, collapses
-  whitespace and cuts it at 150 characters. A title that is nothing but such characters clears the runtime title.
-- When several mounted components call `useTitle`, the most deeply nested, most recently mounted one wins: set a
-  general title in a layout and a specific one in each route. `null`, `undefined` or a blank string claims nothing, so
-  pass `null` while data loads. `setTitle` outranks the hooks mounted when it is called, until `setTitle(null)`; a
-  hook that mounts afterwards takes over, so clear a transient `setTitle` rather than leaving it.
+- The tab shows the text as written, with nothing appended. BorgIQ removes control characters and invisible formatting
+  characters (bidirectional overrides, zero-width spaces), collapses runs of whitespace and cuts it at 150 characters;
+  emoji and joined scripts are left intact. A title with nothing visible in it clears the runtime title.
+- Use `useTitle` in components. When several mounted components call it, the one that first rendered last wins (a page
+  over its layout, a newly mounted route over what was there): set a general title in a layout and a specific one in
+  each route. `null`, `undefined` or a blank string claims nothing, so pass `null` while data loads.
+- `setTitle` is one slot for the whole app, for event handlers and code outside a component: each call replaces the
+  last, and `setTitle(null)` withdraws it, back to whatever a mounted `useTitle` claims. It outranks the hooks mounted
+  when it is called; a hook that mounts afterwards takes over, so clear a transient `setTitle` rather than leaving it.
 - Only the app's own page (`/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`) honours it. A page that embeds the app
   some other way, such as an interface page's web viewer, keeps its own tab title.
-- The `<title>` in `index.html`, and `document.title` written by the app, never reach the tab.
-- Both calls return nothing and never throw. They need SDK 2.4.0 (`version` from `@borgiq/actors`); on a BorgIQ that
-  predates them the tab keeps its default.
-- Under a local `npm run dev` they set the local page's `document.title`, and clearing restores the original.
+- Inside BorgIQ the `<title>` in `index.html`, and `document.title` written by the app, never reach the tab.
+- Both calls return nothing and never throw. They need SDK 2.4.0 (`version` from `@borgiq/actors`): on a runtime with
+  an older SDK the import fails the Build, and on a BorgIQ page that predates them the tab keeps its default.
+- Under a local `npm run dev` they set the local page's `document.title`, and clearing restores the original. A
+  project pulled before the CLI shipped them has an older local SDK stub, where the import fails locally: delete
+  `__borgiq_sdk_placeholder__/` and pull again.
 
 ## Streams
 
