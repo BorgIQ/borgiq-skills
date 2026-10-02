@@ -1,6 +1,6 @@
 {
   "name": "@borgiq/skills",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "BorgIQ skills for AI coding agents (Claude Code, OpenAI Codex CLI, opencode.ai, Pi). Build, validate, deploy, test, and debug BorgIQ workflows from your agent of choice.",
   "license": "Apache-2.0",
   "repository": {
