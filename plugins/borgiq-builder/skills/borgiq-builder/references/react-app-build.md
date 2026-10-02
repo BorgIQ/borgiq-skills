@@ -1,8 +1,8 @@
 # React app build
 
 How a ReactAppTriggerActor project is laid out, built and served: the seeded scaffold, the `vite.config.ts` settings
-the builder requires, every build constraint, WebAssembly and workers, and build-time interpolation of the security
-options. Read it when you create or restructure an app's project, or when a Build fails.
+the builder requires, every build constraint, WebAssembly and workers, and build-time interpolation of the tab title
+and the security options. Read it when you create or restructure an app's project, or when a Build fails.
 
 ## Contents
 
@@ -71,7 +71,8 @@ and stores every `dist/` file. Serving needs a successful build, and every chang
 - **Deployed workspace:** the app is built with the canvas's runtime build, and the editor's Build is refused
   (`409 Build the canvas instead`); `bundle build` does this for you. See [deployment.md](deployment.md).
 
-Open the built app at `/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`.
+Open the built app at `/org/{org}/w/{wsp}/c/{canvas}/apps/{actorId}`. Its tab reads `App | BorgIQ` unless the app
+sets a title ([react-app-sdk.md](react-app-sdk.md#tab-title)).
 
 ## Constraints
 
@@ -113,6 +114,8 @@ is in [app-trigger-actor.md → WebAssembly and workers](app-trigger-actor.md#we
 
 The actor's `options` are interpolated when the app is built, not when a page loads:
 
+- `title`, the static browser tab title, accepts `${{ }}` and is frozen like the rest: a change shows on the next
+  Build. The app's code overrides it per page ([react-app-sdk.md](react-app-sdk.md#tab-title)).
 - The seven security options (`allowedScriptDomains`, `allowedStyleDomains`, `allowInlineScripts`,
   `allowInlineStyling`, `allowedPermissions`, `allowWebAssembly`, `allowBlobWorkers`) accept `${{ }}`, which the
   build resolves and freezes; a `${{ vars.* }}` change applies on the next Build. What each option does to the policy:

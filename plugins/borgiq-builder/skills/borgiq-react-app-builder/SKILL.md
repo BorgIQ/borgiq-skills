@@ -137,7 +137,7 @@ ACTR01webhookhandler:
 
 | Read | When |
 |---|---|
-| [react-app-sdk.md](../borgiq-builder/references/react-app-sdk.md) | Writing calls to endpoints, the viewer session or streams; explaining an SDK error |
+| [react-app-sdk.md](../borgiq-builder/references/react-app-sdk.md) | Endpoint calls, the viewer session, tab title or streams; explaining an SDK error |
 | [react-app-build.md](../borgiq-builder/references/react-app-build.md) | Creating or restructuring the project, `vite.config.ts`, a failed Build, WebAssembly or workers, every constraint |
 | [react-app-themes.md](../borgiq-builder/references/react-app-themes.md) | Before writing components: tokens, Base Contract, recipes, icons, theme rules |
 | [react-app-theme-blocks.md](../borgiq-builder/references/react-app-theme-blocks.md) | Copying the chosen theme's CSS (read only that block) |
