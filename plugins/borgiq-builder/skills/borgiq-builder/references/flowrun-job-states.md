@@ -112,10 +112,13 @@ borgiq flowrun-messages data <sourceFlowrunMessage.id> --json
 - `borgiq flowrun-jobs runtime-data <jobId> --root-path <path> --json` takes three paths: `ctx`, the run context (org,
   workspace, canvas, flowrun, trigger and actor ids and names; not the actor's configuration or secrets); `trigger`,
   the trigger event (webhook request, schedule time, …), on trigger actors' jobs only; `inputs`, the tool-call input,
-  only on jobs that ran as an agent or MCP tool call. The CLI's help also lists `request` and `user`; the API rejects
-  both.
-- `borgiq flowrun-results data <resultId>` fails against the current API, which requires a `rootPath` query the CLI
-  does not send. Read a job's output with `flowrun-messages` instead.
+  only on jobs that ran as an agent or MCP tool call. CLI X.Y.Z and later reject any other value; older CLIs also list
+  `request` and `user` in the help, and the API rejects both.
+- `borgiq flowrun-results data <resultId> --root-path <memory|messages> --json` (CLI X.Y.Z or later) returns one root
+  of an attempt's result: `memory`, the actor's `{ ltm, stm }` as that attempt left it, or `messages`, what it emitted,
+  keyed by source port id. `--root-path` is required. The `resultId` is an `id` from `flowrun-results summaries`, or
+  a job's `resultId` in `flowruns summary`. Older CLIs have no `--root-path` and get a 400 on every call; read a job's
+  output with `flowrun-messages` there.
 - The actor's current configuration: `borgiq canvas-actors get <canvas> <actorId> --json`, or its `actor.yaml` in the
   bundle.
 
