@@ -28,9 +28,9 @@ export const DeprecatedAiAgentOptionsSchema = z.object({
   prompt: z.string().nullish()
     .describe('The prompt to send to the AI model to generate a response'),
   temperature: z.number().min(0).max(2).nullish()
-    .describe('The temperature to use for the AI model (0-1)'),
+    .describe('The sampling temperature (0-2); lower is more deterministic. Unset uses the model\'s default. Claude models take at most 1 (a higher value is sent as 1). Ignored by models that take none: OpenAI reasoning models (o-series, GPT-5 and later) and Claude Opus 4.7 and later, Sonnet 5 and Fable 5'),
   maxTokens: z.number().int().positive().nullish()
-    .describe('The maximum number of tokens to generate'),
+    .describe('The maximum number of tokens to generate. Unset uses the model\'s output limit'),
   systemPrompt: z.string().nullish()
     .describe('Background instructions provided to the AI model before each invocation'),
   messages: z.array(BIQAiMessageSchema)
@@ -695,7 +695,7 @@ export const DeprecatedAiAgentOptionsJsonSchema: BIQJsonSchema = {
     },
     maxTokens: {
       type: BIQJsonSchemaType.Integer,
-      description: 'The maximum number of tokens to generate',
+      description: 'The maximum number of tokens to generate. Unset uses the model\'s output limit',
       title: 'Max tokens',
       default: AiDefaultParameters.maxTokens,
       ui: {
@@ -704,7 +704,7 @@ export const DeprecatedAiAgentOptionsJsonSchema: BIQJsonSchema = {
     },
     temperature: {
       type: BIQJsonSchemaType.Number,
-      description: 'The temperature to use for the AI model (0-1)',
+      description: 'The sampling temperature (0-2); lower is more deterministic. Unset uses the model\'s default. Claude models take at most 1 (a higher value is sent as 1). Ignored by models that take none: OpenAI reasoning models (o-series, GPT-5 and later) and Claude Opus 4.7 and later, Sonnet 5 and Fable 5',
       title: 'Temperature',
       default: AiDefaultParameters.temperature,
       minimum: 0,

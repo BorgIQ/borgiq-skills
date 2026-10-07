@@ -77,12 +77,12 @@ actors:
 | `prompt` | string | — | The prompt, sent as the last user message |
 | `systemPrompt` | string | — | Background context and instructions: the model's role, the task, the output rules |
 | `messages` | array | — | Previous conversation messages (multi-turn); `prompt` is appended after them |
-| `temperature` | number (0–1) | — | Accepted, but not currently sent to the model: the provider's default applies |
+| `temperature` | number (0–2) | — (the editor fills in 0.2) | Sampling temperature; lower is more deterministic. Unset, the model's default applies. Claude models take at most 1 (a higher value is sent as 1). Ignored by models that take none: OpenAI reasoning models (o-series, GPT-5 and later, so the default `gpt-6-luna`) and Claude Opus 4.7 and later, Sonnet 5 and Fable 5 |
 | `maxTokens` | integer | — (the editor fills in 10000) | Maximum tokens to generate |
 | `jsonMode` | boolean | false | Return the response as a JSON object |
 | `outputSchema` | object | — | JSON Schema the response must match; overrides `jsonMode` |
 | `tools` | array | — | Tool definitions the model may call ([below](#tools-function-calling)) |
-| `maxRetries` | integer | — | Retry attempts on failure; must be at least 1 when set (`0` fails validation, so omit it for no retries) |
+| `maxRetries` | integer | — (the editor fills in 0) | Retries after a failed attempt; `0` makes a single attempt. Unset, the provider SDK's default applies (2) |
 | `emitInput` | boolean | false | Include the input messages in `meta.input`, for debugging |
 
 Either `prompt` or `messages` must be provided. A failed call fails the job; rate-limit errors are retried first. With

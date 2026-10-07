@@ -132,10 +132,13 @@ export const AgentHarnessActorOptionsSchema = z.object({
     .describe('The sandbox provider to use. Daytona is recommended for most use cases. E2B offers full internet access.'),
   maxLoopCount: z.number().int().positive().nullish()
     .describe('The maximum number of agentic loops to run, defaults to unlimited'),
+  /** @deprecated No harness launch passes it to its CLI; still accepted so saved actors validate,
+   * and left out of the editor's JSON schema. */
   maxTokens: z.number().int().positive().nullish()
-    .describe('The maximum number of tokens to generate per response'),
+    .describe('Deprecated and ignored: not passed to the harness CLI, which applies its own output limit'),
+  /** @deprecated As maxTokens. */
   temperature: z.number().min(0).max(1).nullish()
-    .describe('The temperature to use for generation (0-1)'),
+    .describe('Deprecated and ignored: not passed to the harness CLI'),
   sessionId: z.string().max(64).optional()
     .describe('Session ID to continue or create a session with custom ID (maximum 64 characters). Auto-generated if empty.'),
   volumeZipFile: BIQFileSchema.nullish()
@@ -360,30 +363,6 @@ export const AgentHarnessActorOptionsJsonSchema: BIQJsonSchema = {
       ui: {
         order: 6,
       }
-    },
-    maxTokens: {
-      type: BIQJsonSchemaType.Integer,
-      description: 'The maximum number of tokens to generate per response',
-      title: 'Max tokens',
-      default: 16384,
-      ui: {
-        order: 7,
-      }
-    },
-    temperature: {
-      type: BIQJsonSchemaType.Number,
-      description: 'The temperature to use for generation (0-1)',
-      title: 'Temperature',
-      default: 1,
-      minimum: 0,
-      maximum: 1,
-      ui: {
-        component: 'slider',
-        order: 8,
-        options: {
-          step: 0.01,
-        },
-      },
     },
     timeoutInMinutes: {
       type: BIQJsonSchemaType.Integer,
