@@ -136,8 +136,6 @@ actors:
         workingDirectory: ''
         timeoutInMinutes: 15
         maxLoopCount: 50
-        maxTokens: 16384
-        temperature: 1
         allowNet: true
         env:
           API_KEY: ${{ credentials.my_api_key }}
@@ -173,8 +171,8 @@ All options live under `configuration.options`; only `prompt` is required.
 | `workingDirectory` | string | — | Working directory relative to the workspace (e.g., `my-project`) |
 | `timeoutInMinutes` | integer | `15` | Maximum execution time before the session is terminated; raise it for complex tasks |
 | `maxLoopCount` | integer | unlimited | Maximum number of agentic loops (tool calls). Set it to bound runaway runs and cost |
-| `maxTokens` | integer | `16384` | Maximum tokens per response. Accepted, but not currently passed to the harness CLI |
-| `temperature` | number | `1` | 0–1. Accepted, but not currently passed to the harness CLI |
+| `maxTokens` | integer | — | Deprecated and ignored: not passed to the harness CLI, which applies its own output limit. Omit it |
+| `temperature` | number | — | Deprecated and ignored: not passed to the harness CLI. Omit it |
 | `allowedTools` | string[] | all tools | Allow-list of the harness's own tools (empty = all allowed) |
 | `disallowedTools` | string[] | — | Deny-list of the harness's own tools |
 | `allowNet` | boolean | `true` | Allow outbound network access from the sandbox |
