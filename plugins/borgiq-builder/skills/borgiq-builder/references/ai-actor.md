@@ -77,7 +77,7 @@ actors:
 | `prompt` | string | — | The prompt, sent as the last user message |
 | `systemPrompt` | string | — | Background context and instructions: the model's role, the task, the output rules |
 | `messages` | array | — | Previous conversation messages (multi-turn); `prompt` is appended after them |
-| `temperature` | number (0–2) | — (the editor fills in 0.2) | Sampling temperature; lower is more deterministic. Unset, the model's default applies. Claude models take at most 1 (a higher value is sent as 1). Ignored by models that take none: OpenAI reasoning models (o-series, GPT-5 and later, so the default `gpt-6-luna`) and Claude Opus 4.7 and later, Sonnet 5 and Fable 5 |
+| `temperature` | number (0–2) | — (the editor fills in 0.2) | Sampling temperature; lower is more deterministic. Unset, the model's default applies. Claude models take at most 1 (a higher value is sent as 1). Ignored by models that take none: OpenAI reasoning models (o-series, GPT-5 and later, so the default `gpt-6-luna`) and Claude Opus 4.7 and later, Sonnet 5, Fable 5 and Haiku 5.5 |
 | `maxTokens` | integer | — (the editor fills in 10000) | Maximum tokens to generate |
 | `jsonMode` | boolean | false | Return the response as a JSON object |
 | `outputSchema` | object | — | JSON Schema the response must match; overrides `jsonMode` |

@@ -48,6 +48,7 @@ USD per million input / output tokens, as the platform meters them.
 | Model | $ in / out | Use |
 |---|---|---|
 | `claude-haiku-4-5` | 1 / 5 | Start here on AiActor and AiRouterActor: classification, extraction, short generation |
+| `claude-haiku-5-5` | 0.10 / 0.50 | High-volume classification, extraction and routing. A prompt over 100K tokens bills 0.50 / 2.50. Thinks by default, billed as output |
 | `claude-sonnet-5`, `gpt-6-sol` | 2 / 10 | The step up; the agent default for multi-step work (Sonnet: 128K output) |
 | `claude-opus-5-5` | 4 / 20 | Hard reasoning, complex agents |
 | `claude-opus-5`, `claude-opus-4-8` | 5 / 25 | |
