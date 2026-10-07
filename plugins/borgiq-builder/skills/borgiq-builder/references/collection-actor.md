@@ -34,7 +34,8 @@ the same actions from code.
 - **`updateItem` never creates an item.** Setting `value` fields or counters on a missing key fails with
   `ITEM_DOES_NOT_EXIST` (404); `putItem` first.
 - **TTL goes in `options.ttl`** on `putItem` and `transactWrite` puts, and top-level `ttl` on `batchWriteItem` items.
-  A top-level `ttl` on `putItem` is dropped and the item never expires. `updateItem` cannot set a TTL.
+  A top-level `ttl` on `putItem` is moved into `options.ttl`, which wins when both are set. On a `transactWrite` item it
+  is dropped and the item never expires. `updateItem` cannot set a TTL.
 - **`query` needs a non-empty `expression`.** In a shared collection query by entity prefix, never `*`.
 - **Condition values are strings** and test `value` fields only, never labels.
 - **Use what a write emits** instead of re-reading it: reads are eventually consistent.
@@ -97,9 +98,9 @@ Every item action takes `collection`, the slug. `putItem`, `getItem`, `updateIte
 | `putItem` | `key` | string | required | The item key: 1–256 characters, no `#` |
 | | `value` | any | required | Stored as given |
 | | `labels` | record of string \| null | — | Label values; each label must be declared on the collection |
-| | `options.overwrite` | boolean | `false` | `true` replaces an existing item whole: value, labels, TTL and `createdAt` |
+| | `options.overwrite` | boolean | `false` | `true` replaces an existing item whole: value, labels, TTL, and `createdAt` unless `options.created` matches |
 | | `options.ttl` | number \| string | — | Seconds from now (a number at or above the current epoch time is an absolute epoch timestamp), or an ISO-8601 string |
-| | `options.created` | integer | — | Epoch seconds for the created-timestamp integrity check (`CREATED_MISMATCH`); use with `overwrite: true` |
+| | `options.created` | string \| integer | — | With `overwrite: true`, write only if the stored `createdAt` still equals this: the `createdAt` a `meta: true` read returned, unchanged, or the same instant in epoch **milliseconds** (`Date.parse(createdAt)`), never seconds. A match keeps `createdAt`; otherwise `CREATED_MISMATCH`. Ignored without `overwrite` |
 | | `conditions` | object | — | [Conditions](#conditions) on the stored item |
 | `getItem` | `key` | string | required | Key to read |
 | | `options.label` | string | — | Look up by label instead: one item whose value for this label equals `key` |
@@ -129,7 +130,7 @@ configuration:
     labels:
       type: user-session
     options:
-      ttl: 86400        # here, never top-level
+      ttl: 86400        # here, not top-level
       meta: true
 ```
 
@@ -199,14 +200,15 @@ key query, plus the label index's `GSI<n>SK` for a label query.
 | `batchGetItem` | `items`: up to 100 `{ collection, key }`, across collections; `options.meta` | `{ items }`, in request order, `null` for a missing item |
 | `batchWriteItem` | `items`: up to 25 `{ operation: put \| delete, collection, key, value (put), labels, ttl }`; `options.meta` | `{ processed, items?, deleted? }` |
 | `transactGet` | `items`: up to 100 `{ collection, key }`; `options.meta` | `{ items, count }`, `null` for a missing item; one consistent snapshot |
-| `transactWrite` | `items`: up to 100 `{ operation: put \| update \| delete \| check, collection, key, value, labels, conditions, atomicCounters, options: { ttl, overwrite } }`; `options.idempotencyKey` | `{ processed }` |
+| `transactWrite` | `items`: up to 100 `{ operation: put \| update \| delete \| check, collection, key, value, labels, conditions, atomicCounters, options: { ttl, overwrite, created } }`; `options.idempotencyKey` | `{ processed }` |
 
 - A `batchWriteItem` put always replaces an existing item: no create-only check, no `overwrite`, no conditions, no
   atomic counters. Its `ttl` is top-level on each item, in the forms `options.ttl` takes.
 - `transactWrite` is all-or-nothing, across collections if needed. A `put` is create-only unless it has
   `options.overwrite: true` or `conditions`; an `update` that sets `value` fields or counters needs an existing item;
   `check` asserts `conditions` without writing. A failure is `TRANSACTION_FAILED` with per-item
-  `error.cancellationReasons`.
+  `error.cancellationReasons`. `options.created` on a put works as on `putItem`; its failure is that item's
+  `CREATED_MISMATCH`.
 
 ```yaml
 configuration:
@@ -448,7 +450,7 @@ code**. Every other failure has a code:
 | `CONDITION_FAILED` | 409 | A condition was false. A create-only put that collides reports this instead of `ITEM_ALREADY_EXISTS` when it has conditions |
 | `ITEM_ALREADY_EXISTS` | 409 | `putItem` without `overwrite` on an existing key |
 | `ITEM_DOES_NOT_EXIST` | 404 | `updateItem` set `value` fields or counters on a missing key |
-| `CREATED_MISMATCH` | 409 | The `options.created` check failed |
+| `CREATED_MISMATCH` | 409 | `overwrite` with `options.created`: the stored `createdAt` differs, or the item is gone. A failed condition on the same put reports this too |
 | `TRANSACTION_FAILED` | 409 | A transaction item failed (a condition, a create-only put on an existing key); `error.cancellationReasons` has per-item codes |
 | `TRANSACTION_CONFLICT` | 409 | A concurrent transaction conflicted |
 | `TRANSACTION_DUPLICATE_ITEM` | 400 | The same collection and key twice in one transaction |
@@ -456,7 +458,7 @@ code**. Every other failure has a code:
 | `IDEMPOTENCY_MISMATCH` | 400 | An `idempotencyKey` reused with different items |
 | `ITEM_TOO_LARGE` | 400 | Item over 400 KB |
 | `EXPRESSION_TOO_LONG`, `EXPRESSION_LIMIT` | 400 | Conditions or updates too large, or too many attribute names or values |
-| `VALIDATION_ERROR` | 400 | Storage rejected the write (e.g. an empty-string label value) |
+| `VALIDATION_ERROR` | 400 | Storage rejected the write (e.g. an empty-string label value), or `options.created` is in epoch seconds |
 | `SERIALIZATION_ERROR` | 400 | The value cannot be stored |
 | `THROUGHPUT_EXCEEDED` | 429 | The partition was throttled ([capacity model](collection-design.md#capacity-model)); retry after a short delay |
 | `CONCURRENT_LIMIT` | 429 | Too many concurrent operations; retry after a short delay |
