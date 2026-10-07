@@ -38,7 +38,7 @@ actors:
         text: ''
         maxLength: 100
       options:
-        model: claude-haiku-4-5
+        model: claude-haiku-5-5
         systemPrompt: |
           You are a text summarization assistant.
           Provide concise summaries while preserving key information.
@@ -46,7 +46,7 @@ actors:
           Summarize the following text in no more than ${{ inputs.maxLength }} words:
 
           ${{ inputs.text }}
-        maxTokens: 500
+        maxTokens: 2000   # Haiku 5.5's thinking counts toward it
     schemas:
       inputs:
         type: object
@@ -73,12 +73,12 @@ actors:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | `gpt-6-luna` | A known model id, `<provider>/<model-id>`, or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md). Set it: start with `claude-haiku-4-5` and step up only when the task needs more reasoning ([ai-models.md](ai-models.md)) |
+| `model` | string | `gpt-6-luna` | A known model id, `<provider>/<model-id>`, or `<custom-provider-slug>/<model-id>` for a workspace [custom provider](custom-ai-providers.md). Set it: start with `claude-haiku-5-5` and step up only when the task needs more reasoning ([ai-models.md](ai-models.md)) |
 | `prompt` | string | — | The prompt, sent as the last user message |
 | `systemPrompt` | string | — | Background context and instructions: the model's role, the task, the output rules |
 | `messages` | array | — | Previous conversation messages (multi-turn); `prompt` is appended after them |
 | `temperature` | number (0–2) | — (the editor fills in 0.2) | Sampling temperature; lower is more deterministic. Unset, the model's default applies. Claude models take at most 1 (a higher value is sent as 1). Ignored by models that take none: OpenAI reasoning models (o-series, GPT-5 and later, so the default `gpt-6-luna`) and Claude Opus 4.7 and later, Sonnet 5, Fable 5 and Haiku 5.5 |
-| `maxTokens` | integer | — (the editor fills in 10000) | Maximum tokens to generate |
+| `maxTokens` | integer | — (the editor fills in 10000) | Maximum tokens to generate. A model that thinks (Claude Haiku 5.5 does by default) counts its thinking toward it, so a small value can end the reply before any text |
 | `jsonMode` | boolean | false | Return the response as a JSON object |
 | `outputSchema` | object | — | JSON Schema the response must match; overrides `jsonMode` |
 | `tools` | array | — | Tool definitions the model may call ([below](#tools-function-calling)) |
@@ -111,7 +111,7 @@ Either `prompt` or `messages` must be provided. A failed call fails the job; rat
 
 ```yaml
 options:
-  model: claude-haiku-4-5
+  model: claude-haiku-5-5
   systemPrompt: |
     You are an expert researcher. Today is ${{ new Date().toISOString() }}.
   prompt: |
@@ -176,7 +176,7 @@ yourself and send the results back as `role: tool` messages, or use an AiAgentAc
 
 ```yaml
 options:
-  model: claude-haiku-4-5
+  model: claude-haiku-5-5
   systemPrompt: You are a helpful assistant with access to tools.
   prompt: ${{ inputs.userRequest }}
   tools:
