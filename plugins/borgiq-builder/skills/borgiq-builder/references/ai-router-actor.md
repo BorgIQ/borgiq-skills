@@ -14,7 +14,7 @@ flows handle. Exact types: [typescript/actorSchemas/task/aiRouter.md](typescript
   reduce accuracy. Test ambiguous inputs.
 - Pass `input: ${{ Q.toJSON(inputs) }}`: it serializes every schema-backed input as one JSON object, so the model
   classifies on complete, structured context rather than on hand-concatenated fields.
-- Set `model` ([ai-models.md](ai-models.md)): start with `claude-haiku-4-5`, and upgrade only if classification is not
+- Set `model` ([ai-models.md](ai-models.md)): start with `claude-haiku-5-5`, and upgrade only if classification is not
   accurate enough.
 
 ## Configuration Structure
@@ -48,7 +48,7 @@ actors:
       inputs:
         message: ''
       options:
-        model: claude-haiku-4-5
+        model: claude-haiku-5-5
         input: ${{ Q.toJSON(inputs) }}
         emitType: singleRoute
         routeDescriptions:
@@ -85,7 +85,7 @@ Use `multiRoute` when an input can belong to several categories:
 
 ```yaml
 options:
-  model: claude-haiku-4-5
+  model: claude-haiku-5-5
   input: ${{ Q.toJSON(inputs) }}
   emitType: multiRoute
   routeDescriptions:

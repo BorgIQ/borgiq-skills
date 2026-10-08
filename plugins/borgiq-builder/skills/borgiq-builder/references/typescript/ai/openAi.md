@@ -121,12 +121,16 @@ export enum OpenAiModels {
   GPT_6_ASTRA = 'gpt-6-astra',
   GPT_6_SOL = 'gpt-6-sol',
   GPT_6_LUNA = 'gpt-6-luna',
+
+  /** No dated snapshot: OpenAI lists the alias as its own only snapshot. */
+  GPT_6_1_SOL = 'gpt-6.1-sol',
 }
 
 /** OpenAI models proficient enough to drive agentic workflows (flagship + mid + budget tiers).
- * The first entry is the Codex harness default, so it is the balanced GPT-6 Sol rather than the
+ * The first entry is the Codex harness default, so it is the balanced GPT-6.1 Sol rather than the
  * pricier GPT-6 Astra. */
 export const OpenAiAgentModels = [
+  OpenAiModels.GPT_6_1_SOL,
   OpenAiModels.GPT_6_SOL,
   OpenAiModels.GPT_6_ASTRA,
   OpenAiModels.GPT_6_LUNA,
@@ -1001,6 +1005,26 @@ export const OpenAiModelInformationMap: Record<OpenAiModels, AiModelInformation>
       default: {
         input: convertCostPerMTokensToCostPer1kTokens(0.2),
         output: convertCostPerMTokensToCostPer1kTokens(0.75),
+      },
+    },
+    maxTokens: 128000,
+  },
+
+  /** Same input and output rates as GPT-6 Sol; only its cached-input rate is lower, which this
+   * map does not model. */
+  [OpenAiModels.GPT_6_1_SOL]: {
+    provider: AiProvider.OpenAI,
+    label: 'GPT 6.1 Sol',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-09-29',
+    costPer1kTokens: {
+      272000: {
+        input: convertCostPerMTokensToCostPer1kTokens(2),
+        output: convertCostPerMTokensToCostPer1kTokens(10),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(4),
+        output: convertCostPerMTokensToCostPer1kTokens(15),
       },
     },
     maxTokens: 128000,

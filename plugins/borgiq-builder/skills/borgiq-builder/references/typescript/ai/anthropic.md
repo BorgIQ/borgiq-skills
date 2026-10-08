@@ -65,6 +65,7 @@ export enum AnthropicModels {
   CLAUDE_5_SONNET = 'claude-sonnet-5',
   CLAUDE_5_OPUS = 'claude-opus-5',
   CLAUDE_5_5_OPUS = 'claude-opus-5-5',
+  CLAUDE_5_5_HAIKU = 'claude-haiku-5-5',
 
   /** Mythos-class tier. Claude Mythos 5 / 5.1 are the same underlying models with
    * safeguards lifted, but are restricted to Anthropic's trusted-access program and
@@ -81,6 +82,7 @@ export const AnthropicAgentModels = [
   AnthropicModels.CLAUDE_5_1_FABLE,
   AnthropicModels.CLAUDE_5_OPUS,
   AnthropicModels.CLAUDE_5_FABLE,
+  AnthropicModels.CLAUDE_5_5_HAIKU,
   AnthropicModels.CLAUDE_4_8_OPUS,
   AnthropicModels.CLAUDE_4_7_OPUS,
   AnthropicModels.CLAUDE_4_6_SONNET,
@@ -470,6 +472,24 @@ export const AnthropicModelInformationMap: Record<AnthropicModels, AiModelInform
     costPer1kTokens: {
       input: convertCostPerMTokensToCostPer1kTokens(4),
       output: convertCostPerMTokensToCostPer1kTokens(20),
+    },
+    maxTokens: 128000,
+  },
+  /** Priced by prompt length: a prompt over 100,000 tokens pays the higher rates. */
+  [AnthropicModels.CLAUDE_5_5_HAIKU]: {
+    provider: AiProvider.Anthropic,
+    label: 'Claude Haiku 5.5',
+    providerLabel: PROVIDER_LABEL,
+    date: '2026-10-07',
+    costPer1kTokens: {
+      100000: {
+        input: convertCostPerMTokensToCostPer1kTokens(0.1),
+        output: convertCostPerMTokensToCostPer1kTokens(0.5),
+      },
+      default: {
+        input: convertCostPerMTokensToCostPer1kTokens(0.5),
+        output: convertCostPerMTokensToCostPer1kTokens(2.5),
+      },
     },
     maxTokens: 128000,
   },

@@ -163,7 +163,7 @@ All options live under `configuration.options`; only `prompt` is required.
 |--------|------|---------|-------------|
 | `prompt` | string | — | **Required.** The task instruction sent to the harness |
 | `harness` | `claude` \| `codex` \| `opencode` \| `pi` | `claude` | The harness CLI to run. Use the exact lowercase value (`claude`, not `Claude` or `BIQAgentHarnessType.Claude`) |
-| `model` | string | the harness's first model | Must be valid for `harness`: `claude` takes the Anthropic agent models (default `claude-sonnet-5`), `codex` the OpenAI ones (default `gpt-6-sol`), `opencode` and `pi` any agent model (default `claude-sonnet-5`), with the credential of the model's provider. Enum-validated: no custom providers (`<slug>/<model-id>`); use AiAgentActor for those. See [ai-models.md](ai-models.md) |
+| `model` | string | the harness's first model | Must be valid for `harness`: `claude` takes the Anthropic agent models (default `claude-sonnet-5`), `codex` the OpenAI ones (default `gpt-6.1-sol`), `opencode` and `pi` any agent model (default `claude-sonnet-5`), with the credential of the model's provider. Enum-validated: no custom providers (`<slug>/<model-id>`); use AiAgentActor for those. See [ai-models.md](ai-models.md) |
 | `systemPrompt` | string | — | Additional context and instructions for the harness |
 | `sandboxProvider` | `e2b` \| `daytona` | `e2b` | The sandbox infrastructure provider |
 | `sessionId` | string | auto-generated | Session ID to continue or create (max 64 characters) |
