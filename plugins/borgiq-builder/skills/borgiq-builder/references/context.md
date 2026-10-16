@@ -158,7 +158,11 @@ status: "${{ inputs.active ? 'Active' : 'Inactive' }}"   # quoted: a plain YAML 
 email: ${{ msg.user?.profile?.email || 'unknown' }}
 weekAgo: ${{ Q.dateFns.subDays(Q.now(), 7).toISOString() }}
 token: "${{ Q.jwtSign({ userId: inputs.userId }, credentials.jwtSecret, { expiresIn: '1h' }) }}"   # jwtSecret must be Sent to runtime
+auth: '${{ `Bearer ${await Q.jwtSign({ userId: inputs.userId }, credentials.jwtSecret)}` }}'     # async: await it inside an expression
 ```
+
+`Q.jwtSign` and `Q.jwtVerify` return Promises. A value that is only the call is awaited for you; inside an
+expression, `await` the call ([q-lib.md](q-lib.md#cryptography)).
 
 For longer logic, use an immediately invoked function:
 

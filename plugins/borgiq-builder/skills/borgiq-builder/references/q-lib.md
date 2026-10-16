@@ -89,16 +89,47 @@ Encoders take `string | Uint8Array | ArrayBuffer`; `toURIEncode` and the decoder
 
 ## Cryptography
 
+**`jwtSign` and `jwtVerify` are asynchronous: they return a Promise.** Every other `Q` function is synchronous.
+
+- A value that is **only the call** needs nothing: the interpolator waits for it.
+  `token: ${{ Q.jwtSign(payload, credentials.jwtSecret) }}` gives the token.
+- To use the result **inside** an expression, `await` it. `await` works in any expression.
+  Without it you get a Promise, or the text `[object Promise]` in a template literal:
+
+```yaml
+authorization: '${{ `Bearer ${await Q.jwtSign({ sub: inputs.userId }, credentials.jwtSecret, { expiresIn: "1h" })}` }}'
+userId: ${{ (await Q.jwtVerify(inputs.token, credentials.jwtSecret)).sub }}
+valid: ${{ await Q.jwtVerify(inputs.token, credentials.jwtSecret).then(() => true, () => false) }}
+```
+
 | Function | Returns | Example |
 |---|---|---|
-| `aesEncrypt(data, key, iv?)` | AES-256-CBC ciphertext (`string`); inputs are `string \| Uint8Array` | `Q.aesEncrypt("Hello", "32-byte-key")` |
-| `aesDecrypt(encryptedData: string, key)` | the plaintext | `Q.aesDecrypt("iv:ciphertext", "32-byte-key")` |
-| `hash(hashAlgorithm, data: string, options?)` | the hash | `Q.hash('SHA256', 'Hello, World!')` |
-| `hmac(hashAlgorithm, key, data: string, options?)` | the HMAC | `Q.hmac('SHA256', 'secret-key', 'Hello, World!')` |
-| `jwtSign(payload: string\|object\|Uint8Array, secret, options?)` | a JWT | `Q.jwtSign({userId: 123}, "secret", {expiresIn: "1h"})` |
-| `jwtVerify(token, secret, options?)` | the payload (`JwtPayload \| string`) | `Q.jwtVerify(token, "secret", {algorithms: ["HS256"]})` |
-| `randomBytes(size)` | cryptographically strong `Uint8Array` | `Q.randomBytes(16)` |
-| `timingSafeEqual(a, b)` | a constant-time equality check | `Q.timingSafeEqual("secret", "secret")` → `true` |
+| `hash(algorithm, data, options?)` | the digest, hex by default | `Q.hash("SHA256", "Hello, World!")` |
+| `hmac(algorithm, key, data, options?)` | the HMAC, hex by default | `Q.hmac("SHA256", credentials.signingKey, body)` |
+| `aesEncrypt(data, key, iv?)` | AES-256-CBC: `"<base64 IV>:<base64 ciphertext>"`; a random IV when `iv` is left out | `Q.aesEncrypt("Hello", key32)` |
+| `aesDecrypt(encryptedData, key)` | the plaintext of an `aesEncrypt` result | `Q.aesDecrypt(encrypted, key32)` |
+| `jwtSign(payload: object\|string\|Uint8Array, secret, options?)` | **a Promise** of the JWT | `Q.jwtSign({ userId: 123 }, secret, { expiresIn: "1h" })` |
+| `jwtVerify(token, secret, options?)` | **a Promise** of the payload; rejects when the token is invalid | `Q.jwtVerify(token, secret, { algorithms: ["HS256"] })` |
+| `randomBytes(size)` | cryptographically strong bytes, a `Uint8Array` with Buffer methods | `Q.randomBytes(16).toString("hex")` |
+| `timingSafeEqual(a, b)` | equal? Constant time; `false` for different lengths | `Q.timingSafeEqual(signature, expected)` |
+
+- **`hash` and `hmac` algorithms** (any letter case): `SHA256`, `SHA384`, `SHA512`, `SHA224`, `SHA512-224`,
+  `SHA512-256`, `SHA3-224`, `SHA3-256`, `SHA3-384`, `SHA3-512`, `BLAKE2b512`, `BLAKE2s256`, `RIPEMD160`, `SHA1`, `MD5`,
+  and for `hash` only, `MD4`. Use MD4, MD5 and SHA1 only where an API or file format asks for them (a `Content-MD5`
+  header, a file checksum), never to protect anything.
+- **`options.encoding`** says how a string `data` is read: `utf8` (default), `hex`, `base64`, `base64url`, `latin1`.
+  **`options.as`** sets the output: `hex` (default), `base64`, `base64url`. A file's MD4:
+  `Q.hash("MD4", fileBase64, { encoding: "base64" })`.
+- **AES keys** are 32 bytes and IVs 16 bytes (`string` or `Uint8Array`). A wrong key length throws
+  `RangeError: Invalid key length`; a wrong key on decrypt throws `bad decrypt`.
+- **JWT keys:** a secret for `HS256` (the default), `HS384`, `HS512`, or a PEM private key for `RS*`, `PS*`, `ES*`
+  (PKCS#8, PKCS#1 `RSA PRIVATE KEY`, SEC1 `EC PRIVATE KEY`). `jwtVerify` takes the secret, or a PEM public key,
+  certificate or private key.
+- **JWT options** are jsonwebtoken's. Sign: `algorithm`, `expiresIn`, `notBefore` (`"1h"`, `"7d"`, or seconds),
+  `audience`, `issuer`, `subject`, `jwtid`, `keyid`, `header`, `noTimestamp`. Verify: `algorithms`, `audience`,
+  `issuer`, `subject`, `jwtid`, `maxAge`, `clockTolerance`, `ignoreExpiration`, `ignoreNotBefore`, `complete`.
+- **`jwtVerify` rejects with** `TokenExpiredError: jwt expired` (`expiredAt`), `NotBeforeError: jwt not active`
+  (`date`), or `JsonWebTokenError` (`invalid signature`, `jwt malformed`, `jwt audience invalid. expected: …`).
 
 ## Lodash and date-fns
 
@@ -119,6 +150,11 @@ title: ${{ Q.appendText("Hello", " ", "World") }}
 json_data: '${{ Q.toJSON({name: "Alice", age: 30}) }}'
 status: ${{ Q.ifTrue(inputs.user.isActive, "Active", "Inactive") }}
 current_date: ${{ Q.dateFns.format(Q.now(), 'yyyy-MM-dd') }}
-token: '${{ Q.jwtSign({userId: inputs.user.id}, "secret", {expiresIn: "1h"}) }}'
+token: '${{ Q.jwtSign({userId: inputs.user.id}, credentials.jwtSecret, {expiresIn: "1h"}) }}'
+authorization: '${{ `Bearer ${await Q.jwtSign({userId: inputs.user.id}, credentials.jwtSecret)}` }}'
 is_valid_ip: ${{ Q.isIPAddress(trigger.request.meta.ipAddress) }}
 ```
+
+Expressions run sandboxed, with no network, files or environment. Use standard JavaScript built-ins, the context
+variables and `Q`. Runtime-specific globals (`Deno`, `process`, `globalThis`, `fetch`, `eval`, `Function`) are not
+part of the expression contract and may stop working; do I/O and custom code in a code actor.
