@@ -11,9 +11,15 @@
       "name": "borgiq-builder",
       "source": "./plugins/borgiq-builder",
       "description": "Build BorgIQ workflows from Claude Code. Hub skill (actor wiring, triggers, expressions) plus four focused spokes: form-builder (interface pages & forms), react-app-builder (Vite/React app UIs), agent-builder (AI agents, agent-harness, MCP), json-schema-builder (structured data contracts). Lifecycle slash commands: /validate, /new-actor, /deploy, /test, /debug-flow.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "category": "automation",
-      "tags": ["borgiq", "workflow", "automation", "ai-agents", "low-code"],
+      "tags": [
+        "borgiq",
+        "workflow",
+        "automation",
+        "ai-agents",
+        "low-code"
+      ],
       "homepage": "https://borgiq.com/docs/claude-code",
       "repository": "https://github.com/BorgIQ/borgiq-skills",
       "license": "Apache-2.0"
