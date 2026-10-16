@@ -189,11 +189,11 @@ options: { prompt: 'Research ${{ inputs.name }}' }
 ```
 
 Expressions are JavaScript over [`Q` helpers](references/q-lib.md) (`Q.toJSON`, `Q.lo`, `Q.dateFns`, …) and
-standard globals (`JSON`, `Math`, `btoa`). Double-quote a value containing `: `: `a: "${{ x ? 1 : 2 }}"`.
-Variables ([context.md](references/context.md)): `msg`, `err`, `ctx` (org, workspace, canvas with trigger URL maps,
-actor, flowrun), `inputs`, `vars`, `credentials`, `connection`, `assets`; `trigger` only in a trigger's own
-configuration; `results` only in `error` and `outputs`. Auth: `auth: ${{ connection.auth }}` with
-`connection: { key, type }` ([auth-types.md](references/auth-types.md)).
+standard globals (`JSON`, `Math`, `btoa`). Inside an expression, `await` the async `Q.jwtSign`/`jwtVerify`.
+Double-quote a value containing `: `: `a: "${{ x ? 1 : 2 }}"`. Variables ([context.md](references/context.md)): `msg`,
+`err`, `ctx`, `inputs`, `vars`, `credentials`, `connection`, `assets`; `trigger` only in a trigger's own configuration;
+`results` only in `error` and `outputs`. Auth: `auth: ${{ connection.auth }}` with `connection: { key, type }`
+([auth-types.md](references/auth-types.md)).
 
 ## Wiring
 
