@@ -1,9 +1,10 @@
 # Code Actor Runtime
 
-What DenoActor, PythonActor and UniversalTriggerActor share: the `receive(req)` → `Response` contract, emit rules,
-errors, source files (`codeDir`), inputs, credentials, memory, temporary files, signals, the runtime API, long-running
-work and dependencies. Read it with the language file ([deno-actor.md](deno-actor.md) or
-[python-actor.md](python-actor.md)); trigger events are in [universal-trigger-actor.md](universal-trigger-actor.md).
+What DenoActor, JavaScriptActor, PythonActor and UniversalTriggerActor share: the `receive(req)` → `Response`
+contract, emit rules, errors, source files (`codeDir`), inputs, credentials, memory, temporary files, signals, the
+runtime API, long-running work and dependencies. Read it with the language file ([deno-actor.md](deno-actor.md),
+[javascript-actor.md](javascript-actor.md) or [python-actor.md](python-actor.md)); trigger events are in
+[universal-trigger-actor.md](universal-trigger-actor.md).
 
 ## Contents
 
@@ -41,9 +42,10 @@ Code actors run on AWS Lambda, in a container that can stay warm between invocat
 
 | | |
 |---|---|
-| Timeout | The runtime's *Deno actor timeout* (workspace settings → Runtimes, 3–780 s), used by PythonActor too; code cannot read it from `req.ctx`. Lambda's absolute limit is 15 minutes |
+| Timeout | The runtime's *Deno actor timeout* (workspace settings → Runtimes, 3–780 s), used by JavaScriptActor and PythonActor too; code cannot read it from `req.ctx`. Lambda's absolute limit is 15 minutes |
 | Memory, ephemeral storage | Set on the runtime (the Lambda configuration) |
 | Deno | TypeScript/JavaScript; no shell or CLI tools ([No shell](deno-actor.md#no-shell)) |
+| JavaScript (beta) | The DenoActor's code on workerd: no `Deno.*`, `node:` built-ins, `/tmp` per invocation, a heap cap ([javascript-actor.md](javascript-actor.md)) |
 | Python | Exactly 3.11, dependencies installed by UV; CLI tools such as `git`, `aws`, `jq`, ImageMagick and `tar` via `subprocess` ([CLI tools](python-actor.md#cli-tools)) |
 
 ## Request and response
@@ -281,7 +283,8 @@ The TypeScript `Memory` type declares both halves, so an editor that type-checks
 ## Temporary files
 
 `TMPDIR` is the actor's data directory, so `tmpdir()`, `Deno.makeTempDir()` and Python's `tempfile` write there. A Deno
-actor reaches it only with `allowFs: true`.
+actor reaches it only with `allowFs: true`. A JavaScriptActor has none: its `/tmp` is in memory and lasts one
+invocation ([Files](javascript-actor.md#files)).
 
 | LTM | Data directory |
 |---|---|

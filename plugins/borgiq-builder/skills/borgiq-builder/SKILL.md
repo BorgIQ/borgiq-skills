@@ -18,7 +18,7 @@ Paths are under `references/`.
 | Scheduled job, fan-out and join | `scheduled-trigger-actor.md`, `message-processor-actor.md`, `error-handling.md` |
 | Approval by emailed link, any recipient | `message-processor-actor.md` → Human approval pattern (the token `url` takes only POST, so the link opens a GET webhook flow that calls `notifyCallbackToken`), `router-actor.md`, `send-email-actor.md` |
 | Approval page for a signed-in workspace member | InterfaceActor, via the form spoke |
-| Deno or Python code, state across runs | `code-actor-runtime.md` + `deno-actor.md` or `python-actor.md` |
+| Code actors, state across runs | `code-actor-runtime.md` + its language file |
 | Collection-backed CRUD API | `universal-trigger-actor.md`, `collection-design.md`, `collection-sdk.md`, `collection-migrations.md` |
 | Record events, process them later | `stream-actor.md`, `collection-migrations.md` |
 | Forms, apps, AI agents, schemas | [Spokes](#spokes) |

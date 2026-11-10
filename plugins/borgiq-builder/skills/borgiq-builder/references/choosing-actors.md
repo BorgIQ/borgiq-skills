@@ -17,7 +17,7 @@ are in its own reference.
   ([borgiq-cli.md](borgiq-cli.md)).
 - Transform data with a MessageProcessorActor (`inject` with `${{ }}` and Q-lib) by default. Non-code actors can also
   compute in `vars` and format in `outputs`; code actors skip both.
-- Use a DenoActor or PythonActor only for fetch inside custom logic, I/O (files, network, async work), npm or other
+- Use a DenoActor, JavaScriptActor or PythonActor only for fetch inside custom logic, I/O (files, network, async work), npm or other
   libraries, or imperative logic (loops, recursion, stateful algorithms). Several dependent API calls go in one of
   them, not a chain of HttpRequestActors.
 - Shell tools on the runtime image (`git`, `aws-cli`, `jq`, ImageMagick, `tar`) need a PythonActor
@@ -30,6 +30,7 @@ are in its own reference.
 |---|---|
 | One API call | HttpRequestActor |
 | Several API calls that depend on each other; an API call plus processing; transforms that need fetch, I/O or npm | DenoActor or PythonActor |
+| The same TypeScript without `Deno.*`, shell or raw TCP, with a memory cap and no host filesystem (beta) | JavaScriptActor ([differences](javascript-actor.md#when-to-use-it)) |
 | Data science (pandas, numpy, scikit-learn), custom Python, shell commands | PythonActor |
 | Generate, summarize or classify text; extract structured data; multi-turn chat; one call that returns tool calls | AiActor |
 | An agent that loops over tool calls; research that searches and synthesizes; AI file work (unzip, script, edit, re-zip, with the built-in filesystem and bash); code it writes **and** runs (`enableCodeExecution: true`); a session resumed across invocations (`sessionId`); sub-agents (CallFlowActor tools) | AiAgentActor |
