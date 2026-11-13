@@ -24,8 +24,13 @@ signals are in [code-actor-runtime.md](code-actor-runtime.md).
 
 Where a DenoActor would fit, when the code needs no `Deno.*` API, no shell, no raw TCP and no `eval`. It has no host
 filesystem at all, a memory cap that stops only the actor (not the whole runtime), and its outbound network goes
-through BorgIQ's egress proxy exactly as a DenoActor's does. It is not built ahead of time on deployed workspaces yet:
-its packages resolve the first time it runs on a machine, as on an ordinary workspace.
+through BorgIQ's egress proxy exactly as a DenoActor's does.
+
+**When it is built.** On a deployed workspace it is built with the canvas, like the other code actors: its packages
+are installed and its code bundled once, a bundle that throws while loading fails the build, and every run starts
+from that bundle with nothing installed. Editing the actor marks the canvas outdated until it is built again. On an
+ordinary workspace it is bundled the first time it runs on a machine, and again when its code or options change;
+`env` values do not count, so a value taken from the message never rebuilds it.
 
 ## Configuration
 
@@ -74,24 +79,27 @@ bootstrap's names (`server.ts`, `handler.ts`, `shared/`) are free.
 
 The DenoActor's options without `allowFs`: `emitArrayAsSingleMessage`, `allowNet`, `allowNetList`, `denyNetList` and
 `env`, with the same meaning ([deno-actor.md](deno-actor.md#options)). `env` becomes `process.env`, set afresh for every
-invocation: exactly the names listed, nothing a previous run set. Exact schema: the DenoActor's
-([typescript/actorSchemas/task/deno.md](typescript/actorSchemas/task/deno.md)) minus `allowFs`.
+invocation: exactly the names listed, nothing a previous run set. Each `allowNetList`/`denyNetList` entry is a host
+name, an IP address or a URL (only its host counts); a wildcard such as `*.example.com` is refused when the actor is
+saved. Exact schema: [typescript/actorSchemas/task/javascript.md](typescript/actorSchemas/task/javascript.md).
 
 ## Imports
 
 | Import | Rule |
 |---|---|
-| `./lib/x.ts`, `../shared/y.ts` | Your own files, with the extension. Nothing outside the actor's files: `..` past the root, absolute paths and symlinks out are refused |
+| `./lib/x.ts`; `../y.ts` from a subfolder | Your own files, with the extension. Nothing outside the actor's files: `..` past the root, absolute paths and symlinks out are refused |
 | `@borgiq/actors` | The SDK, no version |
-| `node:fs`, `node:crypto`, … | Node built-ins, always with `node:` (bare `fs` is refused) |
+| `node:fs`, `node:crypto`, … | Node built-ins, always with `node:` (bare `fs` is refused). Every built-in workerd provides imports; several are stubs that throw when used (`node:child_process`, `node:worker_threads`, `node:cluster`) |
 | `npm:name@1.2.3[/sub]` | Exact version only. Refused: no version, ranges (`^`, `~`), `latest` |
 | `jsr:@scope/name@1.2.3[/sub]` | Exact version only, installed from JSR's npm mirror |
 | `https://…` | **Refused.** Use the package from npm or JSR |
-| `lodash` (bare) | **Refused.** Use `npm:lodash@4.17.21` |
+| `lodash` (bare) | **Refused.** Use `npm:lodash@4.17.21`; a subpath keeps the version on the name: `npm:lodash@4.17.21/chunk` |
 
 Packages install without their install scripts, and a version published less than 7 days ago is refused, as for the
-DenoActor. Code is bundled before it runs: a syntax error or a refused import fails the run with `main.ts:LINE:COL`
-and the reason, before anything executes. Types are stripped, not checked.
+DenoActor. Code is bundled before it runs, packages included: a syntax error or a refused import fails the run (or
+the canvas build) with `main.ts:LINE:COL` and the reason, before anything executes. Types are stripped, not checked,
+and no `tsconfig.json` is read. Inside packages, `require("events")` and other bare built-ins work; a package that
+requires a real npm package such as `ws` or `undici` gets that package.
 
 ## What the code can use
 
@@ -100,15 +108,18 @@ and the reason, before anything executes. Types are stripped, not checked.
 | `fetch`, `Request`, `Response`, `URL`, streams, `TextEncoder` | `Deno` (any `Deno.*` call is a `ReferenceError`) |
 | `crypto.subtle`, `crypto.randomUUID()`, `node:crypto` (hashes, HMAC, ciphers) | `node:child_process`, raw TCP (`node:net` connections), `node:worker_threads` |
 | `node:buffer`, `node:events`, `node:stream`, `node:util`, `node:path`, `node:zlib`, `node:url` | Outbound WebSockets |
-| `node:fs` on `/tmp` (see [Files](#files)) | `eval`, `new Function`, compiling WebAssembly from bytes (libraries that compile templates at run time fail) |
+| `node:fs` on `/tmp` (see [Files](#files)) | `eval`, `new Function`, compiling WebAssembly from bytes, both in `receive` and while the module loads (libraries that compile templates at run time fail) |
 | `process.env` (from `options.env`), timers within the invocation | `process.exit`, `process.kill` (throw, as in a DenoActor) |
 
-The time zone is UTC. `import.meta.url` is not a file path.
+The time zone is UTC. `import.meta.url` is `undefined`: `new URL("./x.json", import.meta.url)` throws; import the file
+instead (`import data from "./x.json"`). The clock only moves inside `receive`: `new Date()` or `Date.now()` at module
+level is the Unix epoch, so read the time in `receive`.
 
 ## Two rules the DenoActor does not have
 
 1. **Await everything before returning.** Timers and promises still pending when `receive` returns are cancelled, so
-   fire-and-forget work never happens.
+   fire-and-forget work never happens; work a library keeps alive past `receive` (`waitUntil`) cannot reach the
+   network: its requests are answered `403` with `x-borgiq-egress-error: outside-invocation`.
 2. **Do not keep open I/O across invocations.** Module-level state persists between runs (create clients and caches
    once, as usual), but a response stream or connection started in one invocation and used in the next hangs until
    the timeout. Keep configuration objects at module level; open requests inside `receive`.
@@ -128,7 +139,9 @@ writeFileSync("/tmp/out.csv", readFileSync(path, "utf8").toUpperCase());
 const outputFile = await stashFile("/tmp/out.csv");           // a path string is read from /tmp
 ```
 
-`mountFile` and `stashFile` need `allowNet: true`, as in a DenoActor.
+`mountFile` and `stashFile` need `allowNet: true`, as in a DenoActor, and an empty `allowNetList`: the storage host
+they download from and upload to is not on a list, so with one they fail naming the host and the reason. A failed
+upload is an error from `stashFile`, never a file that was not stored.
 
 ## Network
 
@@ -138,7 +151,10 @@ const outputFile = await stashFile("/tmp/out.csv");           // a path string i
 - A host outside `allowNetList`, or in `denyNetList`, is **not** an exception: `fetch` resolves with status `403` and
   the header `x-borgiq-egress-error: host-not-allowed` (or `host-denied`). Check `res.ok`. Link-local addresses
   (`169.254.*`) are always refused, and on the hosted runtime so is `localhost`.
-- A target that cannot be reached resolves with `502` and `x-borgiq-egress-error: upstream-error`.
+- A host name that resolves to a refused address (a name for `169.254.169.254` or `127.0.0.1`) is refused the same
+  way, with `x-borgiq-egress-error: resolved-address-denied`.
+- A target that cannot be reached resolves with `502` and `x-borgiq-egress-error: upstream-error`; one that does not
+  answer within the actor's timeout, with `504` and `upstream-timeout`.
 
 ## Errors and limits
 
@@ -148,7 +164,12 @@ const outputFile = await stashFile("/tmp/out.csv");           // a path string i
 - **Timeout:** the same *Deno actor timeout* setting (workspace settings → Runtimes) applies; a run that exceeds it
   fails with `Request timed out` and the actor restarts.
 - **Memory:** the actor's JavaScript heap is capped at 40% of the runtime's memory (at least 64 MB). Exceeding it fails
-  the run with `The JavaScript actor ran out of memory (heap limit N MB)`, not retried; only this actor restarts.
+  the run with `The JavaScript actor ran out of memory (heap limit N MB)`, not retried; only this actor restarts. The
+  whole process, buffers (`Uint8Array`, `Buffer`) and `/tmp` files included, is capped at 60% of the runtime's memory
+  (at least the heap cap plus 128 MB): `The JavaScript actor ran out of memory (it used more than N MB, …)`, not
+  retried.
+- **Load errors:** code that throws while `main.ts` or a module it imports loads fails with `The JavaScript actor's code
+  threw while loading …` and the error, not retried; on a deployed workspace it fails the canvas build instead.
 - `console.log`/`info`/`debug` reach the run log as stdout, `console.warn`/`error` as stderr; one call is one entry,
   newlines included.
 

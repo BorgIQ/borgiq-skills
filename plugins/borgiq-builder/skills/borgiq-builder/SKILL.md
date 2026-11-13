@@ -1,6 +1,6 @@
 ---
 name: borgiq-builder
-description: Build BorgIQ workflows (actors, triggers, wiring, expressions, storage) and deploy, run and debug them with the borgiq CLI. Covers HttpRequestActor, DenoActor, PythonActor, AiActor, AiAgentActor, AgentHarnessActor, CollectionActor, StreamActor, WebhookTriggerActor, InterfaceTriggerActor, ReactAppTriggerActor. Triggers on "create an actor", "build HTTP request", "write Deno/Python code", "use AI to process", "build an AI agent", "agent harness", "run Claude Code in sandbox", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
+description: Build BorgIQ workflows (actors, triggers, wiring, expressions, storage) and deploy, run and debug them with the borgiq CLI. Covers HttpRequestActor, DenoActor, JavaScriptActor, PythonActor, AiActor, AiAgentActor, AgentHarnessActor, CollectionActor, StreamActor, WebhookTriggerActor, InterfaceTriggerActor, ReactAppTriggerActor. Triggers on "create an actor", "build HTTP request", "write Deno/JavaScript/Python code", "use AI to process", "build an AI agent", "agent harness", "store data", "collection", "stream", "append-only log", "set up webhook", "build a web app", "theme an app", or workflow tasks.
 ---
 
 # BorgIQ Builder

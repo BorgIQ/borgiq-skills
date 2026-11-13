@@ -100,12 +100,13 @@ TypeScript type requires `retryable`: set `false` for a permanent failure (omitt
 
 ## Source files (codeDir)
 
-DenoActor, DenoTestActor, UniversalTriggerActor and PythonActor hold their source in `configuration.codeDir`: a list
-of `{ path, content }` files forming a small project, a sibling of `options` (examples in
-[deno-actor.md](deno-actor.md#configuration) and [python-actor.md](python-actor.md#configuration)).
+DenoActor, DenoTestActor, JavaScriptActor, UniversalTriggerActor and PythonActor hold their source in
+`configuration.codeDir`: a list of `{ path, content }` files forming a small project, a sibling of `options` (examples
+in [deno-actor.md](deno-actor.md#configuration), [javascript-actor.md](javascript-actor.md#configuration) and
+[python-actor.md](python-actor.md#configuration)).
 
-- **Exactly one entrypoint, at the root:** `main.ts` for the Deno family, `main.py` for PythonActor; the runtime
-  imports it. Arrange the rest in folders as you like.
+- **Exactly one entrypoint, at the root:** `main.ts` for the Deno family and the JavaScriptActor, `main.py` for
+  PythonActor; the runtime imports it. Arrange the rest in folders as you like.
 - **Your own files:** Deno imports them relatively, with the extension ([imports](deno-actor.md#imports-and-pinning));
   Python imports modules from the tree root, packages need `__init__.py` ([modules](python-actor.md#modules-and-packages)).
 - **`codeDir` is never interpolated.** `${{ }}` in source is literal text: pass runtime values through
@@ -121,6 +122,7 @@ of `{ path, content }` files forming a small project, a sibling of `options` (ex
   | Family | Reserved |
   |---|---|
   | Deno, Deno Test, Universal Trigger | `server.ts`, `handler.ts`, `actor.ts`, `main_test.ts`, `deno.json`, `deno.jsonc`, `deno.lock`, `package.json`, anything under `shared/`, `node_modules/` or `.borgiq-deno-dir/` |
+  | JavaScript | `package.json`, `tsconfig.json`, `jsconfig.json`, anything under `node_modules/` |
   | Python | `server.py`, `handler.py`, `borgiq.py`, `pyproject.toml`, `.python-version`, `uv.lock`, anything under `.borgiq/`, `.venv/` or `borgiq/` |
 
   There is no user-managed dependency manifest: Deno pins versions in the import specifiers; Python lists them in
@@ -396,9 +398,10 @@ Ask the user which approach they prefer. Examples: [Deno](deno-actor.md#checkpoi
   release at least a week old, or it fails to resolve.
 - **When resolution happens depends on the workspace.** On an ordinary workspace, dependencies are resolved (Python:
   installed) the first time the actor runs on a given machine. On a **deployed** workspace they are resolved once,
-  when the canvas is built, into a lockfile (Python: a locked environment) that ships with the actor; every run from
-  that build uses exactly those versions and resolves nothing. A Python actor that needs a package its build did not
-  install fails immediately rather than installing it.
+  when the canvas is built, and ship with the actor: Deno as a lockfile, Python as a locked environment, a
+  JavaScriptActor inside its prebuilt bundle (no lockfile, no `node_modules`). Every run from that build uses exactly
+  those versions and resolves nothing. A Python actor that needs a package its build did not install fails
+  immediately rather than installing it.
 - **On a deployed workspace every run executes the canvas's active runtime build,** so an edit takes effect only after
   the next build ([deployment.md](deployment.md)).
 

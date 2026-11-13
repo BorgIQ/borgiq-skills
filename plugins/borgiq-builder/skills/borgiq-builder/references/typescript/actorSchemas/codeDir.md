@@ -73,7 +73,7 @@ export type CodeFile = z.infer<typeof CodeFileSchema>;
  * **This is the single source of truth for those filenames.** The per-type `codeDir` schemas below,
  * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
  * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
- * in this module rather than a sweep across the platform and the lambda runtime. Kept as
+ * in this module rather than a sweep across `borgiq-platform` and `borgiq-lambda-runtime`. Kept as
  * four separate constants rather than one shared value because the name is a property of each
  * type's runtime: they coincide today, and nothing should assume they always will.
  *
@@ -87,6 +87,8 @@ export const DENO_ACTOR_ENTRYPOINT = 'main.ts';
 export const DENO_TEST_ACTOR_ENTRYPOINT = 'main.ts';
 export const UNIVERSAL_TRIGGER_ACTOR_ENTRYPOINT = 'main.ts';
 export const PYTHON_ACTOR_ENTRYPOINT = 'main.py';
+/** The JavaScript actor runs DenoActor code unchanged, so it keeps the DenoActor's entrypoint name. */
+export const JS_ACTOR_ENTRYPOINT = 'main.ts';
 
 /**
  * Paths a user's `codeDir` may not claim, because the runtime owns them.
@@ -148,6 +150,24 @@ export const DENO_RESERVED_PATHS: ReservedPathSet = {
     // a Deno Test actor's own dependency cache, embedded in its work dir by the runtime build (the
     // parallel of Python's `.venv/`); reserved for the whole family so the name cannot be claimed
     '.borgiq-deno-dir/',
+  ],
+};
+
+/**
+ * Reserved by the JavaScript actor (workerd). The runtime writes user files into a `src/` directory
+ * of its own and bundles them, so no bootstrap file can be overwritten; these are the names that
+ * would change how the bundler resolves imports.
+ */
+export const JS_ACTOR_RESERVED_PATHS: ReservedPathSet = {
+  exact: [
+    // a package.json or tsconfig changes esbuild's module resolution and path aliases
+    'package.json',
+    'tsconfig.json',
+    'jsconfig.json',
+  ],
+  prefixes: [
+    // would shadow the installed npm:/jsr: packages
+    'node_modules/',
   ],
 };
 

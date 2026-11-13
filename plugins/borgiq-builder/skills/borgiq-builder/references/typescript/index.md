@@ -17,6 +17,7 @@ Exact option, result and shared types, one file per platform source module: `act
 | AI messages, thinking levels | [ai/index.md](ai/index.md) |
 | DenoActor | [actorSchemas/task/deno.md](actorSchemas/task/deno.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
 | DenoTestActor | [actorSchemas/task/denoTest.md](actorSchemas/task/denoTest.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
+| JavaScriptActor | [actorSchemas/task/javascript.md](actorSchemas/task/javascript.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
 | PythonActor | [actorSchemas/task/python.md](actorSchemas/task/python.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
 | UniversalTriggerActor and the `TriggerEvent` it receives | [actorSchemas/trigger/universalTrigger.md](actorSchemas/trigger/universalTrigger.md) + [actorSchemas/trigger/triggerConfig.md](actorSchemas/trigger/triggerConfig.md) + [schemas/trigger.md](schemas/trigger.md) |
 | Code-actor source files (`codeDir`): limits, entrypoints, reserved paths | [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
