@@ -74,8 +74,8 @@ export type CodeFile = z.infer<typeof CodeFileSchema>;
  * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
  * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
  * in this module rather than a sweep across `borgiq-platform` and `borgiq-lambda-runtime`. Kept as
- * four separate constants rather than one shared value because the name is a property of each
- * type's runtime: they coincide today, and nothing should assume they always will.
+ * separate constants rather than one shared value because the name is a property of each type's
+ * runtime: most coincide today, and nothing should assume they always will.
  *
  * A rename is NOT just this edit. It is a breaking change that also needs: a data migration (every
  * migrated `codeDir` row names the old path), the `actors/*.yaml` seed templates, the placeholder
@@ -155,13 +155,16 @@ export const DENO_RESERVED_PATHS: ReservedPathSet = {
 
 /**
  * Reserved by the JavaScript actor (workerd). The runtime writes user files into a `src/` directory
- * of its own and bundles them, so no bootstrap file can be overwritten; these are the names that
- * would change how the bundler resolves imports.
+ * of its own and bundles them, so no bootstrap file can be overwritten. A `package.json` would change
+ * how esbuild reads the user's own files (its `browser` and `sideEffects` fields). A `tsconfig.json`
+ * or `jsconfig.json` is never read — the bundler passes `tsconfigRaw: '{}'` — and both are reserved so
+ * a user never expects one to apply.
  */
 export const JS_ACTOR_RESERVED_PATHS: ReservedPathSet = {
   exact: [
-    // a package.json or tsconfig changes esbuild's module resolution and path aliases
+    // changes how esbuild reads the user's files (browser, sideEffects)
     'package.json',
+    // never read (tsconfigRaw: '{}'); reserved so nobody expects their compiler options or paths to apply
     'tsconfig.json',
     'jsconfig.json',
   ],

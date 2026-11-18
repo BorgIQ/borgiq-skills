@@ -29,12 +29,15 @@ export const JavaScriptActorCodeDirSchema = makeCodeDirSchema({
   reservedPaths: JS_ACTOR_RESERVED_PATHS,
 });
 
+const ALLOW_NET_DESCRIPTION = 'Allow network access. When this is true every host may be reached, unless allowNetList is provided: then only the hosts it lists may be reached';
+
 const ENV_DESCRIPTION = 'List of environment variables the actor reads from process.env. They are set afresh for every invocation, so changing a value never rebuilds the actor';
 
 /**
  * A network-list entry the egress forwarder can match: a host name, an IP address, `host:port`, or a
- * URL (only its host counts). A wildcard or anything without a host is refused when the actor is
- * saved; at run time such an entry would silently never match.
+ * URL (only its host counts). A wildcard or anything without a host fails this schema, because the
+ * forwarder would silently never match it: the editor's save shows it as an options warning, a strict
+ * batch save rejects it, and a run fails when the runtime parses the options.
  */
 const NetListEntrySchema = z.string().refine((entry) => {
   try {
@@ -56,7 +59,7 @@ export const JavaScriptActorOptionsSchema = z.object({
   emitArrayAsSingleMessage: z.boolean().nullish()
     .describe('Emit the array as a single message instead of an array of messages, defaults to true').default(true),
   allowNet: z.boolean().nullish()
-    .describe('Allow network access. By default when this is true, all network call is allowed but if allowNetList is provided then only that subset of URLs are allowed').default(false),
+    .describe(ALLOW_NET_DESCRIPTION).default(false),
   allowNetList: z.array(NetListEntrySchema).nullish()
     .describe('List of host names, IP addresses or URLs that are allowed to be accessed when allowNet is true. This is ignored if allowNet is false').default([]),
   denyNetList: z.array(NetListEntrySchema).nullish()
@@ -80,6 +83,8 @@ const { allowFs: _allowFs, env: denoEnv, ...sharedOptionProperties } = DenoActor
 export const JavaScriptActorOptionsJsonSchema: BIQJsonSchema = {
   properties: {
     ...sharedOptionProperties,
+    // overriding in place keeps the DenoActor's field order
+    allowNet: { ...sharedOptionProperties.allowNet, description: ALLOW_NET_DESCRIPTION },
     env: { ...denoEnv, description: ENV_DESCRIPTION },
   },
 };

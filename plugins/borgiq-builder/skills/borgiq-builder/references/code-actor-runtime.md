@@ -42,7 +42,7 @@ Code actors run on AWS Lambda, in a container that can stay warm between invocat
 
 | | |
 |---|---|
-| Timeout | The runtime's *Deno actor timeout* (workspace settings → Runtimes, 3–780 s), used by JavaScriptActor and PythonActor too; code cannot read it from `req.ctx`. Lambda's absolute limit is 15 minutes |
+| Timeout | The runtime's *Deno and JavaScript actor timeout* (workspace settings → Runtimes, 3–780 s), used by JavaScriptActor and PythonActor too; code cannot read it from `req.ctx`. Lambda's absolute limit is 15 minutes |
 | Memory, ephemeral storage | Set on the runtime (the Lambda configuration) |
 | Deno | TypeScript/JavaScript; no shell or CLI tools ([No shell](deno-actor.md#no-shell)) |
 | JavaScript (beta) | The DenoActor's code on workerd: no `Deno.*`, `node:` built-ins, `/tmp` per invocation, a heap cap ([javascript-actor.md](javascript-actor.md)) |
