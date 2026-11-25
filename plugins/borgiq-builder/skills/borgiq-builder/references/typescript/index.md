@@ -55,7 +55,7 @@ Exact option, result and shared types, one file per platform source module: `act
 - `(top level)`: canvas, connection, prefix, sandbox
 - `actorSchemas/`: codeDir
 - `actorSchemas/other/`: comment, echo
-- `actorSchemas/task/`: agentHarness, ai, aiAgent, aiRouter, callableResponse, callFlow, deno, denoTest, interface, interfaceStatus, mcpServer, python, router, sendEmail, webhookResponse
+- `actorSchemas/task/`: agentHarness, ai, aiAgent, aiRouter, callableResponse, callFlow, deno, denoTest, interface, interfaceStatus, javascript, mcpServer, python, router, sendEmail, webhookResponse
 - `actorSchemas/task/collection/`: actions, batchGetItem, batchWriteItem, createCollection, deleteCollection, deleteItem, getItem, index, labelSlots, listCollections, putItem, query, transactGet, transactWrite, updateCollection, updateItem
 - `actorSchemas/task/httpRequest/`: index
 - `actorSchemas/task/messageProcessor/`: actions, collect, dedupeByCount, dedupeByTime, delayBySeconds, delayUntil, downloadFileAsBase64, downloadFileUrl, filter, fork, forkJoin, index, inject, issueCallbackToken, notifyCallbackToken, regexExtract, renderTemplate, split, waitForCallbackToken

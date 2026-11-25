@@ -2,7 +2,7 @@
 
 Generated from the platform's runtime types. Do not edit.
 
-The JavaScriptActor's options and `configuration.codeDir`: the DenoActor's options without `allowFs`, and a project tree whose handler lives in `main.ts`, minus the paths the bundler owns.
+JavaScriptActor options and `configuration.codeDir`, including the `main.ts` entrypoint and reserved paths.
 
 See also: [actorSchemas/codeDir](../codeDir.md), [actorSchemas/task/deno](deno.md).
 
@@ -19,8 +19,7 @@ import { DenoActorOptionsJsonSchema } from './deno.js';
 
 /**
  * The JavaScriptActor runs the DenoActor's code — the same `main.ts` default-exporting `receive(req)`,
- * the same `@borgiq/actors` SDK, the same results — on workerd (borgiq-sandbox) instead of Deno.
- * Design: borgiq-hive engineering/projects/borgiq-sandbox-javascript-actor/.
+ * the same `@borgiq/actors` SDK, the same results — on workerd (the workerd sandbox) instead of Deno.
  */
 
 /** The JavaScriptActor's `configuration.codeDir`: a project tree whose handler lives in `main.ts`. */

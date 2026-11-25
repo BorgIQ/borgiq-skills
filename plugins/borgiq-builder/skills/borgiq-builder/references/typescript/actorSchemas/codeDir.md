@@ -73,7 +73,7 @@ export type CodeFile = z.infer<typeof CodeFileSchema>;
  * **This is the single source of truth for those filenames.** The per-type `codeDir` schemas below,
  * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
  * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
- * in this module rather than a sweep across `borgiq-platform` and `borgiq-lambda-runtime`. Kept as
+ * in this module rather than a sweep across the platform and the lambda runtime. Kept as
  * separate constants rather than one shared value because the name is a property of each type's
  * runtime: most coincide today, and nothing should assume they always will.
  *

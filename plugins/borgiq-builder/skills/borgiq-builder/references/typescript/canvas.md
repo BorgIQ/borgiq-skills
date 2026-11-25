@@ -33,7 +33,7 @@ export enum BIQActorType {
   MessageProcessorActor = 'MessageProcessorActor',
   DenoActor = 'DenoActor',
   DenoTestActor = 'DenoTestActor',
-  /** User code with the DenoActor's contract, run on workerd (borgiq-sandbox) instead of Deno. */
+  /** User code with the DenoActor's contract, run on workerd (the workerd sandbox) instead of Deno. */
   JavaScriptActor = 'JavaScriptActor',
   SendEmailActor = 'SendEmailActor',
   DataStoreActor = 'DataStoreActor',
