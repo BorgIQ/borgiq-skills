@@ -74,8 +74,8 @@ export type CodeFile = z.infer<typeof CodeFileSchema>;
  * the actor-schema metadata the API serves to the web editor and the CLI, and the lambda runtime's
  * per-type validation all resolve the name from here — so renaming an entrypoint is a one-line edit
  * in this module rather than a sweep across the platform and the lambda runtime. Kept as
- * four separate constants rather than one shared value because the name is a property of each
- * type's runtime: they coincide today, and nothing should assume they always will.
+ * separate constants rather than one shared value because the name is a property of each type's
+ * runtime: most coincide today, and nothing should assume they always will.
  *
  * A rename is NOT just this edit. It is a breaking change that also needs: a data migration (every
  * migrated `codeDir` row names the old path), the `actors/*.yaml` seed templates, the placeholder
@@ -87,6 +87,8 @@ export const DENO_ACTOR_ENTRYPOINT = 'main.ts';
 export const DENO_TEST_ACTOR_ENTRYPOINT = 'main.ts';
 export const UNIVERSAL_TRIGGER_ACTOR_ENTRYPOINT = 'main.ts';
 export const PYTHON_ACTOR_ENTRYPOINT = 'main.py';
+/** The JavaScript actor runs DenoActor code unchanged, so it keeps the DenoActor's entrypoint name. */
+export const JS_ACTOR_ENTRYPOINT = 'main.ts';
 
 /**
  * Paths a user's `codeDir` may not claim, because the runtime owns them.
@@ -148,6 +150,27 @@ export const DENO_RESERVED_PATHS: ReservedPathSet = {
     // a Deno Test actor's own dependency cache, embedded in its work dir by the runtime build (the
     // parallel of Python's `.venv/`); reserved for the whole family so the name cannot be claimed
     '.borgiq-deno-dir/',
+  ],
+};
+
+/**
+ * Reserved by the JavaScript actor (workerd). The runtime writes user files into a `src/` directory
+ * of its own and bundles them, so no bootstrap file can be overwritten. A `package.json` would change
+ * how esbuild reads the user's own files (its `browser` and `sideEffects` fields). A `tsconfig.json`
+ * or `jsconfig.json` is never read — the bundler passes `tsconfigRaw: '{}'` — and both are reserved so
+ * a user never expects one to apply.
+ */
+export const JS_ACTOR_RESERVED_PATHS: ReservedPathSet = {
+  exact: [
+    // changes how esbuild reads the user's files (browser, sideEffects)
+    'package.json',
+    // never read (tsconfigRaw: '{}'); reserved so nobody expects their compiler options or paths to apply
+    'tsconfig.json',
+    'jsconfig.json',
+  ],
+  prefixes: [
+    // would shadow the installed npm:/jsr: packages
+    'node_modules/',
   ],
 };
 

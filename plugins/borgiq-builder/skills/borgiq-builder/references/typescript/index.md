@@ -17,6 +17,7 @@ Exact option, result and shared types, one file per platform source module: `act
 | AI messages, thinking levels | [ai/index.md](ai/index.md) |
 | DenoActor | [actorSchemas/task/deno.md](actorSchemas/task/deno.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
 | DenoTestActor | [actorSchemas/task/denoTest.md](actorSchemas/task/denoTest.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
+| JavaScriptActor | [actorSchemas/task/javascript.md](actorSchemas/task/javascript.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
 | PythonActor | [actorSchemas/task/python.md](actorSchemas/task/python.md) + [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
 | UniversalTriggerActor and the `TriggerEvent` it receives | [actorSchemas/trigger/universalTrigger.md](actorSchemas/trigger/universalTrigger.md) + [actorSchemas/trigger/triggerConfig.md](actorSchemas/trigger/triggerConfig.md) + [schemas/trigger.md](schemas/trigger.md) |
 | Code-actor source files (`codeDir`): limits, entrypoints, reserved paths | [actorSchemas/codeDir.md](actorSchemas/codeDir.md) |
@@ -54,7 +55,7 @@ Exact option, result and shared types, one file per platform source module: `act
 - `(top level)`: canvas, connection, prefix, sandbox
 - `actorSchemas/`: codeDir
 - `actorSchemas/other/`: comment, echo
-- `actorSchemas/task/`: agentHarness, ai, aiAgent, aiRouter, callableResponse, callFlow, deno, denoTest, interface, interfaceStatus, mcpServer, python, router, sendEmail, webhookResponse
+- `actorSchemas/task/`: agentHarness, ai, aiAgent, aiRouter, callableResponse, callFlow, deno, denoTest, interface, interfaceStatus, javascript, mcpServer, python, router, sendEmail, webhookResponse
 - `actorSchemas/task/collection/`: actions, batchGetItem, batchWriteItem, createCollection, deleteCollection, deleteItem, getItem, index, labelSlots, listCollections, putItem, query, transactGet, transactWrite, updateCollection, updateItem
 - `actorSchemas/task/httpRequest/`: index
 - `actorSchemas/task/messageProcessor/`: actions, collect, dedupeByCount, dedupeByTime, delayBySeconds, delayUntil, downloadFileAsBase64, downloadFileUrl, filter, fork, forkJoin, index, inject, issueCallbackToken, notifyCallbackToken, regexExtract, renderTemplate, split, waitForCallbackToken

@@ -351,9 +351,11 @@ export const RuntimeCacheSchema = z.object({
    * archive per Deno Test actor (its work dir and its OWN dependency cache): a test actor's argList
    * can grant `--allow-all`, the very permission the dynamic-import jail is built on, so it keeps
    * per-actor tenancy and must never receive the canvas archive — the shared cache's emit files
-   * mirror sibling actors' source.
+   * mirror sibling actors' source. `javascript-actor` — one archive per JavaScript actor (its
+   * sources and its prebuilt bundle and source map; packages are inside the bundle), per-actor
+   * tenancy like the other two.
    */
-  kind: z.enum(['canvas', 'python-actor', 'deno-test-actor']),
+  kind: z.enum(['canvas', 'python-actor', 'deno-test-actor', 'javascript-actor']),
   /** presigned GET, minted per invoke and valid for at least 15 minutes */
   url: z.string().url(),
   /** sha256 of the artifact, hex; verified before anything is extracted */
